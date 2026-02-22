@@ -20,6 +20,13 @@ def _is_safe_slug(value: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value))
 
 
+def _is_usable_vertex_html(value: str) -> bool:
+    html = value.strip().lower()
+    if not html:
+        return False
+    return "<!doctype html" in html and "window.__iis_game_boot_ok" in html and "<script" in html
+
+
 def _build_html(
     *,
     title: str,
@@ -154,7 +161,7 @@ def _build_html(
 """
 
 
-def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
+def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["build_iteration"] += 1
 
     try:
@@ -192,7 +199,15 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     palette = design_spec.palette
     accent_color = str(palette[0]) if palette else "#22C55E"
 
-    artifact_html = _build_html(
+    generated_html = deps.vertex_service.generate_single_file_game(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        objective=gdd.objective,
+        design_spec=design_spec.model_dump(),
+    )
+
+    fallback_html = _build_html(
         title=title,
         genre=genre,
         slug=slug,
@@ -203,6 +218,7 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
         min_font_size_px=design_spec.min_font_size_px,
         text_overflow_policy=design_spec.text_overflow_policy,
     )
+    artifact_html = generated_html.text if _is_usable_vertex_html(generated_html.text) else fallback_html
 
     build_artifact = BuildArtifactPayload(
         game_slug=slug,
@@ -229,5 +245,11 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
             "artifact": state["outputs"]["artifact_path"],
             "genre": genre,
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
+            "generation_source": generated_html.meta.get("generation_source", "stub"),
+            **{
+                key: value
+                for key, value in generated_html.meta.items()
+                if key in {"model", "latency_ms", "reason", "vertex_error"}
+            },
         },
     )

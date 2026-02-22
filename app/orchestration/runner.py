@@ -16,6 +16,7 @@ from app.services.github_service import GitHubArchiveService
 from app.services.pipeline_repository import PipelineJob, PipelineRepository
 from app.services.publisher_service import PublisherService
 from app.services.quality_service import QualityService
+from app.services.vertex_service import VertexService
 from app.services.x_service import XService
 
 
@@ -29,6 +30,7 @@ class PipelineRunner:
         quality_service: QualityService | None = None,
         publisher_service: PublisherService | None = None,
         github_archive_service: GitHubArchiveService | None = None,
+        vertex_service: VertexService | None = None,
     ) -> None:
         self.repository = repository
         self.settings = settings
@@ -37,6 +39,7 @@ class PipelineRunner:
             quality_service=quality_service or QualityService(settings),
             publisher_service=publisher_service or PublisherService(settings),
             github_archive_service=github_archive_service or GitHubArchiveService(settings),
+            vertex_service=vertex_service or VertexService(settings),
         )
         self.deps = deps
         self.graph = build_pipeline_graph(deps)
