@@ -1,19 +1,17 @@
 # iis-core-engine (ForgeMind + ForgeFlow)
 
-Python FastAPI + LangGraph scaffolding for IIS multi-agent automation.
+IIS 멀티에이전트 게임 제작 파이프라인의 코어 엔진입니다.  
+Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
 
-## Architecture
+## 아키텍처 요약
 
-- **API process**: receives trigger and query requests
-- **Worker process**: polls queued pipelines and executes LangGraph nodes
-- **Queue source**: `admin_config` table in Supabase (fallback: in-memory)
-- **Pipeline nodes**: Trigger → Architect → Stylist → Builder ↔ Sentinel (max 3 loops) → Publisher → Echo
+- **API 프로세스**: 트리거/조회/승인 요청 수신
+- **Worker 프로세스**: 큐를 폴링하며 파이프라인 실행
+- **큐 소스**: Supabase `admin_config` 테이블 (MVP에서는 큐+감사로그 겸용)
+- **파이프라인 노드**
+  - Trigger → Architect → Stylist → Builder ↔ Sentinel(최대 3회 재시도) → Publisher → Echo
 
-Queue decision (MVP lock):
-- `admin_config` is used as both trigger audit table and worker queue.
-- No separate queue table is introduced in MVP to keep operational complexity low.
-
-## Endpoints
+## 주요 엔드포인트
 
 - `POST /api/v1/pipelines/trigger`
 - `GET /api/v1/pipelines/{pipeline_id}`
@@ -22,38 +20,39 @@ Queue decision (MVP lock):
 - `POST /api/v1/telegram/webhook`
 - `GET /healthz`
 
-`INTERNAL_API_TOKEN`이 설정되면 `pipelines` 엔드포인트는 Bearer 토큰이 필요합니다.
+`INTERNAL_API_TOKEN`이 설정되면 `pipelines` 계열 엔드포인트는 Bearer 토큰이 필요합니다.
 
-## Telegram commands
+## Telegram 명령어 (실연동 대상)
 
-- `/run <keyword>`: queue pipeline with `trigger_source=telegram`
-- `/status <pipeline_id>`: fetch current status
+- `/run <keyword>`: `trigger_source=telegram`로 파이프라인 큐 등록
+- `/status <pipeline_id>`: 현재 상태 조회
 
-Guardrails:
-- Empty `TELEGRAM_ALLOWED_CHAT_IDS` = deny all chats by default
-- Optional `TELEGRAM_WEBHOOK_SECRET` for webhook signature check
-- Trigger keyword is normalized + validated (`TRIGGER_MIN_KEYWORD_LENGTH`, `TRIGGER_FORBIDDEN_KEYWORDS`)
+가드레일:
+- `TELEGRAM_ALLOWED_CHAT_IDS` 비어있으면 기본값은 **전부 거부**
+- `TELEGRAM_WEBHOOK_SECRET` 선택적으로 사용 가능
+- 트리거 키워드는 정규화/금칙어 검사 수행
 
-## Manual approval mode (Studio Console)
+## 수동 승인 모드 (Studio Console)
 
-- Trigger payload supports `execution_mode=manual`.
-- In manual mode, pipeline pauses at approvable stages and stores `waiting_for_stage`.
-- Resume with `POST /api/v1/pipelines/{pipeline_id}/approvals` body `{ "stage": "plan|style|build|qa|publish|echo" }`.
-- Approval clears wait state and returns job to queued status for worker pickup.
+- 트리거 payload에서 `execution_mode=manual` 지원
+- 수동 모드에서는 승인 가능한 단계에서 일시정지 후 `waiting_for_stage` 저장
+- 승인 재개 API:
+  - `POST /api/v1/pipelines/{pipeline_id}/approvals`
+  - body: `{ "stage": "plan|style|build|qa|publish|echo" }`
 
-## Publish flow
+## Publish 플로우
 
-- Publisher uploads artifact HTML to Supabase Storage bucket
-- Publisher upserts active row in `games_metadata`
-- Publisher syncs `games/<slug>/index.html` and `manifest/games.json` to Repo3 via GitHub API (allowlist enforced)
+- Supabase Storage 버킷에 게임 HTML 업로드
+- `games_metadata` 활성 행 upsert
+- Repo3(`iis-games-archive`)에 `games/<slug>/index.html`, `manifest/games.json` 동기화 (allowlist 강제)
 
-## Payload contracts (MVP)
+## Payload 계약 (MVP)
 
 - `gdd`: `title`, `genre`, `objective`, `visual_style`
 - `design_spec`: `visual_style`, `palette`, `hud`, `viewport_width`, `viewport_height`, `safe_area_padding`, `min_font_size_px`, `text_overflow_policy`, `typography`, `thumbnail_concept`
 - `build_artifact`: `game_slug`, `game_name`, `game_genre`, `artifact_path`, `artifact_html`, `leaderboard_contract`
 
-## Run (local)
+## 로컬 실행
 
 ```bash
 python -m venv .venv
@@ -61,36 +60,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 
-# terminal 1
+# 터미널 1 (API)
 ./scripts/run_api.sh
 
-# terminal 2
+# 터미널 2 (Worker)
 ./scripts/run_worker.sh
 ```
 
-## Security notes
+## 보안/운영 메모
 
-- Never expose `SUPABASE_SERVICE_ROLE_KEY` outside Repo1 runtime.
-- External calls use timeout/retry defaults (`HTTP_TIMEOUT_SECONDS`, `HTTP_MAX_RETRIES`).
-- Telegram chat whitelist is mandatory for command execution.
-- X posting quota guardrail: `X_POSTS_PER_GAME_PER_DAY` + `X_DAILY_STOP_ON_ERROR` (per-day failure lock).
-- Archive writes are restricted by allowlisted paths only.
-- QA applies smoke check + deterministic quality gate (`QA_MIN_QUALITY_SCORE`).
+- `SUPABASE_SERVICE_ROLE_KEY`는 **Repo1 서버 런타임 전용**
+- 외부 호출은 timeout/retry 기본값 사용 (`HTTP_TIMEOUT_SECONDS`, `HTTP_MAX_RETRIES`)
+- Telegram 실행은 chat whitelist 필수
+- X 포스팅은 일일 쿼터 + 실패 시 당일 중단 정책 적용
+- Archive 쓰기는 allowlist 경로만 허용
+- QA는 Playwright 스모크체크 + 품질 게이트(`QA_MIN_QUALITY_SCORE`) 적용
 
-## ARM note (Oracle Cloud Always Free)
+## ARM(Oracle/AWS Graviton) 참고
 
 ```bash
 ./scripts/install_playwright_arm.sh
 ./scripts/verify_playwright_arm.sh
 ```
 
-systemd service templates:
-
+systemd 템플릿:
 - `deploy/systemd/iis-core-api.service.tmpl`
 - `deploy/systemd/iis-core-worker.service.tmpl`
-- installer: `./scripts/install_systemd_services.sh`
+- 설치 스크립트: `./scripts/install_systemd_services.sh`
 
 운영 문서:
-
 - `docs/oracle-arm-runbook.md`
 - `docs/telegram-operations.md`
