@@ -40,6 +40,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     game_name = artifact.game_name
     genre = artifact.game_genre
     artifact_html = artifact.artifact_html
+    artifact_files = [file.model_dump() for file in artifact.artifact_files or []]
+    entrypoint_path = artifact.entrypoint_path or artifact.artifact_path
 
     append_log(
         state,
@@ -55,6 +57,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         name=game_name,
         genre=genre,
         html_content=artifact_html,
+        artifact_files=artifact_files,
+        entrypoint_path=entrypoint_path,
     )
 
     if publish_result.get("status") == "error":
@@ -96,6 +100,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre=genre,
         html_content=artifact_html,
         public_url=public_url,
+        artifact_files=artifact_files,
     )
     archive_status = str(archive_result.get("status", "unknown"))
     archive_reason = archive_result.get("reason")
@@ -127,5 +132,6 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "archive_status": archive_status,
             "archive_reason": archive_reason,
             "storage_path": publish_result.get("storage_path"),
+            "uploaded_files": publish_result.get("uploaded_files", []),
         },
     )

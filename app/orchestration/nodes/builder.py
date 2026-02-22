@@ -748,6 +748,55 @@ def _build_hybrid_engine_html(
 """
 
 
+def _extract_hybrid_bundle_from_inline_html(
+    *,
+    slug: str,
+    inline_html: str,
+) -> tuple[list[dict[str, str]], dict[str, object]] | None:
+    style_match = re.search(r"<style>\s*(.*?)\s*</style>", inline_html, flags=re.DOTALL)
+    script_match = re.search(r"<script>\s*(.*?)\s*</script>\s*</body>", inline_html, flags=re.DOTALL)
+    if not style_match or not script_match:
+        return None
+
+    styles_css = style_match.group(1).strip()
+    game_js = script_match.group(1).strip()
+    if not styles_css or not game_js:
+        return None
+
+    index_html = inline_html
+    index_html = index_html.replace(style_match.group(0), '    <link rel="stylesheet" href="./styles.css" />', 1)
+    index_html = index_html.replace(
+        script_match.group(0),
+        '    <script src="./game.js"></script>\n  </body>',
+        1,
+    )
+
+    artifact_files = [
+        {
+            "path": f"games/{slug}/index.html",
+            "content": index_html,
+            "content_type": "text/html; charset=utf-8",
+        },
+        {
+            "path": f"games/{slug}/styles.css",
+            "content": styles_css,
+            "content_type": "text/css; charset=utf-8",
+        },
+        {
+            "path": f"games/{slug}/game.js",
+            "content": game_js,
+            "content_type": "application/javascript; charset=utf-8",
+        },
+    ]
+    artifact_manifest = {
+        "schema_version": 1,
+        "entrypoint": f"games/{slug}/index.html",
+        "files": [row["path"] for row in artifact_files],
+        "bundle_kind": "hybrid_engine",
+    }
+    return artifact_files, artifact_manifest
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["build_iteration"] += 1
 
@@ -835,6 +884,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     builder_strategy = "llm_full"
     guardrail_reason: str | None = None
     artifact_html = generated_html.text
+    artifact_files: list[dict[str, str]] | None = None
+    artifact_manifest: dict[str, object] | None = None
     if not _is_usable_vertex_html(generated_html.text):
         artifact_html = fallback_html
         builder_strategy = "engine_hybrid_fallback"
@@ -846,12 +897,20 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             builder_strategy = "engine_hybrid_guardrail"
             guardrail_reason = trivial_reason
 
+    if builder_strategy.startswith("engine_hybrid"):
+        hybrid_bundle = _extract_hybrid_bundle_from_inline_html(slug=slug, inline_html=fallback_html)
+        if hybrid_bundle:
+            artifact_files, artifact_manifest = hybrid_bundle
+
     build_artifact = BuildArtifactPayload(
         game_slug=slug,
         game_name=title,
         game_genre=genre,
         artifact_path=f"games/{slug}/index.html",
         artifact_html=artifact_html,
+        entrypoint_path=f"games/{slug}/index.html",
+        artifact_files=artifact_files,
+        artifact_manifest=artifact_manifest,
     )
 
     state["outputs"]["build_artifact"] = build_artifact.model_dump()
@@ -860,6 +919,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["game_genre"] = build_artifact.game_genre
     state["outputs"]["artifact_path"] = build_artifact.artifact_path
     state["outputs"]["artifact_html"] = build_artifact.artifact_html
+    state["outputs"]["artifact_files"] = [row.model_dump() for row in build_artifact.artifact_files or []]
+    state["outputs"]["artifact_manifest"] = build_artifact.artifact_manifest or {}
 
     return append_log(
         state,
@@ -879,6 +940,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             },
             "builder_strategy": builder_strategy,
             "genre_engine_selected": core_loop_type,
+            "artifact_file_count": len(build_artifact.artifact_files or []),
             **({"llm_rejected_reason": guardrail_reason} if guardrail_reason else {}),
         },
     )

@@ -19,9 +19,16 @@ class PublisherService:
         name: str,
         genre: str,
         html_content: str,
+        artifact_files: list[dict[str, str]] | None = None,
+        entrypoint_path: str | None = None,
     ) -> dict[str, Any]:
+        try:
+            fallback_entry = self._normalize_storage_path(entrypoint_path or f"games/{slug}/index.html", slug)
+        except Exception as exc:
+            return {"status": "error", "reason": f"invalid_artifact_path: {exc}"}
+
         if not self.client:
-            fallback_url = f"{self.settings.public_games_base_url.rstrip('/')}/{slug}/index.html"
+            fallback_url = f"{self.settings.public_games_base_url.rstrip('/')}/{fallback_entry}"
             return {
                 "status": "skipped",
                 "reason": "supabase client is not configured",
@@ -30,35 +37,43 @@ class PublisherService:
             }
 
         bucket = self.client.storage.from_(self.settings.supabase_storage_bucket)
-        storage_path = f"{slug}/index.html"
+        files_to_upload = self._normalize_artifact_files(
+            slug=slug,
+            html_content=html_content,
+            artifact_files=artifact_files,
+        )
+        entry_storage_path = fallback_entry
 
         try:
-            upload_payload = html_content.encode("utf-8")
-            file_options = {
-                "content-type": "text/html; charset=utf-8",
-                "cache-control": "60",
-                "x-upsert": "true",
-            }
-            try:
-                bucket.upload(
-                    storage_path,
-                    upload_payload,
-                    file_options=file_options,
-                )
-            except TypeError:
-                bucket.upload(
-                    storage_path,
-                    upload_payload,
-                    file_options={
-                        "content-type": "text/html; charset=utf-8",
-                        "cache-control": "60",
-                        "upsert": "true",
-                    },
-                )
-            except Exception:
-                # Some storage backends/SDK versions preserve old metadata on upsert.
-                # Force an explicit update so HTML content-type/charset is refreshed.
-                bucket.update(storage_path, upload_payload, file_options=file_options)
+            for file_row in files_to_upload:
+                storage_path = str(file_row["storage_path"])
+                upload_payload = str(file_row["content"]).encode("utf-8")
+                content_type = str(file_row["content_type"])
+                file_options = {
+                    "content-type": content_type,
+                    "cache-control": "60",
+                    "x-upsert": "true",
+                }
+                try:
+                    bucket.upload(
+                        storage_path,
+                        upload_payload,
+                        file_options=file_options,
+                    )
+                except TypeError:
+                    bucket.upload(
+                        storage_path,
+                        upload_payload,
+                        file_options={
+                            "content-type": content_type,
+                            "cache-control": "60",
+                            "upsert": "true",
+                        },
+                    )
+                except Exception:
+                    # Some storage backends/SDK versions preserve old metadata on upsert.
+                    # Force an explicit update so HTML content-type/charset is refreshed.
+                    bucket.update(storage_path, upload_payload, file_options=file_options)
         except Exception as exc:  # pragma: no cover - integration path
             return {
                 "status": "error",
@@ -66,9 +81,9 @@ class PublisherService:
             }
 
         try:
-            public_url = bucket.get_public_url(storage_path)
+            public_url = bucket.get_public_url(entry_storage_path)
         except Exception:
-            public_url = f"{self.settings.public_games_base_url.rstrip('/')}/{storage_path}"
+            public_url = f"{self.settings.public_games_base_url.rstrip('/')}/{entry_storage_path}"
 
         metadata_row = {
             "slug": slug,
@@ -94,7 +109,8 @@ class PublisherService:
             "status": "published",
             "public_url": public_url,
             "game_id": game_id,
-            "storage_path": storage_path,
+            "storage_path": entry_storage_path,
+            "uploaded_files": [row["storage_path"] for row in files_to_upload],
         }
 
     def delete_game_assets(self, *, slug: str) -> dict[str, Any]:
@@ -149,3 +165,69 @@ class PublisherService:
             "status": "deleted",
             "paths": sorted(candidate_paths),
         }
+
+    @staticmethod
+    def _normalize_storage_path(path: str, slug: str) -> str:
+        normalized = path.strip().lstrip("/")
+        if normalized.startswith("games/"):
+            normalized = normalized[len("games/") :]
+        if not normalized.startswith(f"{slug}/"):
+            raise ValueError("artifact path is outside game slug prefix")
+        return normalized
+
+    def _normalize_artifact_files(
+        self,
+        *,
+        slug: str,
+        html_content: str,
+        artifact_files: list[dict[str, str]] | None,
+    ) -> list[dict[str, str]]:
+        if not artifact_files:
+            return [
+                {
+                    "storage_path": f"{slug}/index.html",
+                    "content": html_content,
+                    "content_type": "text/html; charset=utf-8",
+                }
+            ]
+
+        normalized_files: list[dict[str, str]] = []
+        for row in artifact_files:
+            raw_path = str(row.get("path", "")).strip()
+            if not raw_path:
+                continue
+            storage_path = self._normalize_storage_path(raw_path, slug)
+            content = str(row.get("content", ""))
+            if not content:
+                continue
+            content_type = str(row.get("content_type", "")).strip() or self._guess_content_type(storage_path)
+            normalized_files.append(
+                {
+                    "storage_path": storage_path,
+                    "content": content,
+                    "content_type": content_type,
+                }
+            )
+
+        if not normalized_files:
+            return [
+                {
+                    "storage_path": f"{slug}/index.html",
+                    "content": html_content,
+                    "content_type": "text/html; charset=utf-8",
+                }
+            ]
+        return normalized_files
+
+    @staticmethod
+    def _guess_content_type(path: str) -> str:
+        lower = path.lower()
+        if lower.endswith(".html"):
+            return "text/html; charset=utf-8"
+        if lower.endswith(".js"):
+            return "application/javascript; charset=utf-8"
+        if lower.endswith(".css"):
+            return "text/css; charset=utf-8"
+        if lower.endswith(".json"):
+            return "application/json; charset=utf-8"
+        return "text/plain; charset=utf-8"

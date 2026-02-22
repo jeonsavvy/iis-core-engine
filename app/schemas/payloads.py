@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class GDDPayload(BaseModel):
@@ -33,9 +33,31 @@ class LeaderboardContract(BaseModel):
 
 
 class BuildArtifactPayload(BaseModel):
+    class ArtifactFile(BaseModel):
+        path: str = Field(pattern=r"^games\/[^\/]+\/[A-Za-z0-9._-]+$")
+        content: str = Field(min_length=1)
+        content_type: str = Field(min_length=3, max_length=120)
+
     game_slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     game_name: str = Field(min_length=1, max_length=120)
     game_genre: str = Field(min_length=1, max_length=40)
     artifact_path: str = Field(pattern=r"^games\/[^\/]+\/index\.html$")
     artifact_html: str = Field(min_length=50)
+    entrypoint_path: str | None = Field(default=None, pattern=r"^games\/[^\/]+\/index\.html$")
+    artifact_files: list[ArtifactFile] | None = None
+    artifact_manifest: dict[str, object] | None = None
     leaderboard_contract: LeaderboardContract = Field(default_factory=LeaderboardContract)
+
+    @model_validator(mode="after")
+    def ensure_bundle_defaults(self) -> "BuildArtifactPayload":
+        if self.entrypoint_path is None:
+            self.entrypoint_path = self.artifact_path
+        if self.artifact_files is None:
+            self.artifact_files = [
+                BuildArtifactPayload.ArtifactFile(
+                    path=self.artifact_path,
+                    content=self.artifact_html,
+                    content_type="text/html; charset=utf-8",
+                )
+            ]
+        return self

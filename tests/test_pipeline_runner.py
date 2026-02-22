@@ -27,11 +27,22 @@ class FakeLowQualityService(FakeQualityService):
 
 
 class FakePublisherService:
-    def publish_game(self, *, slug: str, name: str, genre: str, html_content: str):
+    def publish_game(
+        self,
+        *,
+        slug: str,
+        name: str,
+        genre: str,
+        html_content: str,
+        artifact_files=None,
+        entrypoint_path=None,
+    ):
         assert slug
         assert name
         assert genre
         assert html_content
+        assert artifact_files is None or isinstance(artifact_files, list)
+        assert entrypoint_path is None or isinstance(entrypoint_path, str)
         return {
             "status": "published",
             "public_url": f"https://example.com/games/{slug}/index.html",
@@ -40,12 +51,22 @@ class FakePublisherService:
 
 
 class FakeGitHubArchiveService:
-    def commit_archive_game(self, *, game_slug: str, game_name: str, genre: str, html_content: str, public_url: str):
+    def commit_archive_game(
+        self,
+        *,
+        game_slug: str,
+        game_name: str,
+        genre: str,
+        html_content: str,
+        public_url: str,
+        artifact_files=None,
+    ):
         assert game_slug
         assert game_name
         assert genre
         assert html_content
         assert public_url
+        assert artifact_files is None or isinstance(artifact_files, list)
         return {"status": "committed"}
 
 

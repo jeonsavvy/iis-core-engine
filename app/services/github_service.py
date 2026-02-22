@@ -25,6 +25,7 @@ class GitHubArchiveService:
         genre: str,
         html_content: str,
         public_url: str,
+        artifact_files: list[dict[str, str]] | None = None,
     ) -> dict[str, str]:
         if not self.settings.github_token or not self.settings.github_archive_repo:
             return {
@@ -34,8 +35,12 @@ class GitHubArchiveService:
 
         game_path = f"games/{game_slug}/index.html"
         manifest_path = "manifest/games.json"
-        self._assert_allowlisted_path(game_path)
         self._assert_allowlisted_path(manifest_path)
+        archive_files = self._normalize_archive_artifact_files(
+            game_slug=game_slug,
+            html_content=html_content,
+            artifact_files=artifact_files,
+        )
 
         try:
             existing_manifest = self._fetch_json_file(manifest_path)
@@ -91,7 +96,8 @@ class GitHubArchiveService:
         commit_message = f"feat: archive {game_slug}"
 
         try:
-            self._put_file(game_path, html_content, commit_message)
+            for file_row in archive_files:
+                self._put_file(file_row["path"], file_row["content"], commit_message)
             self._put_file(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n", commit_message)
         except Exception as exc:
             return {"status": "error", "reason": f"archive_commit_failed: {exc}"}
@@ -111,10 +117,14 @@ class GitHubArchiveService:
                 "reason": "GITHUB_TOKEN or GITHUB_ARCHIVE_REPO is not configured.",
             }
 
-        game_path = f"games/{game_slug}/index.html"
         manifest_path = "manifest/games.json"
-        self._assert_allowlisted_path(game_path)
         self._assert_allowlisted_path(manifest_path)
+        try:
+            game_paths = self._list_archive_game_paths(game_slug)
+        except Exception as exc:
+            return {"status": "error", "reason": f"archive_list_failed: {exc}"}
+        if not game_paths:
+            game_paths = [f"games/{game_slug}/index.html"]
 
         try:
             existing_manifest = self._fetch_json_file(manifest_path)
@@ -152,7 +162,9 @@ class GitHubArchiveService:
         commit_message = f"chore: delete archive {game_slug}"
 
         try:
-            self._delete_file(game_path, commit_message)
+            for game_path in sorted(set(game_paths)):
+                self._assert_allowlisted_path(game_path)
+                self._delete_file(game_path, commit_message)
             self._put_file(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n", commit_message)
         except Exception as exc:
             return {"status": "error", "reason": f"archive_delete_failed: {exc}"}
@@ -214,6 +226,31 @@ class GitHubArchiveService:
             raise RuntimeError(f"github_sha_lookup_failed_{response.status_code}")
         return response.json().get("sha")
 
+    def _list_archive_game_paths(self, game_slug: str) -> list[str]:
+        prefix = f"games/{game_slug}"
+        response = self._request("GET", f"{self._contents_url(prefix)}?ref={self.settings.github_archive_branch}")
+        if response.status_code == 404:
+            return []
+        if response.status_code != 200:
+            raise RuntimeError(f"github_list_failed_{response.status_code}")
+
+        body = response.json()
+        if isinstance(body, dict):
+            path = body.get("path")
+            return [path] if isinstance(path, str) else []
+
+        paths: list[str] = []
+        if isinstance(body, list):
+            for row in body:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("type") != "file":
+                    continue
+                path = row.get("path")
+                if isinstance(path, str):
+                    paths.append(path)
+        return paths
+
     def _put_file(self, path: str, content: str, commit_message: str) -> None:
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         payload: dict[str, Any] = {
@@ -245,9 +282,45 @@ class GitHubArchiveService:
             raise RuntimeError(f"github_delete_failed_{response.status_code}")
         return True
 
+    def _normalize_archive_artifact_files(
+        self,
+        *,
+        game_slug: str,
+        html_content: str,
+        artifact_files: list[dict[str, str]] | None,
+    ) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        if artifact_files:
+            for row in artifact_files:
+                path = str(row.get("path", "")).strip()
+                if not path:
+                    continue
+                self._assert_allowlisted_path(path)
+                if not path.startswith(f"games/{game_slug}/"):
+                    raise ValueError("artifact path is outside archive game prefix")
+                content = str(row.get("content", ""))
+                if not content:
+                    continue
+                normalized.append({"path": path, "content": content})
+
+        has_index = any(row["path"] == f"games/{game_slug}/index.html" for row in normalized)
+        if not has_index:
+            normalized.append(
+                {
+                    "path": f"games/{game_slug}/index.html",
+                    "content": html_content,
+                }
+            )
+        return normalized
+
     @staticmethod
     def _assert_allowlisted_path(path: str) -> None:
-        if path.startswith("games/") and path.count("/") == 2 and path.endswith("/index.html"):
+        if (
+            path.startswith("games/")
+            and path.count("/") == 2
+            and ".." not in path
+            and "\\" not in path
+        ):
             return
         if path == "manifest/games.json":
             return
