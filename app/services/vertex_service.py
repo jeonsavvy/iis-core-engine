@@ -34,25 +34,25 @@ class VertexTextResult:
 
 
 class _GDDModel(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
-    genre: str = Field(min_length=1, max_length=40)
-    objective: str = Field(min_length=1, max_length=300)
-    visual_style: str = Field(default="neon-minimal", min_length=1, max_length=80)
-    research_intent: str = Field(min_length=1, max_length=200)
-    references: list[str] = Field(default_factory=list, max_length=8)
+    title: str
+    genre: str
+    objective: str
+    visual_style: str = "neon-minimal"
+    research_intent: str
+    references: list[str] = Field(default_factory=list)
 
 
 class _DesignSpecModel(BaseModel):
-    visual_style: str = Field(min_length=1, max_length=80)
-    palette: list[str] = Field(min_length=1, max_length=8)
-    hud: str = Field(min_length=1, max_length=120)
-    viewport_width: int = Field(default=1280, ge=640, le=1920)
-    viewport_height: int = Field(default=720, ge=360, le=1080)
-    safe_area_padding: int = Field(default=24, ge=0, le=64)
-    min_font_size_px: int = Field(default=14, ge=10, le=24)
-    text_overflow_policy: str = Field(default="ellipsis-clamp", min_length=3, max_length=40)
-    typography: str = Field(default="inter-bold-hud", min_length=1, max_length=80)
-    thumbnail_concept: str = Field(default="High-contrast action scene", min_length=1, max_length=200)
+    visual_style: str
+    palette: list[str]
+    hud: str
+    viewport_width: int = 1280
+    viewport_height: int = 720
+    safe_area_padding: int = 24
+    min_font_size_px: int = 14
+    text_overflow_policy: str = "ellipsis-clamp"
+    typography: str = "inter-bold-hud"
+    thumbnail_concept: str = "High-contrast action scene"
 
 
 def _coerce_message_text(raw: Any) -> str:
@@ -165,7 +165,7 @@ class VertexService:
             )
         except Exception as exc:  # pragma: no cover - external API path
             logger.warning("Vertex design generation failed, using fallback: %s", exc)
-            failed = self._fallback_design_spec(visual_style=visual_style)
+            failed = self._fallback_design_spec(visual_style=visual_style, reason=f"vertex_error:{type(exc).__name__}")
             return VertexGenerationResult(
                 payload=failed.payload,
                 meta={
@@ -352,7 +352,7 @@ class VertexService:
         )
 
     @staticmethod
-    def _fallback_design_spec(*, visual_style: str) -> VertexGenerationResult:
+    def _fallback_design_spec(*, visual_style: str, reason: str = "vertex_not_configured") -> VertexGenerationResult:
         return VertexGenerationResult(
             payload={
                 "visual_style": visual_style or "neon-minimal",
@@ -366,5 +366,5 @@ class VertexService:
                 "typography": "inter-bold-hud",
                 "thumbnail_concept": "Neon particle burst with score counter.",
             },
-            meta={"generation_source": "stub", "reason": "vertex_not_configured"},
+            meta={"generation_source": "stub", "reason": reason},
         )
