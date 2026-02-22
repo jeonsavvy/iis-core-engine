@@ -49,7 +49,7 @@ class PipelineRunner:
             self._run_manual(job)
             return
 
-        state = create_initial_state(job)
+        state = create_initial_state(job, log_sink=self._log_sink)
 
         try:
             final_state = self.graph.invoke(state)
@@ -57,7 +57,7 @@ class PipelineRunner:
             self.repository.mark_pipeline_status(job.pipeline_id, PipelineStatus.ERROR, str(exc))
             return
 
-        self.repository.append_logs(final_state["logs"])
+        self._flush_pending_logs(final_state)
         self.repository.mark_pipeline_status(
             job.pipeline_id,
             final_state["status"],
@@ -65,7 +65,7 @@ class PipelineRunner:
         )
 
     def _run_manual(self, job: PipelineJob) -> None:
-        state = create_initial_state(job)
+        state = create_initial_state(job, log_sink=self._log_sink)
         state["outputs"].update(self._manual_outputs(job))
         state["qa_attempt"] = self._manual_int(job, "manual_qa_attempt", state["qa_attempt"])
         state["build_iteration"] = self._manual_int(job, "manual_build_iteration", state["build_iteration"])
@@ -134,7 +134,7 @@ class PipelineRunner:
             self.repository.mark_pipeline_status(job.pipeline_id, PipelineStatus.ERROR, str(exc))
             return
 
-        self.repository.append_logs(state["logs"])
+        self._flush_pending_logs(state)
         self.repository.update_pipeline_metadata(
             job.pipeline_id,
             metadata_update={
@@ -172,7 +172,7 @@ class PipelineRunner:
 
     def _finalize_manual_pause(self, job: PipelineJob, state: PipelineState, *, cursor: str) -> None:
         waiting_for_stage = self._waiting_stage_from_reason(state.get("reason"))
-        self.repository.append_logs(state["logs"])
+        self._flush_pending_logs(state)
         self.repository.update_pipeline_metadata(
             job.pipeline_id,
             metadata_update={
@@ -232,3 +232,13 @@ class PipelineRunner:
         if value not in {"trigger", "plan", "style", "build_qa", "publish", "echo", "done"}:
             return "trigger"
         return value
+
+    def _log_sink(self, log: PipelineLogRecord) -> None:
+        self.repository.append_logs([log])
+
+    def _flush_pending_logs(self, state: PipelineState) -> None:
+        flushed_count = int(state.get("flushed_log_count", 0))
+        pending = state["logs"][flushed_count:]
+        if pending:
+            self.repository.append_logs(pending)
+            state["flushed_log_count"] = len(state["logs"])

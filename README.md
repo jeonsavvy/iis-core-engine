@@ -54,16 +54,21 @@ Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
 
 ## 로컬 실행
 
+실행 컨텍스트 표기 규칙:
+- `[LOCAL WSL]` : 사용자 PC의 WSL/로컬 터미널
+- `[EC2 SSH]` : AWS EC2에 SSH 접속한 셸
+
 ```bash
+# [LOCAL WSL]
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 
-# 터미널 1 (API)
+# [LOCAL WSL] 터미널 1 (API)
 ./scripts/run_api.sh
 
-# 터미널 2 (Worker)
+# [LOCAL WSL] 터미널 2 (Worker)
 ./scripts/run_worker.sh
 ```
 
@@ -79,6 +84,7 @@ cp .env.example .env
 ## ARM(Oracle/AWS Graviton) 참고
 
 ```bash
+# [EC2 SSH] 또는 ARM 서버 셸
 ./scripts/install_playwright_arm.sh
 ./scripts/verify_playwright_arm.sh
 ```

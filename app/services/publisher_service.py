@@ -96,3 +96,56 @@ class PublisherService:
             "game_id": game_id,
             "storage_path": storage_path,
         }
+
+    def delete_game_assets(self, *, slug: str) -> dict[str, Any]:
+        if not self.client:
+            return {"status": "error", "reason": "supabase client is not configured"}
+
+        bucket = self.client.storage.from_(self.settings.supabase_storage_bucket)
+        prefix = slug.strip().strip("/")
+        if not prefix:
+            return {"status": "error", "reason": "invalid_slug"}
+
+        candidate_paths: set[str] = {
+            f"{prefix}/index.html",
+            f"{prefix}/game.js",
+            f"{prefix}/styles.css",
+            f"{prefix}/manifest.json",
+        }
+
+        listed_entries: Any = None
+        for call in (
+            lambda: bucket.list(prefix),
+            lambda: bucket.list(prefix, {"limit": 1000}),
+            lambda: bucket.list(path=prefix),
+        ):
+            try:
+                listed_entries = call()
+                break
+            except TypeError:
+                continue
+            except Exception:
+                listed_entries = None
+                break
+
+        if isinstance(listed_entries, list):
+            for entry in listed_entries:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    candidate_paths.add(f"{prefix}/{name}")
+
+        try:
+            bucket.remove(sorted(candidate_paths))
+        except Exception as exc:  # pragma: no cover - integration path
+            return {
+                "status": "error",
+                "reason": f"storage_delete_failed: {exc}",
+                "paths": sorted(candidate_paths),
+            }
+
+        return {
+            "status": "deleted",
+            "paths": sorted(candidate_paths),
+        }

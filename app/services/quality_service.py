@@ -85,6 +85,10 @@ class QualityService:
             ("overflow_guard", "overflow-guard" in html_content, 15),
             ("overflow_policy", "data-overflow-policy" in html_content, 10),
             ("safe_area", "--safe-area-padding" in html_content, 15),
+            ("canvas_present", "<canvas" in html_content.lower(), 20),
+            ("game_loop_raf", "requestanimationframe" in html_content.lower(), 20),
+            ("keyboard_input", "keydown" in html_content.lower(), 15),
+            ("game_state_logic", "game over" in html_content.lower() or "overlay" in html_content.lower(), 10),
         ]
 
         viewport_width = spec.get("viewport_width")
@@ -105,8 +109,20 @@ class QualityService:
         check_map = {name: passed for name, passed, _ in checks}
         failed_checks = [name for name, passed, _ in checks if not passed]
 
+        hard_failures: list[str] = []
+        lowered = html_content.lower()
+        if "+100 score" in lowered and "requestanimationframe" not in lowered:
+            hard_failures.append("trivial_score_button_template")
+        if "addEventListener(\"click\")" in html_content and "keydown" not in lowered and "<canvas" not in lowered:
+            hard_failures.append("click_only_interaction")
+
+        if hard_failures:
+            failed_checks.extend(hard_failures)
+            for failure in hard_failures:
+                check_map[failure] = False
+
         return QualityGateResult(
-            ok=score >= threshold,
+            ok=(score >= threshold) and not hard_failures,
             score=score,
             threshold=threshold,
             failed_checks=failed_checks,

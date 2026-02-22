@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, TypedDict
 from uuid import UUID
 
@@ -18,10 +19,16 @@ class PipelineState(TypedDict):
     status: PipelineStatus
     reason: str | None
     logs: list[PipelineLogRecord]
+    flushed_log_count: int
+    log_sink: Callable[[PipelineLogRecord], None] | None
     outputs: dict[str, Any]
 
 
-def create_initial_state(job: PipelineJob) -> PipelineState:
+def create_initial_state(
+    job: PipelineJob,
+    *,
+    log_sink: Callable[[PipelineLogRecord], None] | None = None,
+) -> PipelineState:
     outputs: dict[str, Any] = {}
     safe_slug = job.metadata.get("safe_slug")
     if isinstance(safe_slug, str) and safe_slug:
@@ -41,5 +48,7 @@ def create_initial_state(job: PipelineJob) -> PipelineState:
         "status": PipelineStatus.RUNNING,
         "reason": None,
         "logs": [],
+        "flushed_log_count": 0,
+        "log_sink": log_sink,
         "outputs": outputs,
     }

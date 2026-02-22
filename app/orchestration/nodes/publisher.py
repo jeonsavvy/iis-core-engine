@@ -41,6 +41,15 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     genre = artifact.game_genre
     artifact_html = artifact.artifact_html
 
+    append_log(
+        state,
+        stage=PipelineStage.PUBLISH,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.PUBLISHER,
+        message="Uploading artifact to Supabase storage.",
+        metadata={"slug": slug},
+    )
+
     publish_result = deps.publisher_service.publish_game(
         slug=slug,
         name=game_name,
@@ -71,6 +80,15 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     archive_status = "skipped"
     archive_reason = None
+
+    append_log(
+        state,
+        stage=PipelineStage.PUBLISH,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.PUBLISHER,
+        message="Syncing archive repository manifest.",
+        metadata={"slug": slug, "url": public_url},
+    )
 
     archive_result = deps.github_archive_service.commit_archive_game(
         game_slug=slug,
@@ -108,5 +126,6 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "publisher_status": publish_result.get("status"),
             "archive_status": archive_status,
             "archive_reason": archive_reason,
+            "storage_path": publish_result.get("storage_path"),
         },
     )

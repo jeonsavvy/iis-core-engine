@@ -104,6 +104,68 @@ class GitHubArchiveService:
             "message": commit_message,
         }
 
+    def delete_archive_game(self, *, game_slug: str) -> dict[str, str]:
+        if not self.settings.github_token or not self.settings.github_archive_repo:
+            return {
+                "status": "skipped",
+                "reason": "GITHUB_TOKEN or GITHUB_ARCHIVE_REPO is not configured.",
+            }
+
+        game_path = f"games/{game_slug}/index.html"
+        manifest_path = "manifest/games.json"
+        self._assert_allowlisted_path(game_path)
+        self._assert_allowlisted_path(manifest_path)
+
+        try:
+            existing_manifest = self._fetch_json_file(manifest_path)
+        except Exception as exc:
+            return {"status": "error", "reason": f"manifest_fetch_failed: {exc}"}
+
+        if isinstance(existing_manifest, dict):
+            existing_games = existing_manifest.get("games", [])
+            if not isinstance(existing_games, list):
+                existing_games = []
+            manifest_schema_version = int(existing_manifest.get("schema_version", 1) or 1)
+        elif isinstance(existing_manifest, list):
+            existing_games = existing_manifest
+            manifest_schema_version = 1
+        else:
+            existing_games = []
+            manifest_schema_version = 1
+
+        removed = False
+        updated_games: list[dict[str, Any]] = []
+        for row in existing_games:
+            if not isinstance(row, dict):
+                continue
+            if row.get("slug") == game_slug:
+                removed = True
+                continue
+            updated_games.append(row)
+
+        updated_manifest = {
+            "schema_version": manifest_schema_version,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "games": updated_games,
+        }
+
+        commit_message = f"chore: delete archive {game_slug}"
+
+        try:
+            self._delete_file(game_path, commit_message)
+            self._put_file(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n", commit_message)
+        except Exception as exc:
+            return {"status": "error", "reason": f"archive_delete_failed: {exc}"}
+
+        return {
+            "status": "deleted",
+            "slug": game_slug,
+            "removed_from_manifest": "true" if removed else "false",
+            "repo": self.settings.github_archive_repo or "",
+            "branch": self.settings.github_archive_branch,
+            "message": commit_message,
+        }
+
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.settings.github_token}",
@@ -167,6 +229,21 @@ class GitHubArchiveService:
         response = self._request("PUT", self._contents_url(path), json_payload=payload)
         if response.status_code not in (200, 201):
             raise RuntimeError(f"github_put_failed_{response.status_code}")
+
+    def _delete_file(self, path: str, commit_message: str) -> bool:
+        current_sha = self._fetch_sha(path)
+        if not current_sha:
+            return False
+
+        payload = {
+            "message": commit_message,
+            "sha": current_sha,
+            "branch": self.settings.github_archive_branch,
+        }
+        response = self._request("DELETE", self._contents_url(path), json_payload=payload)
+        if response.status_code != 200:
+            raise RuntimeError(f"github_delete_failed_{response.status_code}")
+        return True
 
     @staticmethod
     def _assert_allowlisted_path(path: str) -> None:

@@ -21,6 +21,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     artifact_html = str(state["outputs"].get("artifact_html", ""))
+    append_log(
+        state,
+        stage=PipelineStage.QA,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.SENTINEL,
+        message="Playwright smoke check started.",
+        metadata={"attempt": state["qa_attempt"]},
+    )
     smoke_result = deps.quality_service.run_smoke_check(artifact_html)
 
     if not smoke_result.ok:
@@ -39,6 +47,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     design_spec = state["outputs"].get("design_spec", {})
+    append_log(
+        state,
+        stage=PipelineStage.QA,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.SENTINEL,
+        message="Quality gate evaluation started.",
+        metadata={"attempt": state["qa_attempt"]},
+    )
     quality_result = deps.quality_service.evaluate_quality_contract(
         artifact_html,
         design_spec=design_spec if isinstance(design_spec, dict) else None,
@@ -57,6 +73,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "quality_score": quality_result.score,
                 "quality_threshold": quality_result.threshold,
                 "failed_checks": quality_result.failed_checks,
+                "checks": quality_result.checks,
             },
         )
 
@@ -75,5 +92,6 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "attempt": state["qa_attempt"],
             "quality_score": quality_result.score,
             "quality_threshold": quality_result.threshold,
+            "checks": quality_result.checks,
         },
     )
