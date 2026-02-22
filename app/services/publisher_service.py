@@ -34,14 +34,31 @@ class PublisherService:
 
         try:
             upload_payload = html_content.encode("utf-8")
+            file_options = {
+                "content-type": "text/html; charset=utf-8",
+                "cache-control": "60",
+                "x-upsert": "true",
+            }
             try:
                 bucket.upload(
                     storage_path,
                     upload_payload,
-                    file_options={"content-type": "text/html; charset=utf-8", "upsert": "true"},
+                    file_options=file_options,
                 )
             except TypeError:
-                bucket.upload(storage_path, upload_payload)
+                bucket.upload(
+                    storage_path,
+                    upload_payload,
+                    file_options={
+                        "content-type": "text/html; charset=utf-8",
+                        "cache-control": "60",
+                        "upsert": "true",
+                    },
+                )
+            except Exception:
+                # Some storage backends/SDK versions preserve old metadata on upsert.
+                # Force an explicit update so HTML content-type/charset is refreshed.
+                bucket.update(storage_path, upload_payload, file_options=file_options)
         except Exception as exc:  # pragma: no cover - integration path
             return {
                 "status": "error",
