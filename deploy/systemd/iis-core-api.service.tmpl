@@ -1,0 +1,19 @@
+[Unit]
+Description=IIS Core Engine API (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__IIS_USER__
+Group=__IIS_USER__
+WorkingDirectory=__IIS_APP_DIR__
+EnvironmentFile=__IIS_APP_DIR__/.env
+ExecStart=__IIS_VENV_BIN__/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

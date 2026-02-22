@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+langgraph
+langchain
+langchain-google-vertexai
+google-cloud-aiplatform
+supabase
+playwright
+httpx
+tenacity
+python-telegram-bot
+PyGithub
+python-dotenv
+orjson

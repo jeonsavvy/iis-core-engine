@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="${1:-/opt/iis-core-engine}"
+RUN_USER="${2:-iis}"
+VENV_BIN="${3:-$APP_DIR/.venv/bin}"
+SYSTEMD_DIR="/etc/systemd/system"
+
+render_and_install() {
+  local template_file="$1"
+  local output_name="$2"
+
+  sed \
+    -e "s|__IIS_USER__|${RUN_USER}|g" \
+    -e "s|__IIS_APP_DIR__|${APP_DIR}|g" \
+    -e "s|__IIS_VENV_BIN__|${VENV_BIN}|g" \
+    "$template_file" | sudo tee "${SYSTEMD_DIR}/${output_name}" >/dev/null
+}
+
+render_and_install "deploy/systemd/iis-core-api.service.tmpl" "iis-core-api.service"
+render_and_install "deploy/systemd/iis-core-worker.service.tmpl" "iis-core-worker.service"
+
+sudo systemctl daemon-reload
+sudo systemctl enable iis-core-api.service iis-core-worker.service
+
+echo "Installed services:"
+sudo systemctl status iis-core-api.service --no-pager || true
+sudo systemctl status iis-core-worker.service --no-pager || true
