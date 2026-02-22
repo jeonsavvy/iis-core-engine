@@ -29,7 +29,7 @@ async def run_worker_forever() -> None:
             continue
 
         logger.info("Processing pipeline %s", job.pipeline_id)
-        runner.run(job)
+        await asyncio.to_thread(runner.run, job)
 
 
 if __name__ == "__main__":
