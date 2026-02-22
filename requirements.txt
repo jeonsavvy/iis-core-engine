@@ -5,6 +5,7 @@ pydantic-settings
 langgraph
 langchain
 langchain-google-vertexai
+google-genai
 google-cloud-aiplatform
 supabase
 playwright

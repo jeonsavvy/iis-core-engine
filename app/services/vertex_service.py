@@ -18,6 +18,13 @@ try:  # pragma: no cover - import availability differs across environments
 except Exception:  # pragma: no cover - runtime safeguard
     ChatVertexAI = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - import availability differs across environments
+    from google import genai as google_genai
+    from google.genai import types as genai_types
+except Exception:  # pragma: no cover - runtime safeguard
+    google_genai = None  # type: ignore[assignment]
+    genai_types = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,6 +99,7 @@ class VertexService:
         self.settings = settings
         self._pro_llm = None
         self._flash_llm = None
+        self._genai_client = None
 
     def generate_gdd_bundle(self, keyword: str) -> VertexGenerationResult:
         fallback = self._fallback_gdd_bundle(keyword, reason="vertex_not_configured")
@@ -100,10 +108,18 @@ class VertexService:
 
         started = time.perf_counter()
         try:
-            model = self._pro_model()
             prompt = self._gdd_prompt(keyword)
-            runnable = model.with_structured_output(_GDDModel, method="json_mode")
-            raw = self._invoke_with_retry(runnable, prompt)
+            if self._use_genai_sdk():
+                raw = self._genai_json(
+                    model_name=self.settings.gemini_pro_model,
+                    prompt=prompt,
+                    schema=_GDDModel,
+                    temperature=0.4,
+                )
+            else:
+                model = self._pro_model()
+                runnable = model.with_structured_output(_GDDModel, method="json_mode")
+                raw = self._invoke_with_retry(runnable, prompt)
             parsed = raw if isinstance(raw, _GDDModel) else _GDDModel.model_validate(raw)
             latency_ms = int((time.perf_counter() - started) * 1000)
 
@@ -149,10 +165,18 @@ class VertexService:
 
         started = time.perf_counter()
         try:
-            model = self._flash_model()
             prompt = self._design_prompt(keyword=keyword, visual_style=visual_style, genre=genre)
-            runnable = model.with_structured_output(_DesignSpecModel, method="json_mode")
-            raw = self._invoke_with_retry(runnable, prompt)
+            if self._use_genai_sdk():
+                raw = self._genai_json(
+                    model_name=self.settings.gemini_flash_model,
+                    prompt=prompt,
+                    schema=_DesignSpecModel,
+                    temperature=0.3,
+                )
+            else:
+                model = self._flash_model()
+                runnable = model.with_structured_output(_DesignSpecModel, method="json_mode")
+                raw = self._invoke_with_retry(runnable, prompt)
             parsed = raw if isinstance(raw, _DesignSpecModel) else _DesignSpecModel.model_validate(raw)
             latency_ms = int((time.perf_counter() - started) * 1000)
             return VertexGenerationResult(
@@ -192,7 +216,6 @@ class VertexService:
 
         started = time.perf_counter()
         try:
-            model = self._pro_model()
             prompt = self._builder_prompt(
                 keyword=keyword,
                 title=title,
@@ -200,8 +223,16 @@ class VertexService:
                 objective=objective,
                 design_spec=design_spec,
             )
-            raw = self._invoke_with_retry(model, prompt)
-            content = _strip_code_fences(_coerce_message_text(getattr(raw, "content", raw)))
+            if self._use_genai_sdk():
+                content = self._genai_text(
+                    model_name=self.settings.gemini_pro_model,
+                    prompt=prompt,
+                    temperature=0.4,
+                )
+            else:
+                model = self._pro_model()
+                raw = self._invoke_with_retry(model, prompt)
+                content = _strip_code_fences(_coerce_message_text(getattr(raw, "content", raw)))
             latency_ms = int((time.perf_counter() - started) * 1000)
             if not content:
                 raise ValueError("empty_builder_response")
@@ -229,12 +260,20 @@ class VertexService:
     def _is_enabled(self) -> bool:
         if not self.settings.vertex_project_id:
             return False
-        if ChatVertexAI is None:
-            return False
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
         if not credentials_path:
             return False
-        return os.path.exists(credentials_path)
+        if not os.path.exists(credentials_path):
+            return False
+        return (google_genai is not None and genai_types is not None) or ChatVertexAI is not None
+
+    def _use_genai_sdk(self) -> bool:
+        if google_genai is None or genai_types is None:
+            return False
+        if not self.settings.vertex_project_id:
+            return False
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        return bool(credentials_path and os.path.exists(credentials_path))
 
     def _pro_model(self):
         if self._pro_llm is None:
@@ -257,6 +296,71 @@ class VertexService:
             timeout=self.settings.http_timeout_seconds,
         )
 
+    def _client(self):
+        if self._genai_client is None:
+            if google_genai is None:  # pragma: no cover - import guard
+                raise RuntimeError("google_genai is not available")
+            self._genai_client = google_genai.Client(
+                vertexai=True,
+                project=self.settings.vertex_project_id,
+                location=self.settings.vertex_location,
+            )
+        return self._genai_client
+
+    def _genai_json(self, *, model_name: str, prompt: str, schema: type[BaseModel], temperature: float) -> dict[str, Any]:
+        if genai_types is None:  # pragma: no cover - import guard
+            raise RuntimeError("google_genai types are not available")
+        response = self._genai_generate_with_retry(
+            model_name=model_name,
+            prompt=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=temperature,
+                response_mime_type="application/json",
+                response_schema=schema,
+            ),
+        )
+        text = _strip_code_fences(self._coerce_genai_text(response))
+        if not text:
+            raise ValueError("empty_json_response")
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("json_response_not_object")
+        return parsed
+
+    def _genai_text(self, *, model_name: str, prompt: str, temperature: float) -> str:
+        if genai_types is None:  # pragma: no cover - import guard
+            raise RuntimeError("google_genai types are not available")
+        response = self._genai_generate_with_retry(
+            model_name=model_name,
+            prompt=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=temperature,
+                response_mime_type="text/plain",
+            ),
+        )
+        return _strip_code_fences(self._coerce_genai_text(response))
+
+    def _coerce_genai_text(self, response: Any) -> str:
+        try:
+            text = getattr(response, "text", "")
+            if isinstance(text, str) and text.strip():
+                return text
+        except Exception:
+            pass
+
+        candidates = getattr(response, "candidates", None) or []
+        parts: list[str] = []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            content_parts = getattr(content, "parts", None) or []
+            for part in content_parts:
+                text = getattr(part, "text", None)
+                if isinstance(text, str):
+                    parts.append(text)
+        if parts:
+            return "\n".join(parts).strip()
+        return str(response)
+
     @retry(
         reraise=True,
         retry=retry_if_exception_type(Exception),
@@ -265,6 +369,20 @@ class VertexService:
     )
     def _invoke_with_retry(self, runnable, prompt: str):
         return runnable.invoke(prompt)
+
+    @retry(
+        reraise=True,
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.5, max=3),
+    )
+    def _genai_generate_with_retry(self, *, model_name: str, prompt: str, config: Any):
+        client = self._client()
+        return client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=config,
+        )
 
     @staticmethod
     def _gdd_prompt(keyword: str) -> str:
