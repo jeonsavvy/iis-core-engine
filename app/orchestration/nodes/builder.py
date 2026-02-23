@@ -31,7 +31,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         gdd = GDDPayload(
             title=f"{state['keyword'].title()} Infinite",
             genre="arcade",
-            objective="Get highest score possible in 90 seconds.",
+            objective="Survive escalating pressure while chaining skill actions for a high score.",
             visual_style="neon-minimal",
         )
 
@@ -78,6 +78,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "title": title,
                 "genre": genre,
                 "supported_modes": [
+                    "f1_formula_circuit_3d",
                     "flight_sim_3d",
                     "webgl_three_runner",
                     "topdown_roguelike_shooter",

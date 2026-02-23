@@ -45,3 +45,18 @@ def test_builder_prompt_mentions_procedural_asset_policy() -> None:
     assert "analog control" in lowered
     assert "miniboss" in lowered
     assert "relic synergy" in lowered
+
+
+def test_builder_prompt_mentions_formula_guidance() -> None:
+    prompt = VertexService._builder_prompt(
+        keyword="F1 스타일 풀3D 레이싱",
+        title="Formula Neon",
+        genre="racing",
+        objective="finish laps and overtake rivals",
+        design_spec={"visual_style": "formula-neon"},
+        variation_hint="Variant A",
+    )
+    lowered = prompt.casefold()
+    assert "formula/f1/circuit racing" in lowered
+    assert "braking windows" in lowered
+    assert "multi-minute runs" in lowered

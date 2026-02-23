@@ -17,6 +17,22 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     if any(
         token in haystack
         for token in (
+            "f1",
+            "formula 1",
+            "formula-one",
+            "포뮬러",
+            "formula",
+            "grand prix",
+            "그랑프리",
+            "circuit race",
+            "circuit racing",
+            "formula racing",
+        )
+    ):
+        return "f1_formula_circuit_3d"
+    if any(
+        token in haystack
+        for token in (
             "비행기",
             "비행 시뮬",
             "항공기",
@@ -88,6 +104,13 @@ def _detect_unsupported_scope(*, keyword: str, title: str, genre: str) -> str | 
 
 def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> list[str]:
     presets = {
+        "f1_formula_circuit_3d": [
+            "Variant A: high-downforce technical circuit emphasizing braking zones and apex precision.",
+            "Variant B: high-speed street circuit with narrower margins and aggressive overtakes.",
+            "Variant C: endurance grand-prix loop balancing tire heat management with late-lap push.",
+            "Variant D: rain-threat circuit pacing with unstable grip windows and recovery-focused handling.",
+            "Variant E: balanced modern F1 feel prioritizing smooth steering response and clean racing lines.",
+        ],
         "flight_sim_3d": [
             "Variant A: atmospheric canyon training with strict throttle control and ring precision scoring.",
             "Variant B: high-altitude storm run with turbulence dodges and aggressive speed-management.",

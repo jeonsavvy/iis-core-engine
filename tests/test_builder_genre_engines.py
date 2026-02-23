@@ -49,6 +49,11 @@ def test_infer_flight_mode_from_keyword() -> None:
     assert mode == "flight_sim_3d"
 
 
+def test_infer_formula_mode_from_keyword() -> None:
+    mode = _infer_core_loop_type(keyword="F1 스타일 풀3D 레이싱", title="Grand Prix Neon", genre="racing")
+    assert mode == "f1_formula_circuit_3d"
+
+
 def test_infer_webgl_runner_mode_from_keyword() -> None:
     mode = _infer_core_loop_type(keyword="웹글 3D 드리프트 레이싱", title="Neon Outrun", genre="arcade")
     assert mode == "webgl_three_runner"
@@ -104,6 +109,14 @@ def test_flight_builder_html_contains_flight_controls_and_progression_hooks() ->
     assert "pitch" in html and "roll" in html and "yaw" in html
 
 
+def test_formula_builder_html_contains_lap_and_overtake_hooks() -> None:
+    html = _build_sample_html("f1_formula_circuit_3d").lower()
+    assert "state.formula" in html
+    assert "checkpoint" in html
+    assert "overtakechain" in html
+    assert "accel_rate" in html and "brake_rate" in html
+
+
 def test_gameplay_gate_rejects_when_keyword_requires_flight_but_mode_mismatches() -> None:
     html = _build_sample_html("topdown_roguelike_shooter").replace("state.flight", "state.airframe")
     quality = QualityService(Settings(qa_min_gameplay_score=55))
@@ -130,6 +143,20 @@ def test_gameplay_gate_rejects_quantized_webgl_lane_steering() -> None:
     )
     assert gate.ok is False
     assert "quantized_lane_steering" in gate.failed_checks
+
+
+def test_gameplay_gate_passes_for_formula_mode() -> None:
+    html = _build_sample_html("f1_formula_circuit_3d")
+    quality = QualityService(Settings(qa_min_gameplay_score=55))
+    gate = quality.evaluate_gameplay_gate(
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="formula racing",
+        genre_engine="f1_formula_circuit_3d",
+        keyword="f1 style full 3d racing",
+    )
+    assert gate.ok is True
+    assert gate.score >= gate.threshold
 
 
 def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> None:

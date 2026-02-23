@@ -327,6 +327,18 @@ class QualityService:
             checks.append(("flight_controls", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 16))
             checks.append(("flight_progression_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 12))
             checks.append(("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 12))
+        if genre_engine_hint == "f1_formula_circuit_3d":
+            checks.append(
+                (
+                    "f1_analog_steering_runtime",
+                    "steervelocity" in lowered and "lanefloat" in lowered and "math.round(state.player.lane)" not in lowered,
+                    14,
+                )
+            )
+            checks.append(("f1_lap_checkpoint_loop", "state.formula.lap" in lowered and "checkpoint" in lowered, 14))
+            checks.append(("f1_brake_accel_loop", "accel_rate" in lowered and "brake_rate" in lowered, 10))
+            checks.append(("f1_overtake_boost_loop", "overtakechain" in lowered and "boosttimer" in lowered, 10))
+            checks.append(("f1_track_rendering", "roadcurve" in lowered and "roadscroll" in lowered, 8))
         if genre_engine_hint == "webgl_three_runner":
             checks.append(
                 (
@@ -372,6 +384,15 @@ class QualityService:
                 hard_failures.append("flight_mechanics_not_found")
         if genre_engine_hint == "webgl_three_runner" and "math.round(state.player.lane)" in lowered:
             hard_failures.append("quantized_lane_steering")
+        if genre_engine_hint == "f1_formula_circuit_3d":
+            missing_formula_token = any(
+                token not in lowered
+                for token in ("state.formula", "checkpoint", "overtakechain", "accel_rate", "brake_rate")
+            )
+            if missing_formula_token:
+                hard_failures.append("f1_mechanics_not_found")
+            if "math.round(state.player.lane)" in lowered:
+                hard_failures.append("f1_quantized_steering")
 
         if hard_failures:
             failed_checks.extend(hard_failures)

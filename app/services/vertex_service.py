@@ -150,7 +150,7 @@ class VertexService:
 
             references = parsed.references[:3] or [
                 f"{keyword} + score-attack progression",
-                f"{keyword} + 90-second arcade pacing",
+                f"{keyword} + multi-minute run pacing curve",
                 f"{keyword} + mobile-friendly HUD readability",
             ]
             research_summary = {
@@ -465,7 +465,7 @@ class VertexService:
             f"Keyword: {keyword}\n"
             "Constraints:\n"
             "- genre must be one of: arcade, puzzle, survival, score-attack\n"
-            "- objective must fit a short 60~120 second session\n"
+            "- objective must define an actionable session target; allowed range is 90~360 seconds when fantasy requires depth\n"
             "- visual_style should be concise (e.g., neon-minimal, pixel-retro)\n"
             "- references should be 3 short reference ideas (strings)\n"
             "- research_intent should explain what references target\n"
@@ -476,7 +476,8 @@ class VertexService:
             "Design quality bar:\n"
             "- The player must have a meaningful verb loop (move/aim/attack/evade/collect)\n"
             "- The fantasy implied by the keyword should be visible in the core loop\n"
-            "- The game should be understandable within 5 seconds and replayable within 90 seconds\n"
+            "- The game should be understandable within 5 seconds and replayable with depth for multiple 2~6 minute runs\n"
+            "- If keyword implies Formula/F1/circuit racing, include lap/checkpoint/overtake/braking-line fantasy explicitly\n"
         )
 
     @staticmethod
@@ -921,11 +922,12 @@ class VertexService:
             "- base_score_value: integer (e.g. 10 to 100, default 10)\n\n"
             "Quality bar:\n"
             "- If the game is a fast-paced racing game, increase speeds and lower HP.\n"
+            "- If keyword implies Formula/F1/circuit racing, emphasize braking windows, lap progression, and overtake chain risk/reward.\n"
             "- If the game is a brawl, increase enemy HP and adjust attack cooldowns.\n"
             "- Preserve analog control headroom (no quantized one-step movement assumptions).\n"
             "- Prefer procedural scene layering (parallax/depth/particles) over bitmap dependency.\n"
             "- Ensure wave escalation + miniboss cadence + relic synergy potential can emerge from numeric tuning.\n"
-            "- Ensure values provide a fair but challenging experience suitable for a 90-second arcade game."
+            "- Ensure values provide a fair but challenging experience suitable for repeated multi-minute runs."
         )
 
     @staticmethod
@@ -939,14 +941,14 @@ class VertexService:
             "intent": f"{keyword} 기반 코어 플레이 루프 아이디어 수집",
             "references": [
                 f"{keyword} + score-attack progression",
-                f"{keyword} + 90-second arcade pacing",
+                f"{keyword} + multi-minute run pacing curve",
                 f"{keyword} + mobile-friendly HUD readability",
             ],
         }
         gdd = {
             "title": f"{keyword_title} Infinite",
             "genre": "arcade",
-            "objective": "Get highest score possible in 90 seconds.",
+            "objective": "Survive escalating pressure while chaining skill actions for a high score.",
             "visual_style": "neon-minimal",
         }
         return VertexGenerationResult(

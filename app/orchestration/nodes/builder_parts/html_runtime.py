@@ -21,6 +21,11 @@ def _build_hybrid_engine_html(
     asset_manifest: dict[str, object] | None = None,
 ) -> str:
     mode_config = {
+        "f1_formula_circuit_3d": {
+            "label": "F1 Formula Circuit",
+            "objective": "브레이킹 포인트와 에이펙스를 읽어 체커 포인트를 연속 통과하며 랩 타임을 단축하세요.",
+            "controls": "← → 조향 / ↑ 가속 / ↓ 브레이크 / Shift 오버테이크 부스트 / R 재시작",
+        },
         "flight_sim_3d": {
             "label": "Flight Sim 3D",
             "objective": "스로틀·피치·롤·요 제어로 항로 링을 통과하며 스톨/충돌을 피하고 최고 점수를 달성하세요.",
@@ -267,11 +272,29 @@ def _build_hybrid_engine_html(
       const SPRITE_PATHS = ASSET_MANIFEST.images && typeof ASSET_MANIFEST.images === "object" ? ASSET_MANIFEST.images : {{}};
       const SPRITES = {{}};
       const MODE_IS_FLIGHT_SIM = CONFIG.mode === "flight_sim_3d";
-      const MODE_IS_3D_RUNNER = CONFIG.mode === "lane_dodge_racer" || CONFIG.mode === "webgl_three_runner";
-      const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FLIGHT_SIM;
+      const MODE_IS_FORMULA_CIRCUIT = CONFIG.mode === "f1_formula_circuit_3d";
+      const MODE_IS_3D_RUNNER = MODE_IS_FORMULA_CIRCUIT || CONFIG.mode === "lane_dodge_racer" || CONFIG.mode === "webgl_three_runner";
+      const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FORMULA_CIRCUIT || MODE_IS_FLIGHT_SIM;
       const MODE_IS_SHOOTER = CONFIG.mode === "arena_shooter" || CONFIG.mode === "topdown_roguelike_shooter";
       const MODE_IS_BRAWLER = CONFIG.mode === "duel_brawler" || CONFIG.mode === "comic_action_brawler_3d";
       const CONTROL_PRESETS = {{
+        f1_formula_circuit_3d: {{
+          steer_accel: 11.6,
+          steer_drag: 8.8,
+          steer_return: 9.4,
+          accel_rate: 340,
+          brake_rate: 420,
+          drag_rate: 120,
+          speed_min: 210,
+          speed_max: 640,
+          lane_lerp: 11.2,
+          curve_response: 1.9,
+          curve_interval_min: 0.6,
+          curve_interval_max: 1.8,
+          apex_window: 0.32,
+          overtake_boost_floor: 460,
+          checkpoint_bonus_sec: 2.2,
+        }},
         flight_sim_3d: {{
           throttle_response: 0.62,
           pitch_response: 2.7,
@@ -336,6 +359,12 @@ def _build_hybrid_engine_html(
         }},
       }};
       const DEPTH_PACKS = {{
+        f1_formula_circuit_3d: {{
+          wave_interval_sec: 6.4,
+          miniboss_interval_sec: 20.0,
+          wave_modifiers: [1.0, 1.12, 1.26, 1.42],
+          pattern: [["checkpoint", 0.24], ["opponent", 0.52], ["boost", 0.14], ["hazard", 0.1]],
+        }},
         flight_sim_3d: {{
           wave_interval_sec: 8.0,
           miniboss_interval_sec: 24.0,
@@ -459,6 +488,15 @@ def _build_hybrid_engine_html(
           curveTimer: 0,
           distance: 0,
         }},
+        formula: {{
+          lap: 1,
+          checkpoints: 0,
+          checkpointsPerLap: 5,
+          lapTimer: 0,
+          bestLap: 999,
+          sectorHeat: 0,
+          overtakeChain: 0,
+        }},
         topdown: {{
           orbitAngle: 0,
         }},
@@ -542,6 +580,15 @@ def _build_hybrid_engine_html(
           roadCurveTarget: 0,
           curveTimer: 0,
           distance: 0,
+        }};
+        state.formula = {{
+          lap: 1,
+          checkpoints: 0,
+          checkpointsPerLap: 5,
+          lapTimer: 0,
+          bestLap: 999,
+          sectorHeat: 0,
+          overtakeChain: 0,
         }};
         state.topdown = {{ orbitAngle: 0 }};
         state.flight = {{
@@ -830,6 +877,19 @@ def _build_hybrid_engine_html(
 
       function spawnMiniBoss() {{
         const difficultyScale = Math.max(1, state.run.difficultyScale || 1);
+        if (MODE_IS_FORMULA_CIRCUIT) {{
+          state.enemies.push({{
+            lane: rand(-0.9, 0.9),
+            z: 0.06,
+            speedMul: 0.92 + difficultyScale * 0.2,
+            kind: "opponent_elite",
+            w: 72,
+            h: 110,
+            hp: Math.max(2, Math.floor(2 + state.run.level * 0.22)),
+            miniBoss: true,
+          }});
+          return;
+        }}
         if (MODE_IS_FLIGHT_SIM) {{
           state.enemies.push({{
             kind: "hazard",
@@ -876,6 +936,21 @@ def _build_hybrid_engine_html(
         const spdMax = CONFIG.enemy_speed_max || 220;
         const difficultyScale = Math.max(1, state.run.difficultyScale || 1) * Math.max(1, state.run.waveModifier || 1);
         const weightedPattern = Array.isArray(ACTIVE_DEPTH_PACK.pattern) ? ACTIVE_DEPTH_PACK.pattern : [];
+        if (MODE_IS_FORMULA_CIRCUIT) {{
+          const kind = pickWeighted(weightedPattern, "opponent");
+          const lane = rand(-0.95, 0.95);
+          const opponentScale = kind === "opponent_elite" ? 1.18 : kind === "opponent" ? 1.0 : 0.9;
+          state.enemies.push({{
+            lane,
+            z: rand(0.03, 0.16),
+            speedMul: rand(0.88, 1.18) * (0.92 + difficultyScale * 0.16) * opponentScale,
+            kind,
+            w: kind === "checkpoint" ? 80 : kind === "boost" ? 28 : 52,
+            h: kind === "checkpoint" ? 100 : kind === "boost" ? 28 : 88,
+            hp: kind.includes("opponent") ? Math.max(1, Math.floor(1 + state.run.level * 0.16)) : 1,
+          }});
+          return;
+        }}
         if (MODE_IS_FLIGHT_SIM) {{
           const kind = pickWeighted(weightedPattern, "hazard");
           state.enemies.push({{
@@ -1031,7 +1106,127 @@ def _build_hybrid_engine_html(
         const spawnRate = ((CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8))
           * Math.max(0.78, Number(state.run.synergy.spawnEase || 1));
 
-        if (MODE_IS_FLIGHT_SIM) {{
+        if (MODE_IS_FORMULA_CIRCUIT) {{
+          const left = keys.has("ArrowLeft") || keys.has("a");
+          const right = keys.has("ArrowRight") || keys.has("d");
+          const accel = keys.has("ArrowUp") || keys.has("w");
+          const brake = keys.has("ArrowDown") || keys.has("s");
+
+          state.formula.lapTimer += dt;
+          const steerDir = (right ? 1 : 0) - (left ? 1 : 0);
+          state.racer.steerVelocity += steerDir * dt * Number(CONTROL.steer_accel || 10.5);
+          state.racer.steerVelocity *= (1 - Math.min(0.84, dt * Number(CONTROL.steer_drag || 8.2)));
+          if (!left && !right) {{
+            state.racer.steerVelocity *= (1 - Math.min(0.88, dt * Number(CONTROL.steer_return || 9.1)));
+          }}
+          state.racer.laneFloat = clamp(state.racer.laneFloat + state.racer.steerVelocity * dt, 0.06, 1.94);
+          state.player.lane = state.racer.laneFloat;
+
+          if (accel) state.racer.speed += Number(CONTROL.accel_rate || 320) * dt;
+          if (brake) state.racer.speed -= Number(CONTROL.brake_rate || 400) * dt;
+          if (!accel && !brake) state.racer.speed -= Number(CONTROL.drag_rate || 116) * dt;
+          state.racer.speed = clamp(state.racer.speed, Number(CONTROL.speed_min || 210), Number(CONTROL.speed_max || 620));
+
+          if (keys.has("Shift") && consumeDash()) {{
+            state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.2 + Number(state.run.synergy.boostBonus || 0));
+            state.racer.speed = Math.max(state.racer.speed, Number(CONTROL.overtake_boost_floor || 460));
+            state.formula.overtakeChain += 1;
+            playSfx("boost");
+          }}
+          if (state.racer.boostTimer > 0) {{
+            state.racer.boostTimer = Math.max(0, state.racer.boostTimer - dt);
+            state.racer.speed = Math.max(state.racer.speed, Number(CONTROL.overtake_boost_floor || 460));
+          }}
+
+          state.racer.curveTimer -= dt;
+          if (state.racer.curveTimer <= 0) {{
+            state.racer.curveTimer = rand(Number(CONTROL.curve_interval_min || 0.7), Number(CONTROL.curve_interval_max || 2.0));
+            state.racer.roadCurveTarget = rand(-0.62, 0.62);
+          }}
+          state.racer.roadCurve += (state.racer.roadCurveTarget - state.racer.roadCurve) * Math.min(1, dt * Number(CONTROL.curve_response || 1.8));
+          state.racer.roadScroll += dt * state.racer.speed * 0.064;
+          state.racer.distance += dt * state.racer.speed;
+          state.formula.sectorHeat = clamp(state.formula.sectorHeat + Math.abs(state.racer.roadCurve) * dt * 0.3, 0, 1.6);
+
+          const curvePx = state.racer.roadCurve * canvas.width * 0.2;
+          const laneNormalized = state.player.lane - 1;
+          const laneX = canvas.width * 0.5 + curvePx * 0.2 + laneNormalized * (canvas.width * 0.3);
+          state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * Number(CONTROL.lane_lerp || 11));
+          state.player.y = canvas.height * 0.79;
+
+          const adaptiveSpawnRate = clamp(spawnRate * (280 / state.racer.speed), 0.16, 0.78);
+          if (state.spawnTimer > adaptiveSpawnRate) {{
+            state.spawnTimer = 0;
+            spawnEnemy();
+          }}
+
+          const playerLaneNorm = state.player.lane - 1;
+          for (const e of state.enemies) {{
+            e.z += dt * (state.racer.speed / 320) * (e.speedMul || 1);
+            if (e.z > 0.78 && e.z < 1.04) {{
+              const laneDiff = Math.abs((e.lane || 0) - playerLaneNorm);
+              const hitWindow = Number(CONTROL.apex_window || 0.32);
+              if (laneDiff < hitWindow) {{
+                if (e.kind === "checkpoint") {{
+                  state.formula.checkpoints += 1;
+                  state.timeLeft = Math.min((CONFIG.time_limit_sec || 60) + 45, state.timeLeft + Number(CONTROL.checkpoint_bonus_sec || 2.2));
+                  const checkpointScore = (CONFIG.base_score_value || 10) * (4 + state.formula.overtakeChain * 0.35) * Number(state.run.synergy.scoreMul || 1);
+                  state.score += checkpointScore;
+                  addCombo(1.2);
+                  grantXp(14);
+                  playSfx("boost");
+                  burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.2, ASSET.boost_color, 16);
+                  if (state.formula.checkpoints >= state.formula.checkpointsPerLap) {{
+                    const finishedLapTime = Math.max(0.1, state.formula.lapTimer);
+                    state.formula.bestLap = Math.min(state.formula.bestLap, finishedLapTime);
+                    state.formula.lap += 1;
+                    state.formula.checkpoints = 0;
+                    state.formula.lapTimer = 0;
+                    state.formula.overtakeChain = Math.max(0, state.formula.overtakeChain - 1);
+                    state.run.level += 1;
+                    state.run.difficultyScale = (1 + (state.run.level - 1) * 0.12) * Math.max(1, state.run.waveModifier);
+                    state.score += 300 * Number(state.run.synergy.scoreMul || 1);
+                    state.timeLeft = Math.min((CONFIG.time_limit_sec || 60) + 55, state.timeLeft + 4);
+                    playSfx("levelup");
+                  }}
+                }} else if (e.kind === "boost") {{
+                  state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.6 + Number(state.run.synergy.boostBonus || 0));
+                  state.score += 50;
+                  addCombo(0.9);
+                  grantXp(10);
+                  playSfx("boost");
+                  burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.6, ASSET.boost_color, 14);
+                }} else {{
+                  const dangerScale = e.kind === "opponent_elite" ? 2 : 1;
+                  state.hp -= dangerScale;
+                  state.formula.overtakeChain = 0;
+                  state.score = Math.max(0, state.score - 20 * dangerScale);
+                  state.run.combo = 0;
+                  state.run.shake = Math.max(state.run.shake, 0.24);
+                  playSfx("damage");
+                  burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.5, ASSET.enemy_primary, 16);
+                }}
+                e.z = 2;
+              }}
+            }}
+          }}
+
+          state.enemies = state.enemies.filter((e) => {{
+            const passed = e.z > 1.08;
+            if (passed && (e.kind === "opponent" || e.kind === "opponent_elite")) {{
+              state.score += (CONFIG.base_score_value || 10) * (1.5 + state.formula.overtakeChain * 0.08) * Number(state.run.synergy.scoreMul || 1);
+              state.formula.overtakeChain = Math.min(20, state.formula.overtakeChain + 0.6);
+              addCombo(0.45);
+              grantXp(6);
+            }}
+            if (passed && e.kind === "checkpoint") {{
+              state.formula.overtakeChain = Math.max(0, state.formula.overtakeChain - 0.4);
+            }}
+            return !passed;
+          }});
+
+          state.score += dt * (state.racer.speed * 0.052) * (1 + state.run.combo * 0.032 + state.formula.overtakeChain * 0.014) * Number(state.run.synergy.scoreMul || 1);
+        }} else if (MODE_IS_FLIGHT_SIM) {{
           const pitchInput = (keys.has("w") || keys.has("ArrowUp") ? -1 : 0) + (keys.has("s") || keys.has("ArrowDown") ? 1 : 0);
           const rollInput = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
           const yawInput = (keys.has("e") ? 1 : 0) - (keys.has("q") ? 1 : 0);
@@ -1493,12 +1688,14 @@ def _build_hybrid_engine_html(
             }}
           }}
         }} else if (MODE_IS_3D_RUNNER) {{
-          const horizonY = canvas.height * 0.2;
-          const roadTop = canvas.width * 0.2;
-          const roadBottom = canvas.width * 0.78;
-          const curvePx = state.racer.roadCurve * canvas.width * 0.16;
+          const horizonY = MODE_IS_FORMULA_CIRCUIT ? canvas.height * 0.22 : canvas.height * 0.2;
+          const roadTop = MODE_IS_FORMULA_CIRCUIT ? canvas.width * 0.26 : canvas.width * 0.2;
+          const roadBottom = MODE_IS_FORMULA_CIRCUIT ? canvas.width * 0.88 : canvas.width * 0.78;
+          const curvePx = state.racer.roadCurve * canvas.width * (MODE_IS_FORMULA_CIRCUIT ? 0.2 : 0.16);
 
-          const webglRendered = CONFIG.mode === "webgl_three_runner" ? renderWebglBackground(1 / 60) : false;
+          const webglRendered = (CONFIG.mode === "webgl_three_runner" || MODE_IS_FORMULA_CIRCUIT)
+            ? renderWebglBackground(1 / 60)
+            : false;
           if (!webglRendered) {{
             const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
             sky.addColorStop(0, ASSET.bg_top);
@@ -1550,6 +1747,42 @@ def _build_hybrid_engine_html(
             ctx.fillRect(cx - dashW / 2, y, dashW, dashH);
           }}
 
+          if (MODE_IS_FORMULA_CIRCUIT) {{
+            for (let side = -1; side <= 1; side += 2) {{
+              ctx.lineWidth = 5;
+              for (let i = 0; i <= 28; i++) {{
+                const t = i / 28;
+                const tt = t * t;
+                const y = horizonY + tt * (canvas.height - horizonY);
+                const roadHalf = roadTop + (roadBottom - roadTop) * tt;
+                const cx = canvas.width / 2 + curvePx * (1 - t);
+                const x = cx + roadHalf * side;
+                const stripe = (i + Math.floor(state.racer.roadScroll * 0.02)) % 2 === 0;
+                ctx.strokeStyle = stripe ? "rgba(248, 113, 113, 0.95)" : "rgba(241, 245, 249, 0.92)";
+                ctx.beginPath();
+                ctx.moveTo(x - side * 6, y);
+                ctx.lineTo(x + side * 6, y);
+                ctx.stroke();
+              }}
+            }}
+            ctx.strokeStyle = "rgba(56, 189, 248, 0.34)";
+            ctx.lineWidth = 2;
+            for (let side = -1; side <= 1; side += 2) {{
+              ctx.beginPath();
+              for (let i = 0; i <= 24; i++) {{
+                const t = i / 24;
+                const tt = t * t;
+                const y = horizonY + tt * (canvas.height - horizonY);
+                const roadHalf = roadTop + (roadBottom - roadTop) * tt;
+                const cx = canvas.width / 2 + curvePx * (1 - t);
+                const x = cx + roadHalf * side + side * 18;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+              }}
+              ctx.stroke();
+            }}
+          }}
+
           ctx.strokeStyle = "rgba(148,163,184,0.35)";
           ctx.lineWidth = 2;
           for (const laneFactor of [-0.33, 0.33]) {{
@@ -1575,7 +1808,7 @@ def _build_hybrid_engine_html(
             const y = horizonY + tt * (canvas.height - horizonY);
             const roadHalf = roadTop + (roadBottom - roadTop) * tt;
             const cx = canvas.width / 2 + curvePx * (1 - t);
-            const laneOffset = (e.lane || 0) * roadHalf * 0.54;
+            const laneOffset = (e.lane || 0) * roadHalf * (MODE_IS_FORMULA_CIRCUIT ? 0.72 : 0.54);
             const scale = 0.28 + t * 1.05;
             const ew = (e.w || 30) * scale;
             const eh = (e.h || 50) * scale;
@@ -1598,8 +1831,15 @@ def _build_hybrid_engine_html(
               ctx.closePath();
               ctx.fill();
               ctx.restore();
+            }} else if (MODE_IS_FORMULA_CIRCUIT && e.kind === "checkpoint") {{
+              if (drawSprite("ring", ex, ey, ew * 1.18, eh * 0.82, 0.98)) continue;
+              ctx.strokeStyle = ASSET.boost_color;
+              ctx.lineWidth = Math.max(3, ew * 0.08);
+              ctx.shadowBlur = 16;
+              ctx.shadowColor = ASSET.boost_color;
+              ctx.strokeRect(ex - ew * 0.06, ey + eh * 0.08, ew * 1.12, eh * 0.7);
             }} else {{
-              const eliteRender = e.kind === "elite" || e.miniBoss || (e.hp || 0) > 1;
+              const eliteRender = e.kind === "elite" || e.kind === "opponent_elite" || e.miniBoss || (e.hp || 0) > 1;
               if (drawSprite(eliteRender ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
               ctx.fillStyle = ASSET.enemy_primary;
               ctx.shadowBlur = 14;
@@ -1721,23 +1961,40 @@ def _build_hybrid_engine_html(
           }} else {{
           ctx.shadowBlur = 18;
           ctx.shadowColor = state.racer.boostTimer > 0 ? ASSET.boost_color : ASSET.player_primary;
-          ctx.fillStyle = ASSET.player_primary;
-          ctx.beginPath();
-          ctx.moveTo(px + pw * 0.5, py - ph * 0.08);
-          ctx.lineTo(px + pw * 0.9, py + ph * 0.3);
-          ctx.lineTo(px + pw * 0.78, py + ph * 0.95);
-          ctx.lineTo(px + pw * 0.22, py + ph * 0.95);
-          ctx.lineTo(px + pw * 0.1, py + ph * 0.3);
-          ctx.closePath();
-          ctx.fill();
-          ctx.fillStyle = ASSET.player_secondary;
-          ctx.fillRect(px + pw * 0.2, py + ph * 0.25, pw * 0.6, ph * 0.26);
-          ctx.fillStyle = ASSET.track;
-          ctx.fillRect(px + pw * 0.02, py + ph * 0.62, pw * 0.18, ph * 0.2);
-          ctx.fillRect(px + pw * 0.8, py + ph * 0.62, pw * 0.18, ph * 0.2);
-          if (state.racer.boostTimer > 0) {{
-            ctx.fillStyle = ASSET.boost_color;
-            ctx.fillRect(px + pw * 0.4, py + ph * 0.95, pw * 0.2, ph * 0.35);
+          if (MODE_IS_FORMULA_CIRCUIT) {{
+            ctx.fillStyle = ASSET.player_primary;
+            ctx.fillRect(px + pw * 0.35, py - ph * 0.06, pw * 0.3, ph * 1.02);
+            ctx.fillRect(px + pw * 0.14, py + ph * 0.25, pw * 0.72, ph * 0.18);
+            ctx.fillRect(px + pw * 0.02, py + ph * 0.56, pw * 0.96, ph * 0.16);
+            ctx.fillStyle = ASSET.player_secondary;
+            ctx.fillRect(px + pw * 0.42, py + ph * 0.08, pw * 0.16, ph * 0.22);
+            ctx.beginPath();
+            ctx.arc(px + pw * 0.2, py + ph * 0.86, pw * 0.11, 0, Math.PI * 2);
+            ctx.arc(px + pw * 0.8, py + ph * 0.86, pw * 0.11, 0, Math.PI * 2);
+            ctx.fill();
+            if (state.racer.boostTimer > 0) {{
+              ctx.fillStyle = ASSET.boost_color;
+              ctx.fillRect(px + pw * 0.44, py + ph * 0.92, pw * 0.12, ph * 0.34);
+            }}
+          }} else {{
+            ctx.fillStyle = ASSET.player_primary;
+            ctx.beginPath();
+            ctx.moveTo(px + pw * 0.5, py - ph * 0.08);
+            ctx.lineTo(px + pw * 0.9, py + ph * 0.3);
+            ctx.lineTo(px + pw * 0.78, py + ph * 0.95);
+            ctx.lineTo(px + pw * 0.22, py + ph * 0.95);
+            ctx.lineTo(px + pw * 0.1, py + ph * 0.3);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = ASSET.player_secondary;
+            ctx.fillRect(px + pw * 0.2, py + ph * 0.25, pw * 0.6, ph * 0.26);
+            ctx.fillStyle = ASSET.track;
+            ctx.fillRect(px + pw * 0.02, py + ph * 0.62, pw * 0.18, ph * 0.2);
+            ctx.fillRect(px + pw * 0.8, py + ph * 0.62, pw * 0.18, ph * 0.2);
+            if (state.racer.boostTimer > 0) {{
+              ctx.fillStyle = ASSET.boost_color;
+              ctx.fillRect(px + pw * 0.4, py + ph * 0.95, pw * 0.2, ph * 0.35);
+            }}
           }}
           }}
         }} else {{
@@ -1789,6 +2046,12 @@ def _build_hybrid_engine_html(
         if (MODE_IS_FLIGHT_SIM) {{
           timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · THR ${{Math.round(state.flight.throttle * 100)}}%`;
           hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · CKP ${{state.flight.checkpointCombo}}`;
+          return;
+        }}
+        if (MODE_IS_FORMULA_CIRCUIT) {{
+          const bestLapText = state.formula.bestLap < 998 ? `${{state.formula.bestLap.toFixed(1)}}s` : "--";
+          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lap ${{state.formula.lap}} · CKP ${{state.formula.checkpoints}}/${{state.formula.checkpointsPerLap}} · Best ${{bestLapText}}`;
+          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Speed ${{Math.round(state.racer.speed)}} · OVT ${{Math.floor(state.formula.overtakeChain)}}`;
           return;
         }}
         timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;

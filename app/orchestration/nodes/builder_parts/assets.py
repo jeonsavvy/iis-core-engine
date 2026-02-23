@@ -26,6 +26,21 @@ def _resolve_asset_pack(
         "sprite_profile": "neon",
     }
     by_mode = {
+        "f1_formula_circuit_3d": {
+            "name": "formula_circuit_neon",
+            "bg_top": "#0a1730",
+            "bg_bottom": "#040810",
+            "horizon": "#182f58",
+            "track": "#090f1b",
+            "player_primary": "#38bdf8",
+            "player_secondary": "#0f172a",
+            "enemy_primary": "#f43f5e",
+            "enemy_elite": "#f97316",
+            "boost_color": "#22d3ee",
+            "particle": "#facc15",
+            "sfx_profile": "formula_arcade",
+            "sprite_profile": "formula",
+        },
         "flight_sim_3d": {
             "name": "flight_sim_neon",
             "bg_top": "#020716",
@@ -203,6 +218,72 @@ def _build_hybrid_asset_bank(
             f"</svg>"
         ),
     }
+    if core_loop_type == "f1_formula_circuit_3d":
+        svg_map = {
+            "player.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'>"
+                f"<rect width='120' height='120' fill='none'/>"
+                f"<rect x='48' y='20' width='24' height='64' rx='8' fill='{player_primary}'/>"
+                f"<rect x='38' y='42' width='44' height='16' rx='6' fill='{player_secondary}'/>"
+                f"<rect x='22' y='70' width='76' height='12' rx='5' fill='{player_primary}'/>"
+                f"<rect x='30' y='82' width='16' height='26' rx='4' fill='{player_secondary}'/>"
+                f"<rect x='74' y='82' width='16' height='26' rx='4' fill='{player_secondary}'/>"
+                f"<circle cx='38' cy='100' r='9' fill='{player_secondary}'/>"
+                f"<circle cx='82' cy='100' r='9' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "enemy.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'>"
+                f"<rect width='120' height='120' fill='none'/>"
+                f"<rect x='48' y='18' width='24' height='64' rx='8' fill='{enemy_primary}'/>"
+                f"<rect x='36' y='40' width='48' height='16' rx='6' fill='{player_secondary}'/>"
+                f"<rect x='18' y='68' width='84' height='13' rx='5' fill='{enemy_primary}'/>"
+                f"<circle cx='36' cy='98' r='9' fill='{player_secondary}'/>"
+                f"<circle cx='84' cy='98' r='9' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "elite.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'>"
+                f"<rect width='120' height='120' fill='none'/>"
+                f"<rect x='46' y='12' width='28' height='70' rx='8' fill='{enemy_elite}'/>"
+                f"<rect x='34' y='34' width='52' height='18' rx='6' fill='{player_secondary}'/>"
+                f"<rect x='10' y='66' width='100' height='14' rx='6' fill='{enemy_elite}'/>"
+                f"<rect x='20' y='78' width='20' height='28' rx='5' fill='{player_secondary}'/>"
+                f"<rect x='80' y='78' width='20' height='28' rx='5' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "boost.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+                f"<rect width='128' height='128' fill='none'/>"
+                f"<path d='M64 10 L86 64 L64 118 L42 64 Z' fill='{boost_color}'/>"
+                f"<path d='M64 22 L76 64 L64 106 L52 64 Z' fill='{hud_primary}' opacity='0.35'/>"
+                f"</svg>"
+            ),
+            "ring.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='160' height='128' viewBox='0 0 160 128'>"
+                f"<rect width='160' height='128' fill='none'/>"
+                f"<rect x='22' y='22' width='116' height='84' rx='18' fill='none' stroke='{boost_color}' stroke-width='10'/>"
+                f"<rect x='40' y='38' width='80' height='52' rx='12' fill='none' stroke='{hud_primary}' stroke-width='3' opacity='0.7'/>"
+                f"</svg>"
+            ),
+            "hazard.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='112' height='112' viewBox='0 0 112 112'>"
+                f"<rect width='112' height='112' fill='none'/>"
+                f"<polygon points='56,8 104,98 8,98' fill='{enemy_primary}'/>"
+                f"<rect x='51' y='36' width='10' height='32' rx='4' fill='{hud_primary}'/>"
+                f"<circle cx='56' cy='80' r='6' fill='{hud_primary}'/>"
+                f"</svg>"
+            ),
+            "trail.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='128' viewBox='0 0 96 128'>"
+                f"<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
+                f"<stop offset='0%' stop-color='{boost_color}' stop-opacity='1'/>"
+                f"<stop offset='100%' stop-color='{boost_color}' stop-opacity='0'/>"
+                f"</linearGradient></defs>"
+                f"<rect x='28' y='10' width='40' height='108' rx='16' fill='url(#g)'/>"
+                f"</svg>"
+            ),
+        }
 
     image_keys = {
         "player": "player.svg",
