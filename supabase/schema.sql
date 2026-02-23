@@ -134,6 +134,8 @@ create table if not exists public.games_metadata (
   genre text not null,
   url text not null,
   thumbnail_url text,
+  ai_review text,
+  screenshot_url text,
   status public.game_status not null default 'active',
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),

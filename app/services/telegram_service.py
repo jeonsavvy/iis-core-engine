@@ -27,6 +27,21 @@ class TelegramService:
         )
         return {"status": "sent"}
 
+    def broadcast_message(self, text: str) -> dict[str, str]:
+        allowed = self.settings.telegram_allowed_chat_id_set()
+        if not allowed:
+            return {"status": "skipped", "reason": "No allowed chat IDs configured for broadcast."}
+
+        success_count = 0
+        for chat_id in allowed:
+            result = self.send_message(chat_id, text)
+            if result.get("status") == "sent":
+                success_count += 1
+
+        if success_count > 0:
+            return {"status": "posted"}
+        return {"status": "error", "reason": "Failed to send broadcast to any allowed chats."}
+
     def handle_update(self, update: TelegramWebhookUpdate, repository: PipelineRepository) -> TelegramWebhookResponse:
         message = update.active_message()
         if message is None or not message.text:

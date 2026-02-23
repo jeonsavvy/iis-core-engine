@@ -16,8 +16,8 @@ from app.services.github_service import GitHubArchiveService
 from app.services.pipeline_repository import PipelineJob, PipelineRepository
 from app.services.publisher_service import PublisherService
 from app.services.quality_service import QualityService
+from app.services.telegram_service import TelegramService
 from app.services.vertex_service import VertexService
-from app.services.x_service import XService
 
 
 class PipelineRunner:
@@ -26,7 +26,7 @@ class PipelineRunner:
         *,
         repository: PipelineRepository,
         settings: Settings,
-        x_service: XService | None = None,
+        telegram_service: TelegramService | None = None,
         quality_service: QualityService | None = None,
         publisher_service: PublisherService | None = None,
         github_archive_service: GitHubArchiveService | None = None,
@@ -35,7 +35,7 @@ class PipelineRunner:
         self.repository = repository
         self.settings = settings
         deps = NodeDependencies(
-            x_service=x_service or XService(settings),
+            telegram_service=telegram_service or TelegramService(settings),
             quality_service=quality_service or QualityService(settings),
             publisher_service=publisher_service or PublisherService(settings),
             github_archive_service=github_archive_service or GitHubArchiveService(settings),

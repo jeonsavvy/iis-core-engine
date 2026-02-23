@@ -82,6 +82,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     if smoke_result.reason:
         qa_message = f"QA passed with fallback: {smoke_result.reason}"
 
+    screenshot_url = None
+    if smoke_result.screenshot_bytes:
+        game_slug = str(state["outputs"].get("game_slug", "untitled"))
+        screenshot_url = deps.publisher_service.upload_screenshot(
+            slug=game_slug, 
+            screenshot_bytes=smoke_result.screenshot_bytes
+        )
+        if screenshot_url:
+            state["outputs"]["screenshot_url"] = screenshot_url
+            qa_message += " (Screenshot captured)"
+
     return append_log(
         state,
         stage=PipelineStage.QA,

@@ -132,8 +132,9 @@ class VertexService:
         started = time.perf_counter()
         try:
             prompt = self._gdd_prompt(keyword)
+            usage = {}
             if self._use_genai_sdk():
-                raw = self._genai_json(
+                raw, usage = self._genai_json(
                     model_name=self.settings.gemini_pro_model,
                     prompt=prompt,
                     schema=_GDDModel,
@@ -167,6 +168,7 @@ class VertexService:
                     "generation_source": "vertex",
                     "model": self.settings.gemini_pro_model,
                     "latency_ms": latency_ms,
+                    "usage": usage,
                 },
             )
         except Exception as exc:  # pragma: no cover - external API path
@@ -189,8 +191,9 @@ class VertexService:
         started = time.perf_counter()
         try:
             prompt = self._design_prompt(keyword=keyword, visual_style=visual_style, genre=genre)
+            usage = {}
             if self._use_genai_sdk():
-                raw = self._genai_json(
+                raw, usage = self._genai_json(
                     model_name=self.settings.gemini_flash_model,
                     prompt=prompt,
                     schema=_DesignSpecModel,
@@ -208,6 +211,7 @@ class VertexService:
                     "generation_source": "vertex",
                     "model": self.settings.gemini_flash_model,
                     "latency_ms": latency_ms,
+                    "usage": usage,
                 },
             )
         except Exception as exc:  # pragma: no cover - external API path
@@ -246,8 +250,9 @@ class VertexService:
                 objective=objective,
                 design_spec=design_spec,
             )
+            usage = {}
             if self._use_genai_sdk():
-                raw = self._genai_json(
+                raw, usage = self._genai_json(
                     model_name=self.settings.gemini_pro_model,
                     prompt=prompt,
                     schema=_GameConfigModel,
@@ -266,6 +271,7 @@ class VertexService:
                     "generation_source": "vertex",
                     "model": self.settings.gemini_pro_model,
                     "latency_ms": latency_ms,
+                    "usage": usage,
                 },
             )
         except Exception as exc:  # pragma: no cover - external API path
@@ -330,7 +336,7 @@ class VertexService:
             )
         return self._genai_client
 
-    def _genai_json(self, *, model_name: str, prompt: str, schema: type[BaseModel], temperature: float) -> dict[str, Any]:
+    def _genai_json(self, *, model_name: str, prompt: str, schema: type[BaseModel], temperature: float) -> tuple[dict[str, Any], dict[str, int]]:
         if genai_types is None:  # pragma: no cover - import guard
             raise RuntimeError("google_genai types are not available")
         response = self._genai_generate_with_retry(
@@ -342,15 +348,22 @@ class VertexService:
                 response_schema=schema,
             ),
         )
+        usage = {}
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = {
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+            }
         text = _strip_code_fences(self._coerce_genai_text(response))
         if not text:
             raise ValueError("empty_json_response")
         parsed = json.loads(text)
         if not isinstance(parsed, dict):
             raise ValueError("json_response_not_object")
-        return parsed
+        return parsed, usage
 
-    def _genai_text(self, *, model_name: str, prompt: str, temperature: float) -> str:
+    def _genai_text(self, *, model_name: str, prompt: str, temperature: float) -> tuple[str, dict[str, int]]:
         if genai_types is None:  # pragma: no cover - import guard
             raise RuntimeError("google_genai types are not available")
         response = self._genai_generate_with_retry(
@@ -361,7 +374,14 @@ class VertexService:
                 response_mime_type="text/plain",
             ),
         )
-        return _strip_code_fences(self._coerce_genai_text(response))
+        usage = {}
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = {
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+            }
+        return _strip_code_fences(self._coerce_genai_text(response)), usage
 
     def _coerce_genai_text(self, response: Any) -> str:
         try:
@@ -453,6 +473,48 @@ class VertexService:
             "- Visual style should match keyword fantasy, not generic dark UI only\n"
             "- Thumbnail concept should describe a dynamic action moment with clear focal point\n"
         )
+
+    def generate_marketing_copy(self, *, keyword: str, slug: str, genre: str) -> VertexGenerationResult:
+        prompt = (
+            f"Write a short, engaging, 1-2 sentence AI designer review and promotional tweet "
+            f"for an indie arcade game named '{slug}'. The genre is '{genre}' and the keyword is '{keyword}'. "
+            f"Include emojis and #indiegame #html5. Return ONLY the text, nothing else."
+        )
+        started = time.perf_counter()
+        try:
+            usage = {}
+            if self._use_genai_sdk():
+                text, usage = self._genai_text(
+                    model_name=self.settings.gemini_flash_model,
+                    prompt=prompt,
+                    temperature=0.7,
+                )
+            else:
+                model = self._flash_model()
+                from langchain_core.messages import HumanMessage
+                result = model.invoke([HumanMessage(content=prompt)])
+                text = _strip_code_fences(_coerce_message_text(result.content))
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return VertexGenerationResult(
+                payload={"marketing_copy": text},
+                meta={
+                    "generation_source": "vertex",
+                    "model": self.settings.gemini_flash_model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Vertex marketing generation failed: %s", exc)
+            fallback_text = f"New game launched: {slug} #indiegame #html5 based on '{keyword}'!"
+            return VertexGenerationResult(
+                payload={"marketing_copy": fallback_text},
+                meta={
+                    "generation_source": "stub",
+                    "reason": f"vertex_error:{type(exc).__name__}",
+                    "vertex_error": str(exc),
+                },
+            )
 
     @staticmethod
     def _builder_prompt(

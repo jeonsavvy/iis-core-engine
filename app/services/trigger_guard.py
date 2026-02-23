@@ -6,7 +6,6 @@ import unicodedata
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1F\x7F]")
-_ALLOWED_CHARS_RE = re.compile(r"^[\w\s\-]+$", flags=re.UNICODE)
 _ASCII_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -40,8 +39,6 @@ def validate_keyword(
         raise ValueError("keyword_too_long")
     if _CONTROL_CHAR_RE.search(normalized):
         raise ValueError("keyword_contains_control_characters")
-    if not _ALLOWED_CHARS_RE.match(normalized):
-        raise ValueError("keyword_contains_unsupported_characters")
 
     lowered = normalized.casefold()
     for term in forbidden_terms or set():

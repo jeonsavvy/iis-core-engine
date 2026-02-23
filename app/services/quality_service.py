@@ -16,6 +16,7 @@ class SmokeCheckResult:
     ok: bool
     reason: str | None = None
     console_errors: list[str] | None = None
+    screenshot_bytes: bytes | None = None
 
 
 @dataclass
@@ -56,6 +57,18 @@ class QualityService:
 
                     page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
                     page.wait_for_timeout(300)
+                    
+                    # Capture screenshot if possible
+                    screenshot_bytes = None
+                    try:
+                        canvas = page.locator("canvas")
+                        if canvas.count() > 0:
+                            screenshot_bytes = canvas.first.screenshot(type="png")
+                        else:
+                            screenshot_bytes = page.screenshot(type="png")
+                    except Exception as e:
+                        page_errors.append(f"screenshot_failed: {e}")
+                        
                     browser.close()
         except PlaywrightError as exc:
             if self.settings.playwright_required:
@@ -66,9 +79,9 @@ class QualityService:
 
         combined_errors = console_errors + page_errors
         if combined_errors:
-            return SmokeCheckResult(ok=False, reason="runtime_console_error", console_errors=combined_errors)
+            return SmokeCheckResult(ok=False, reason="runtime_console_error", console_errors=combined_errors, screenshot_bytes=screenshot_bytes)
 
-        return SmokeCheckResult(ok=True)
+        return SmokeCheckResult(ok=True, screenshot_bytes=screenshot_bytes)
 
     def evaluate_quality_contract(
         self,

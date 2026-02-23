@@ -113,6 +113,51 @@ class PublisherService:
             "uploaded_files": [row["storage_path"] for row in files_to_upload],
         }
 
+    def upload_screenshot(self, *, slug: str, screenshot_bytes: bytes) -> str | None:
+        if not self.client:
+            return None
+        
+        bucket = self.client.storage.from_(self.settings.supabase_storage_bucket)
+        storage_path = f"{slug}/screenshot.png"
+        file_options = {
+            "content-type": "image/png",
+            "cache-control": "60",
+            "x-upsert": "true",
+        }
+        try:
+            try:
+                bucket.upload(storage_path, screenshot_bytes, file_options=file_options)
+            except TypeError:
+                bucket.upload(
+                    storage_path,
+                    screenshot_bytes,
+                    file_options={"content-type": "image/png", "cache-control": "60", "upsert": "true"}
+                )
+            except Exception:
+                bucket.update(storage_path, screenshot_bytes, file_options=file_options)
+            return bucket.get_public_url(storage_path)
+        except Exception:
+            return None
+
+    def update_game_marketing(self, *, slug: str, ai_review: str | None = None, screenshot_url: str | None = None) -> bool:
+        if not self.client:
+            return False
+            
+        update_dist = {}
+        if ai_review is not None:
+            update_dist["ai_review"] = ai_review
+        if screenshot_url is not None:
+            update_dist["screenshot_url"] = screenshot_url
+            
+        if not update_dist:
+            return True
+            
+        try:
+            self.client.table("games_metadata").update(update_dist).eq("slug", slug).execute()
+            return True
+        except Exception:
+            return False
+
     def delete_game_assets(self, *, slug: str) -> dict[str, Any]:
         if not self.client:
             return {"status": "error", "reason": "supabase client is not configured"}

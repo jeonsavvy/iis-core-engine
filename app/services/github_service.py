@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-import base64
 import json
+import logging
+import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
 from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubArchiveService:
-    """Repo3 archive commit integration with allowlist guards."""
+    """Repo3 archive commit integration via local subprocess GitOps."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # iis-core-engine/app/services/github_service.py
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        self.repo_path = os.path.join(base_dir, "iis-games-archive")
 
     def commit_archive_game(
         self,
@@ -27,301 +32,130 @@ class GitHubArchiveService:
         public_url: str,
         artifact_files: list[dict[str, str]] | None = None,
     ) -> dict[str, str]:
-        if not self.settings.github_token or not self.settings.github_archive_repo:
+        if not os.path.exists(os.path.join(self.repo_path, ".git")):
             return {
                 "status": "skipped",
-                "reason": "GITHUB_TOKEN or GITHUB_ARCHIVE_REPO is not configured.",
+                "reason": "Local archive repo not found at iis-games-archive",
             }
 
-        game_path = f"games/{game_slug}/index.html"
-        manifest_path = "manifest/games.json"
-        self._assert_allowlisted_path(manifest_path)
-        archive_files = self._normalize_archive_artifact_files(
-            game_slug=game_slug,
-            html_content=html_content,
-            artifact_files=artifact_files,
-        )
-
+        # 1. Update manifest
+        manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
         try:
-            existing_manifest = self._fetch_json_file(manifest_path)
-        except Exception as exc:
-            return {"status": "error", "reason": f"manifest_fetch_failed: {exc}"}
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception:
+            manifest = {"schema_version": 1, "games": []}
 
-        if isinstance(existing_manifest, dict):
-            existing_games = existing_manifest.get("games", [])
-            if not isinstance(existing_games, list):
-                existing_games = []
-            manifest_schema_version = int(existing_manifest.get("schema_version", 1) or 1)
-        elif isinstance(existing_manifest, list):
-            existing_games = existing_manifest
-            manifest_schema_version = 1
-        else:
-            existing_games = []
-            manifest_schema_version = 1
+        games = manifest.get("games", [])
+        if not isinstance(games, list):
+            games = []
 
         now = datetime.now(timezone.utc).isoformat()
-        previous_row = next(
-            (
-                row
-                for row in existing_games
-                if isinstance(row, dict) and row.get("slug") == game_slug
-            ),
-            None,
-        )
+        previous_row = next((g for g in games if isinstance(g, dict) and g.get("slug") == game_slug), None)
+        created_at = previous_row.get("created_at", now) if isinstance(previous_row, dict) else now
 
-        created_at = now
-        if isinstance(previous_row, dict) and isinstance(previous_row.get("created_at"), str):
-            created_at = previous_row["created_at"]
-
-        updated_games: list[dict[str, Any]] = [
-            row for row in existing_games if isinstance(row, dict) and row.get("slug") != game_slug
-        ]
-        updated_games.append(
+        games = [g for g in games if isinstance(g, dict) and g.get("slug") != game_slug]
+        games.append(
             {
                 "slug": game_slug,
                 "name": game_name,
                 "genre": genre,
-                "path": game_path,
+                "path": f"games/{game_slug}/index.html",
                 "url": public_url,
                 "created_at": created_at,
             }
         )
+        manifest["games"] = games
+        manifest["generated_at"] = now
 
-        updated_manifest = {
-            "schema_version": manifest_schema_version,
-            "generated_at": now,
-            "games": updated_games,
-        }
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+            f.write("\n")
 
-        commit_message = f"feat: archive {game_slug}"
+        # 2. Write game files
+        game_dir = os.path.join(self.repo_path, "games", game_slug)
+        os.makedirs(game_dir, exist_ok=True)
 
+        with open(os.path.join(game_dir, "index.html"), "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        if artifact_files:
+            for af in artifact_files:
+                p = af.get("path", "").strip()
+                if not p.startswith(f"games/{game_slug}/"):
+                    continue
+                content = af.get("content", "")
+                rel_path = p[len(f"games/{game_slug}/") :]
+                full_p = os.path.join(game_dir, rel_path)
+                os.makedirs(os.path.dirname(full_p), exist_ok=True)
+                with open(full_p, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+        # 3. git add, commit, push
         try:
-            for file_row in archive_files:
-                self._put_file(file_row["path"], file_row["content"], commit_message)
-            self._put_file(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n", commit_message)
-        except Exception as exc:
-            return {"status": "error", "reason": f"archive_commit_failed: {exc}"}
-
-        return {
-            "status": "committed",
-            "slug": game_slug,
-            "repo": self.settings.github_archive_repo,
-            "branch": self.settings.github_archive_branch,
-            "message": commit_message,
-        }
+            subprocess.run(["git", "add", "--all"], cwd=self.repo_path, check=True)
+            commit_msg = f"feat: archive {game_slug}"
+            
+            st = subprocess.run(
+                ["git", "status", "--porcelain"], cwd=self.repo_path, capture_output=True, text=True
+            )
+            if st.stdout.strip():
+                subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
+                subprocess.run(["git", "push"], cwd=self.repo_path, check=True)
+                return {"status": "committed", "slug": game_slug, "message": commit_msg}
+            else:
+                return {"status": "skipped", "reason": "no changes to commit"}
+        except subprocess.CalledProcessError as exc:
+            logger.error(f"Git commit/push failed: {exc}")
+            return {"status": "error", "reason": f"git_operation_failed: {exc}"}
 
     def delete_archive_game(self, *, game_slug: str) -> dict[str, str]:
-        if not self.settings.github_token or not self.settings.github_archive_repo:
+        if not os.path.exists(os.path.join(self.repo_path, ".git")):
             return {
                 "status": "skipped",
-                "reason": "GITHUB_TOKEN or GITHUB_ARCHIVE_REPO is not configured.",
+                "reason": "Local archive repo not found at iis-games-archive",
             }
 
-        manifest_path = "manifest/games.json"
-        self._assert_allowlisted_path(manifest_path)
+        manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
         try:
-            game_paths = self._list_archive_game_paths(game_slug)
-        except Exception as exc:
-            return {"status": "error", "reason": f"archive_list_failed: {exc}"}
-        if not game_paths:
-            game_paths = [f"games/{game_slug}/index.html"]
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception:
+            manifest = {"schema_version": 1, "games": []}
 
-        try:
-            existing_manifest = self._fetch_json_file(manifest_path)
-        except Exception as exc:
-            return {"status": "error", "reason": f"manifest_fetch_failed: {exc}"}
+        games = manifest.get("games", [])
+        if not isinstance(games, list):
+            games = []
 
-        if isinstance(existing_manifest, dict):
-            existing_games = existing_manifest.get("games", [])
-            if not isinstance(existing_games, list):
-                existing_games = []
-            manifest_schema_version = int(existing_manifest.get("schema_version", 1) or 1)
-        elif isinstance(existing_manifest, list):
-            existing_games = existing_manifest
-            manifest_schema_version = 1
-        else:
-            existing_games = []
-            manifest_schema_version = 1
+        original_count = len(games)
+        games = [g for g in games if isinstance(g, dict) and g.get("slug") != game_slug]
+        manifest["games"] = games
+        manifest["generated_at"] = datetime.now(timezone.utc).isoformat()
 
-        removed = False
-        updated_games: list[dict[str, Any]] = []
-        for row in existing_games:
-            if not isinstance(row, dict):
-                continue
-            if row.get("slug") == game_slug:
-                removed = True
-                continue
-            updated_games.append(row)
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+            f.write("\n")
 
-        updated_manifest = {
-            "schema_version": manifest_schema_version,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "games": updated_games,
-        }
-
-        commit_message = f"chore: delete archive {game_slug}"
+        game_dir = os.path.join(self.repo_path, "games", game_slug)
+        if os.path.exists(game_dir):
+            shutil.rmtree(game_dir)
 
         try:
-            for game_path in sorted(set(game_paths)):
-                self._assert_allowlisted_path(game_path)
-                self._delete_file(game_path, commit_message)
-            self._put_file(manifest_path, json.dumps(updated_manifest, ensure_ascii=False, indent=2) + "\n", commit_message)
-        except Exception as exc:
-            return {"status": "error", "reason": f"archive_delete_failed: {exc}"}
+            # We use git add --all to stage the deleted files robustly
+            subprocess.run(["git", "add", "--all"], cwd=self.repo_path, check=True)
+            commit_msg = f"chore: delete archive {game_slug}"
 
-        return {
-            "status": "deleted",
-            "slug": game_slug,
-            "removed_from_manifest": "true" if removed else "false",
-            "repo": self.settings.github_archive_repo or "",
-            "branch": self.settings.github_archive_branch,
-            "message": commit_message,
-        }
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.settings.github_token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-        }
-
-    def _contents_url(self, path: str) -> str:
-        base = self.settings.github_api_base_url.rstrip("/")
-        return f"{base}/repos/{self.settings.github_archive_repo}/contents/{path}"
-
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-        retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError, RuntimeError)),
-    )
-    def _request(self, method: str, url: str, *, json_payload: dict[str, Any] | None = None) -> httpx.Response:
-        with httpx.Client(timeout=self.settings.http_timeout_seconds) as client:
-            response = client.request(method, url, headers=self._headers(), json=json_payload)
-            if response.status_code >= 500:
-                raise RuntimeError(f"github_server_error_{response.status_code}")
-            return response
-
-    def _fetch_json_file(self, path: str) -> Any:
-        response = self._request("GET", f"{self._contents_url(path)}?ref={self.settings.github_archive_branch}")
-        if response.status_code == 404:
-            return []
-        if response.status_code != 200:
-            raise RuntimeError(f"github_read_failed_{response.status_code}")
-
-        body = response.json()
-        content = body.get("content", "")
-        if not content:
-            return []
-
-        decoded = base64.b64decode(content).decode("utf-8")
-        return json.loads(decoded)
-
-    def _fetch_sha(self, path: str) -> str | None:
-        response = self._request("GET", f"{self._contents_url(path)}?ref={self.settings.github_archive_branch}")
-        if response.status_code == 404:
-            return None
-        if response.status_code != 200:
-            raise RuntimeError(f"github_sha_lookup_failed_{response.status_code}")
-        return response.json().get("sha")
-
-    def _list_archive_game_paths(self, game_slug: str) -> list[str]:
-        prefix = f"games/{game_slug}"
-        response = self._request("GET", f"{self._contents_url(prefix)}?ref={self.settings.github_archive_branch}")
-        if response.status_code == 404:
-            return []
-        if response.status_code != 200:
-            raise RuntimeError(f"github_list_failed_{response.status_code}")
-
-        body = response.json()
-        if isinstance(body, dict):
-            path = body.get("path")
-            return [path] if isinstance(path, str) else []
-
-        paths: list[str] = []
-        if isinstance(body, list):
-            for row in body:
-                if not isinstance(row, dict):
-                    continue
-                if row.get("type") != "file":
-                    continue
-                path = row.get("path")
-                if isinstance(path, str):
-                    paths.append(path)
-        return paths
-
-    def _put_file(self, path: str, content: str, commit_message: str) -> None:
-        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-        payload: dict[str, Any] = {
-            "message": commit_message,
-            "content": encoded,
-            "branch": self.settings.github_archive_branch,
-        }
-
-        current_sha = self._fetch_sha(path)
-        if current_sha:
-            payload["sha"] = current_sha
-
-        response = self._request("PUT", self._contents_url(path), json_payload=payload)
-        if response.status_code not in (200, 201):
-            raise RuntimeError(f"github_put_failed_{response.status_code}")
-
-    def _delete_file(self, path: str, commit_message: str) -> bool:
-        current_sha = self._fetch_sha(path)
-        if not current_sha:
-            return False
-
-        payload = {
-            "message": commit_message,
-            "sha": current_sha,
-            "branch": self.settings.github_archive_branch,
-        }
-        response = self._request("DELETE", self._contents_url(path), json_payload=payload)
-        if response.status_code != 200:
-            raise RuntimeError(f"github_delete_failed_{response.status_code}")
-        return True
-
-    def _normalize_archive_artifact_files(
-        self,
-        *,
-        game_slug: str,
-        html_content: str,
-        artifact_files: list[dict[str, str]] | None,
-    ) -> list[dict[str, str]]:
-        normalized: list[dict[str, str]] = []
-        if artifact_files:
-            for row in artifact_files:
-                path = str(row.get("path", "")).strip()
-                if not path:
-                    continue
-                self._assert_allowlisted_path(path)
-                if not path.startswith(f"games/{game_slug}/"):
-                    raise ValueError("artifact path is outside archive game prefix")
-                content = str(row.get("content", ""))
-                if not content:
-                    continue
-                normalized.append({"path": path, "content": content})
-
-        has_index = any(row["path"] == f"games/{game_slug}/index.html" for row in normalized)
-        if not has_index:
-            normalized.append(
-                {
-                    "path": f"games/{game_slug}/index.html",
-                    "content": html_content,
-                }
+            st = subprocess.run(
+                ["git", "status", "--porcelain"], cwd=self.repo_path, capture_output=True, text=True
             )
-        return normalized
+            if st.stdout.strip():
+                subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
+                subprocess.run(["git", "push"], cwd=self.repo_path, check=True)
+                return {"status": "deleted", "slug": game_slug, "message": commit_msg}
+            else:
+                return {"status": "skipped", "reason": "no changes to commit"}
+        except subprocess.CalledProcessError as exc:
+            logger.error(f"Git delete/push failed: {exc}")
+            return {"status": "error", "reason": f"git_operation_failed: {exc}"}
 
-    @staticmethod
-    def _assert_allowlisted_path(path: str) -> None:
-        if (
-            path.startswith("games/")
-            and path.count("/") == 2
-            and ".." not in path
-            and "\\" not in path
-        ):
-            return
-        if path == "manifest/games.json":
-            return
-        raise ValueError(f"path is not allowlisted for archive repo: {path}")

@@ -27,13 +27,6 @@ class Settings(BaseSettings):
     telegram_allowed_chat_ids: str = ""
     telegram_webhook_secret: str | None = None
 
-    x_api_base_url: str = "https://api.x.com"
-    x_bearer_token: str | None = None
-    x_auto_post_enabled: bool = False
-    x_posts_per_game_per_day: int = Field(default=1, ge=1, le=10)
-    x_daily_stop_on_error: bool = True
-    x_quota_state_file: str = ".x_quota_state.json"
-
     github_token: str | None = None
     github_archive_repo: str | None = None
     github_archive_branch: str = "main"
