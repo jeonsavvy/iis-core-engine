@@ -125,3 +125,15 @@ def test_run_command_rejects_forbidden_keyword() -> None:
     assert result.status == "invalid"
     assert result.detail == "keyword_contains_blocked_term"
     assert result.pipeline_id is None
+
+
+def test_start_command_returns_help_message() -> None:
+    settings = _default_settings()
+    repository = PipelineRepository(settings=settings)
+    service = StubTelegramService(settings)
+
+    result = service.handle_update(make_update("/start"), repository)
+
+    assert result.status == "help"
+    assert service.sent_messages
+    assert "IIS 제어 봇 명령 안내" in service.sent_messages[-1][1]

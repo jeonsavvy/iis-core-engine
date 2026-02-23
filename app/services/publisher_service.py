@@ -71,9 +71,19 @@ class PublisherService:
                         },
                     )
                 except Exception:
-                    # Some storage backends/SDK versions preserve old metadata on upsert.
-                    # Force an explicit update so HTML content-type/charset is refreshed.
                     bucket.update(storage_path, upload_payload, file_options=file_options)
+
+                # Some storage backends/SDK versions preserve old metadata on POST upsert.
+                # Force a follow-up metadata refresh for entry HTML to avoid text/plain regressions.
+                if storage_path.endswith("index.html"):
+                    bucket.update(
+                        storage_path,
+                        upload_payload,
+                        file_options={
+                            "content-type": "text/html; charset=utf-8",
+                            "cache-control": "60",
+                        },
+                    )
         except Exception as exc:  # pragma: no cover - integration path
             return {
                 "status": "error",

@@ -22,3 +22,9 @@ def test_make_safe_slug_uses_hash_for_non_ascii_keyword() -> None:
     slug = make_safe_slug("한글 게임")
     assert slug.startswith("game-")
     assert len(slug) == 17
+
+
+def test_make_safe_slug_adds_hash_for_too_short_ascii_slug() -> None:
+    slug = make_safe_slug("<아웃런 스타일 3d>")
+    assert slug.startswith("3d-")
+    assert len(slug) > len("3d-")

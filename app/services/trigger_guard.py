@@ -17,10 +17,15 @@ def normalize_keyword(keyword: str) -> str:
 
 def make_safe_slug(keyword: str) -> str:
     slug = _ASCII_SLUG_RE.sub("-", keyword.lower()).strip("-")
-    if slug:
-        return slug[:80]
-
     digest = hashlib.sha1(keyword.encode("utf-8")).hexdigest()[:12]
+
+    if slug:
+        slug = slug[:80]
+        # Avoid low-entropy slugs such as "3d" from non-ASCII prompts.
+        if len(slug) < 4:
+            return f"{slug}-{digest[:6]}"
+        return slug
+
     return f"game-{digest}"
 
 

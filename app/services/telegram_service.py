@@ -103,6 +103,10 @@ class TelegramService:
                 reason="telegram_user_not_allowed",
             )
 
+        if command in {"/start", "/help"}:
+            self.send_message(chat_id, self._command_help_message())
+            return TelegramWebhookResponse(status="help", detail=command)
+
         if command == "/run":
             return self._handle_run(chat_id=chat_id, keyword=argument, repository=repository, user_id=user_id)
 
@@ -160,9 +164,22 @@ class TelegramService:
 
         self.send_message(
             chat_id,
-            "지원 명령: /run /status /approve /logs /retry /cancel /reset /delete_game /confirm",
+            self._command_help_message(),
         )
         return TelegramWebhookResponse(status="unknown_command", detail=command)
+
+    @staticmethod
+    def _command_help_message() -> str:
+        return (
+            "IIS 제어 봇 명령 안내\n"
+            "- /run <keyword>\n"
+            "- /status <pipeline_id>\n"
+            "- /approve <pipeline_id> <stage>\n"
+            "- /logs <pipeline_id> [limit]\n"
+            "- /retry|/cancel|/reset <pipeline_id> (확인 필요)\n"
+            "- /delete_game <game_id> (확인 필요)\n"
+            "- /confirm <token>"
+        )
 
     def _handle_run(
         self,
