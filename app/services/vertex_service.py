@@ -725,6 +725,10 @@ class VertexService:
             "- Keep safe-area / overflow-readability guard behavior.\n"
             "- Keep keyboard controls and restart flow.\n"
             "- Implement the requested core loop mode faithfully.\n"
+            "- Asset policy is procedural_threejs_first: prefer procedural visuals (geometry/gradients/particles/shader-like effects) and internal vector sprites only.\n"
+            "- Do not rely on external image generation services or remote image URLs.\n"
+            "- Do not regress to flat placeholder rectangle-only visuals.\n"
+            "- Movement and steering must remain analog/time-based; avoid one-step quantized control.\n"
             "- Do not output markdown fences.\n\n"
             f"Keyword: {keyword}\n"
             f"Title: {title}\n"
@@ -805,6 +809,8 @@ class VertexService:
             "- Preserve all existing gameplay rules and controls.\n"
             "- Preserve leaderboard contract and `window.__iis_game_boot_ok`.\n"
             "- Keep responsive/safe-area/readability rules.\n"
+            "- Keep procedural_threejs_first asset policy: improve via procedural rendering layers, not external generated image dependencies.\n"
+            "- Keep analog control smoothness; never convert movement into one-step lane snapping.\n"
             "- Return only the final HTML text (no markdown fences).\n\n"
             f"Game title: {title}\n"
             f"Keyword: {keyword}\n"
@@ -914,6 +920,8 @@ class VertexService:
             "Quality bar:\n"
             "- If the game is a fast-paced racing game, increase speeds and lower HP.\n"
             "- If the game is a brawl, increase enemy HP and adjust attack cooldowns.\n"
+            "- Preserve analog control headroom (no quantized one-step movement assumptions).\n"
+            "- Prefer procedural scene layering (parallax/depth/particles) over bitmap dependency.\n"
             "- Ensure values provide a fair but challenging experience suitable for a 90-second arcade game."
         )
 

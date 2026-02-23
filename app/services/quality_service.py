@@ -452,13 +452,27 @@ class QualityService:
         module_count = len(modules) if isinstance(modules, list) else 0
         asset_manifest = manifest.get("asset_manifest")
         image_assets = 0
+        policy_mode = ""
+        policy_provider = ""
+        policy_external_generation = None
+        procedural_layer_count = 0
         if isinstance(asset_manifest, dict):
             images = asset_manifest.get("images")
             if isinstance(images, dict):
                 image_assets = len([value for value in images.values() if isinstance(value, str) and value.strip()])
+            policy = asset_manifest.get("asset_policy")
+            if isinstance(policy, dict):
+                policy_mode = str(policy.get("mode", "")).strip()
+                policy_provider = str(policy.get("provider", "")).strip()
+                if isinstance(policy.get("external_image_generation"), bool):
+                    policy_external_generation = bool(policy.get("external_image_generation"))
+            procedural_layers = asset_manifest.get("procedural_layers")
+            if isinstance(procedural_layers, list):
+                procedural_layer_count = len([value for value in procedural_layers if isinstance(value, str) and value.strip()])
         contract_min_images = int(art_contract.get("min_image_assets", 5) or 5)
         contract_min_layers = int(art_contract.get("min_render_layers", 4) or 4)
         contract_min_hooks = int(art_contract.get("min_animation_hooks", 3) or 3)
+        contract_min_procedural_layers = int(art_contract.get("min_procedural_layers", 3) or 3)
         runtime_hooks = manifest.get("runtime_hooks")
         runtime_hook_count = len(runtime_hooks) if isinstance(runtime_hooks, list) else 0
 
@@ -469,6 +483,10 @@ class QualityService:
             ("image_assets_count", image_assets >= contract_min_images, 18),
             ("render_layers_count", module_count >= contract_min_layers, 16),
             ("animation_hooks_count", runtime_hook_count >= contract_min_hooks, 16),
+            ("procedural_layers_count", procedural_layer_count >= contract_min_procedural_layers, 12),
+            ("policy_mode_procedural_threejs_first", policy_mode == "procedural_threejs_first", 8),
+            ("policy_provider_present", bool(policy_provider), 6),
+            ("policy_external_generation_disabled", policy_external_generation is False, 6),
             ("art_direction_contract_present", bool(art_contract), 12),
         ]
 
@@ -484,8 +502,14 @@ class QualityService:
             hard_failures.append("insufficient_image_assets")
         if runtime_hook_count < max(2, contract_min_hooks - 1):
             hard_failures.append("insufficient_animation_hooks")
+        if procedural_layer_count < max(2, contract_min_procedural_layers - 1):
+            hard_failures.append("insufficient_procedural_layers")
         if bundle_kind != "hybrid_engine":
             hard_failures.append("unsupported_bundle_kind")
+        if policy_mode != "procedural_threejs_first":
+            hard_failures.append("asset_policy_mode_mismatch")
+        if policy_external_generation is not False:
+            hard_failures.append("external_image_generation_not_disabled")
 
         if hard_failures:
             failed_checks.extend(hard_failures)

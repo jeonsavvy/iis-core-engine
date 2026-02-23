@@ -29,3 +29,17 @@ def test_builder_model_name_keeps_configured_value_when_force_pro_disabled() -> 
         )
     )
     assert service._builder_model_name() == "gemini-3.0-flash"
+
+
+def test_builder_prompt_mentions_procedural_asset_policy() -> None:
+    prompt = VertexService._builder_prompt(
+        keyword="네온 드리프트",
+        title="Neon Drift",
+        genre="arcade",
+        objective="survive and score",
+        design_spec={"visual_style": "neon"},
+        variation_hint="Variant A",
+    )
+    lowered = prompt.casefold()
+    assert "procedural" in lowered
+    assert "analog control" in lowered

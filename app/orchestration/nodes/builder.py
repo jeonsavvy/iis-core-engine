@@ -100,14 +100,33 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     contract = runtime_asset_manifest.get("contract")
     if isinstance(contract, dict):
-        for key in ("min_image_assets", "min_render_layers", "min_animation_hooks"):
+        for key in ("min_image_assets", "min_render_layers", "min_animation_hooks", "min_procedural_layers"):
             value = art_direction_contract.get(key)
             if isinstance(value, int) and value > 0:
                 contract[key] = int(value)
+    policy = runtime_asset_manifest.get("asset_policy")
+    if isinstance(policy, dict):
+        mode_value = art_direction_contract.get("asset_strategy_mode")
+        if isinstance(mode_value, str) and mode_value.strip():
+            policy["mode"] = mode_value.strip()
+        provider_value = art_direction_contract.get("asset_provider")
+        if isinstance(provider_value, str) and provider_value.strip():
+            policy["provider"] = provider_value.strip()
+        external_generation = art_direction_contract.get("external_image_generation")
+        if isinstance(external_generation, bool):
+            policy["external_image_generation"] = external_generation
     if art_direction_contract:
         runtime_asset_manifest["art_direction"] = {
             key: art_direction_contract.get(key)
-            for key in ("style_tag", "motif", "required_visual_keywords", "forbidden_visual_tokens")
+            for key in (
+                "style_tag",
+                "motif",
+                "required_visual_keywords",
+                "forbidden_visual_tokens",
+                "asset_strategy_mode",
+                "asset_provider",
+                "external_image_generation",
+            )
         }
     candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)

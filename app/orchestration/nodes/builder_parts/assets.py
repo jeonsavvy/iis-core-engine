@@ -227,10 +227,23 @@ def _build_hybrid_asset_bank(
         "genre_engine": core_loop_type,
         "images": {key: f"./{filename}" for key, filename in image_keys.items()},
         "audio": {"profile": str(asset_pack.get("sfx_profile", "synth"))},
+        "asset_policy": {
+            "mode": "procedural_threejs_first",
+            "provider": "builtin_vector_pack",
+            "external_image_generation": False,
+        },
+        "procedural_layers": [
+            "gradient_background",
+            "parallax_grid",
+            "depth_fog",
+            "particle_trails",
+            "hud_glow_overlay",
+        ],
         "contract": {
             "min_image_assets": 5,
             "min_render_layers": 4,
             "min_animation_hooks": 3,
+            "min_procedural_layers": 3,
         },
     }
     return artifact_files, asset_manifest

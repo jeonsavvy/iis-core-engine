@@ -19,11 +19,15 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
         "style_tag": visual_style,
         "genre": genre,
         "motif": motif,
+        "asset_strategy_mode": "procedural_threejs_first",
+        "asset_provider": "builtin_vector_pack",
+        "external_image_generation": False,
         "required_visual_keywords": [motif, "readable_silhouette", "high_contrast_hud"],
         "forbidden_visual_tokens": ["placeholder", "temp", "debug-ui", "plain-rectangle-only"],
         "min_image_assets": 5,
         "min_render_layers": 4,
         "min_animation_hooks": 3,
+        "min_procedural_layers": 3,
     }
 
 

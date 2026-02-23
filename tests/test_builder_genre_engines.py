@@ -166,6 +166,13 @@ def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> Non
     images = asset_manifest.get("images")
     assert isinstance(images, dict)
     assert images.get("player") == "./player.svg"
+    asset_policy = asset_manifest.get("asset_policy")
+    assert isinstance(asset_policy, dict)
+    assert asset_policy.get("mode") == "procedural_threejs_first"
+    assert asset_policy.get("external_image_generation") is False
+    procedural_layers = asset_manifest.get("procedural_layers")
+    assert isinstance(procedural_layers, list)
+    assert len(procedural_layers) >= 3
 
     quality = QualityService(Settings(qa_min_artifact_contract_score=70))
     contract_result = quality.evaluate_artifact_contract(
@@ -174,6 +181,7 @@ def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> Non
             "min_image_assets": 5,
             "min_render_layers": 4,
             "min_animation_hooks": 3,
+            "min_procedural_layers": 3,
         },
     )
     assert contract_result.ok is True
