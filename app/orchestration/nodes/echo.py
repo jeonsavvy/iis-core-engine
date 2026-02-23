@@ -15,11 +15,18 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     marketing_text = marketing_result.payload.get("marketing_copy", "")
     
     resolved_public_url = ""
+    portal_link_candidate = ""
     publish_result = state["outputs"].get("publish_result")
     if isinstance(publish_result, dict):
+        maybe_game_id = publish_result.get("game_id")
+        if maybe_game_id and deps.telegram_service.settings.public_portal_base_url:
+            base = deps.telegram_service.settings.public_portal_base_url.rstrip("/")
+            portal_link_candidate = f"{base}/play/{maybe_game_id}"
         maybe_public_url = publish_result.get("public_url")
         if isinstance(maybe_public_url, str):
             resolved_public_url = maybe_public_url.strip()
+    if portal_link_candidate:
+        resolved_public_url = portal_link_candidate
     if not resolved_public_url:
         raw_public_url = state["outputs"].get("public_url")
         if isinstance(raw_public_url, str):

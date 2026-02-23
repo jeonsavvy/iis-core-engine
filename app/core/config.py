@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     github_api_base_url: str = "https://api.github.com"
 
     public_games_base_url: str = "https://cdn.example.com/games"
+    public_portal_base_url: str | None = None
 
     playwright_required: bool = False
     qa_smoke_timeout_seconds: float = Field(default=8.0, ge=2.0, le=60.0)
