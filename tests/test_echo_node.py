@@ -23,7 +23,9 @@ def _state_with_publish_result() -> dict:
         "log_sink": None,
         "outputs": {
             "game_slug": "game-portal-link",
+            "game_name": "Portal Link Racer",
             "game_genre": "arcade",
+            "gdd": {"objective": "장애물 회피와 타이밍 기반 드리프트"},
             "publish_result": {
                 "public_url": "https://storage.example.com/games/game-portal-link/index.html",
                 "game_id": "11111111-1111-1111-1111-111111111111",
@@ -44,6 +46,10 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
                 payload={"marketing_copy": "테스트 홍보 문구"},
+                meta={"generation_source": "stub", "model": "stub", "latency_ms": 1, "usage": {}},
+            ),
+            generate_ai_review=lambda **_: SimpleNamespace(
+                payload={"ai_review": "테스트 디자이너 코멘트"},
                 meta={"generation_source": "stub", "model": "stub", "latency_ms": 1, "usage": {}},
             )
         ),
@@ -77,6 +83,10 @@ def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
                 payload={"marketing_copy": "테스트 홍보 문구"},
+                meta={"generation_source": "stub", "model": "stub", "latency_ms": 1, "usage": {}},
+            ),
+            generate_ai_review=lambda **_: SimpleNamespace(
+                payload={"ai_review": "테스트 디자이너 코멘트"},
                 meta={"generation_source": "stub", "model": "stub", "latency_ms": 1, "usage": {}},
             )
         ),

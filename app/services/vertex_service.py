@@ -474,9 +474,17 @@ class VertexService:
             "- Thumbnail concept should describe a dynamic action moment with clear focal point\n"
         )
 
-    def generate_marketing_copy(self, *, keyword: str, slug: str, genre: str) -> VertexGenerationResult:
+    def generate_marketing_copy(
+        self,
+        *,
+        keyword: str,
+        slug: str,
+        genre: str,
+        game_name: str | None = None,
+    ) -> VertexGenerationResult:
+        display_name = (game_name or "").strip() or slug
         prompt = (
-            f"게임 이름은 '{slug}', 장르는 '{genre}', 키워드는 '{keyword}'입니다. "
+            f"게임 이름은 '{display_name}', 장르는 '{genre}', 키워드는 '{keyword}'입니다. "
             "한국어(ko-KR)로 1~2문장 분량의 게임 디자이너 코멘트 겸 홍보 문구를 작성하세요. "
             "과장된 표현은 피하고 실제 플레이 감각(조작/목표/긴장감)을 담아주세요. "
             "이모지 1~2개와 #indiegame #html5 해시태그를 포함하고, 오직 문구 텍스트만 반환하세요."
@@ -507,9 +515,73 @@ class VertexService:
             )
         except Exception as exc:
             logger.warning("Vertex marketing generation failed: %s", exc)
-            fallback_text = f"🎮 '{slug}' 새 게임이 공개되었습니다! 키워드 '{keyword}' 기반 아케이드 액션을 지금 플레이해보세요. #indiegame #html5"
+            fallback_text = (
+                f"🎮 '{display_name}' 신규 게임이 게시되었습니다! "
+                f"'{keyword}' 키워드 기반의 {genre} 플레이를 지금 확인해보세요. #indiegame #html5"
+            )
             return VertexGenerationResult(
                 payload={"marketing_copy": fallback_text},
+                meta={
+                    "generation_source": "stub",
+                    "reason": f"vertex_error:{type(exc).__name__}",
+                    "vertex_error": str(exc),
+                },
+            )
+
+    def generate_ai_review(
+        self,
+        *,
+        keyword: str,
+        game_name: str,
+        genre: str,
+        objective: str,
+    ) -> VertexGenerationResult:
+        prompt = (
+            f"게임 이름: {game_name}\n"
+            f"장르: {genre}\n"
+            f"키워드: {keyword}\n"
+            f"목표: {objective}\n\n"
+            "한국어(ko-KR)로 'AI 게임 디자이너 코멘트'를 작성하세요.\n"
+            "- 해시태그/이모지/광고문구 금지\n"
+            "- 2~3개 핵심 포인트를 문장형으로 작성\n"
+            "- 구체적으로: 핵심 플레이 루프, 난이도/리듬, 시각/연출 방향\n"
+            "- 최대 240자\n"
+            "코멘트 텍스트만 반환하세요."
+        )
+        started = time.perf_counter()
+        try:
+            usage = {}
+            if self._use_genai_sdk():
+                text, usage = self._genai_text(
+                    model_name=self.settings.gemini_flash_model,
+                    prompt=prompt,
+                    temperature=0.5,
+                )
+            else:
+                model = self._flash_model()
+                from langchain_core.messages import HumanMessage
+
+                result = model.invoke([HumanMessage(content=prompt)])
+                text = _strip_code_fences(_coerce_message_text(result.content))
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return VertexGenerationResult(
+                payload={"ai_review": text},
+                meta={
+                    "generation_source": "vertex",
+                    "model": self.settings.gemini_flash_model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Vertex AI review generation failed: %s", exc)
+            fallback_text = (
+                f"{game_name}은(는) '{keyword}' 키워드를 {genre} 플레이 루프로 정리했습니다. "
+                f"{objective} 목표를 중심으로 속도감과 장애물 회피 리듬을 강화했고, "
+                "HUD 가독성과 즉시 재도전 흐름을 우선하도록 구성했습니다."
+            )
+            return VertexGenerationResult(
+                payload={"ai_review": fallback_text},
                 meta={
                     "generation_source": "stub",
                     "reason": f"vertex_error:{type(exc).__name__}",

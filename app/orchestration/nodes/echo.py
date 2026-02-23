@@ -6,14 +6,30 @@ from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatu
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     slug = state["outputs"].get("game_slug", "unknown-game")
+    game_name = state["outputs"].get("game_name", slug)
     genre = state["outputs"].get("game_genre", "arcade")
     keyword = state.get("keyword", "unknown")
+    objective = ""
+    gdd_payload = state["outputs"].get("gdd")
+    if isinstance(gdd_payload, dict):
+        raw_objective = gdd_payload.get("objective")
+        if isinstance(raw_objective, str):
+            objective = raw_objective.strip()
     
     marketing_result = deps.vertex_service.generate_marketing_copy(
-        keyword=keyword, slug=slug, genre=genre
+        keyword=keyword, slug=slug, genre=genre, game_name=game_name
     )
     marketing_text = marketing_result.payload.get("marketing_copy", "")
-    
+    review_result = deps.vertex_service.generate_ai_review(
+        keyword=keyword,
+        game_name=game_name,
+        genre=genre,
+        objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
+    )
+    ai_review_text = str(review_result.payload.get("ai_review", "")).strip()
+    if not ai_review_text:
+        ai_review_text = marketing_text
+
     resolved_public_url = ""
     portal_link_candidate = ""
     publish_result = state["outputs"].get("publish_result")
@@ -40,9 +56,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     result = deps.telegram_service.broadcast_message(telegram_text)
     
     screenshot_url = state["outputs"].get("screenshot_url")
-    deps.publisher_service.update_game_marketing(
+    marketing_updated = deps.publisher_service.update_game_marketing(
         slug=slug,
-        ai_review=marketing_text,
+        ai_review=ai_review_text,
         screenshot_url=screenshot_url
     )
 
@@ -60,6 +76,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "model": marketing_result.meta.get("model"),
             "latency_ms": marketing_result.meta.get("latency_ms"),
             "usage": marketing_result.meta.get("usage", {}),
+            "review_generation_source": review_result.meta.get("generation_source"),
+            "review_model": review_result.meta.get("model"),
+            "review_usage": review_result.meta.get("usage", {}),
+            "marketing_updated": bool(marketing_updated),
             "marketing_language": "ko-KR",
             "resolved_public_url": resolved_public_url,
         },

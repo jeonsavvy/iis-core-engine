@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import Settings
 from app.services.supabase_service import create_supabase_admin_client
+
+logger = logging.getLogger(__name__)
 
 
 class PublisherService:
@@ -162,11 +166,17 @@ class PublisherService:
         if not update_dist:
             return True
             
-        try:
-            self.client.table("games_metadata").update(update_dist).eq("slug", slug).execute()
-            return True
-        except Exception:
-            return False
+        max_retries = max(1, int(self.settings.http_max_retries))
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.client.table("games_metadata").update(update_dist).eq("slug", slug).execute()
+                return True
+            except Exception as exc:
+                if attempt >= max_retries:
+                    logger.warning("update_game_marketing failed after retries: slug=%s, error=%s", slug, exc)
+                    return False
+                time.sleep(min(0.15 * attempt, 0.5))
+        return False
 
     def delete_game_assets(self, *, slug: str) -> dict[str, Any]:
         if not self.client:
