@@ -42,6 +42,11 @@ def test_infer_topdown_roguelike_mode_from_keyword() -> None:
     assert mode == "topdown_roguelike_shooter"
 
 
+def test_infer_flight_mode_from_keyword() -> None:
+    mode = _infer_core_loop_type(keyword="풀3D 비행기 조종 시뮬레이터", title="Sky Ace", genre="sim")
+    assert mode == "flight_sim_3d"
+
+
 def test_infer_webgl_runner_mode_from_keyword() -> None:
     mode = _infer_core_loop_type(keyword="웹글 3D 드리프트 레이싱", title="Neon Outrun", genre="arcade")
     assert mode == "webgl_three_runner"
@@ -77,3 +82,25 @@ def test_webgl_builder_html_contains_webgl_audio_and_relic_hooks() -> None:
     assert "renderwebglbackground(" in html
     assert "playsfx(" in html
     assert "state.run.relics" in html
+
+
+def test_flight_builder_html_contains_flight_controls_and_progression_hooks() -> None:
+    html = _build_sample_html("flight_sim_3d").lower()
+    assert "state.flight" in html
+    assert "checkpointcombo" in html
+    assert "throttle" in html
+    assert "pitch" in html and "roll" in html and "yaw" in html
+
+
+def test_gameplay_gate_rejects_when_keyword_requires_flight_but_mode_mismatches() -> None:
+    html = _build_sample_html("topdown_roguelike_shooter").replace("state.flight", "state.airframe")
+    quality = QualityService(Settings(qa_min_gameplay_score=55))
+    gate = quality.evaluate_gameplay_gate(
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="simulation",
+        genre_engine="flight_sim_3d",
+        keyword="full 3d flight simulator",
+    )
+    assert gate.ok is False
+    assert "flight_mechanics_not_found" in gate.failed_checks or "genre_engine_mismatch" in gate.failed_checks

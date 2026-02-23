@@ -157,10 +157,14 @@ class QualityService:
         *,
         design_spec: dict[str, Any] | None = None,
         genre: str | None = None,
+        genre_engine: str | None = None,
+        keyword: str | None = None,
     ) -> GameplayGateResult:
         spec = design_spec or {}
         lowered = html_content.lower()
         genre_hint = (genre or "").strip().casefold()
+        genre_engine_hint = (genre_engine or "").strip().casefold()
+        keyword_hint = (keyword or "").strip().casefold()
 
         checks: list[tuple[str, bool, int]] = [
             ("core_loop_tick", "requestanimationframe" in lowered and "update(" in lowered and "draw(" in lowered, 16),
@@ -190,6 +194,18 @@ class QualityService:
             checks.append(("fighter_specific_mechanics", "performattack" in lowered and "attackcooldown" in lowered, 10))
         if any(token in genre_hint for token in ("로그라이크", "roguelike", "탑다운", "topdown")):
             checks.append(("roguelike_progression", any(token in lowered for token in ("run.level", "difficultyscale", "dashcooldown")), 10))
+        if genre_engine_hint:
+            checks.append(
+                (
+                    "genre_engine_declared",
+                    f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered,
+                    10,
+                )
+            )
+        if genre_engine_hint == "flight_sim_3d":
+            checks.append(("flight_controls", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 16))
+            checks.append(("flight_progression_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 12))
+            checks.append(("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 12))
 
         text_overflow_policy = str(spec.get("text_overflow_policy", "")).strip()
         if text_overflow_policy:
@@ -215,6 +231,16 @@ class QualityService:
             hard_failures.append("no_enemy_pressure")
         if lowered.count("score +=") <= 1 and "combo" not in lowered:
             hard_failures.append("flat_scoring_loop")
+        if genre_engine_hint and not (
+            f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered
+        ):
+            hard_failures.append("genre_engine_mismatch")
+        if "flight" in keyword_hint and genre_engine_hint != "flight_sim_3d":
+            hard_failures.append("keyword_engine_mismatch_flight")
+        if genre_engine_hint == "flight_sim_3d":
+            missing_flight_token = any(token not in lowered for token in ("state.flight", "checkpointcombo", "throttle"))
+            if missing_flight_token:
+                hard_failures.append("flight_mechanics_not_found")
 
         if hard_failures:
             failed_checks.extend(hard_failures)

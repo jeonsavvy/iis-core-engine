@@ -11,15 +11,15 @@ class FakeQualityService:
     def run_smoke_check(self, _html: str) -> SmokeCheckResult:
         return SmokeCheckResult(ok=True)
 
-    def evaluate_quality_contract(self, _html: str, *, design_spec=None) -> QualityGateResult:
+    def evaluate_quality_contract(self, _html: str, *, design_spec=None, **_kwargs) -> QualityGateResult:
         return QualityGateResult(ok=True, score=90, threshold=75, failed_checks=[], checks={"quality": True})
 
-    def evaluate_gameplay_gate(self, _html: str, *, design_spec=None, genre=None) -> GameplayGateResult:
+    def evaluate_gameplay_gate(self, _html: str, *, design_spec=None, genre=None, **_kwargs) -> GameplayGateResult:
         return GameplayGateResult(ok=True, score=85, threshold=55, failed_checks=[], checks={"gameplay": True})
 
 
 class FakeLowQualityService(FakeQualityService):
-    def evaluate_quality_contract(self, _html: str, *, design_spec=None) -> QualityGateResult:
+    def evaluate_quality_contract(self, _html: str, *, design_spec=None, **_kwargs) -> QualityGateResult:
         return QualityGateResult(
             ok=False,
             score=40,

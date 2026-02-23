@@ -28,6 +28,21 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     if any(
         token in haystack
         for token in (
+            "비행기",
+            "비행 시뮬",
+            "항공기",
+            "flight sim",
+            "flight simulator",
+            "aircraft",
+            "pilot",
+            "cockpit",
+            "dogfight",
+        )
+    ):
+        return "flight_sim_3d"
+    if any(
+        token in haystack
+        for token in (
             "webgl",
             "three.js",
             "threejs",
@@ -69,8 +84,28 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     return "arcade_generic"
 
 
+def _detect_unsupported_scope(*, keyword: str, title: str, genre: str) -> str | None:
+    haystack = " ".join([keyword, title, genre]).casefold()
+    out_of_scope_map: dict[str, tuple[str, ...]] = {
+        "open_world_scope": ("오픈월드", "open world", "sandbox world"),
+        "mmo_scope": ("mmorpg", "mmo", "대규모 멀티플레이"),
+        "metaverse_scope": ("메타버스", "metaverse"),
+    }
+    for reason, tokens in out_of_scope_map.items():
+        if any(token in haystack for token in tokens):
+            return reason
+    return None
+
+
 def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> list[str]:
     presets = {
+        "flight_sim_3d": [
+            "Variant A: atmospheric canyon training with strict throttle control and ring precision scoring.",
+            "Variant B: high-altitude storm run with turbulence dodges and aggressive speed-management.",
+            "Variant C: relay checkpoint sprint emphasizing roll control, near-miss bonuses, and route optimization.",
+            "Variant D: endurance flight with escalating hazard density and careful stall-risk handling.",
+            "Variant E: arcade sim blend prioritizing believable handling while keeping short-session replayability.",
+        ],
         "webgl_three_runner": [
             "Variant A: ultra-fast neon sprint with aggressive traffic and boost-chain risk/reward.",
             "Variant B: technical drift line with sharper corner pressure and stricter recovery windows.",
@@ -171,6 +206,21 @@ def _resolve_asset_pack(
         "sprite_profile": "neon",
     }
     by_mode = {
+        "flight_sim_3d": {
+            "name": "flight_sim_neon",
+            "bg_top": "#020716",
+            "bg_bottom": "#030d22",
+            "horizon": "#123248",
+            "track": "#050c1d",
+            "player_primary": "#34d399",
+            "player_secondary": "#0f172a",
+            "enemy_primary": "#f97316",
+            "enemy_elite": "#ef4444",
+            "boost_color": "#22d3ee",
+            "particle": "#22d3ee",
+            "sfx_profile": "flight_arcade",
+            "sprite_profile": "flight",
+        },
         "webgl_three_runner": {
             "name": "webgl_neon_highway",
             "bg_top": "#071125",
@@ -284,6 +334,11 @@ def _build_hybrid_engine_html(
     asset_pack: dict[str, str],
 ) -> str:
     mode_config = {
+        "flight_sim_3d": {
+            "label": "Flight Sim 3D",
+            "objective": "스로틀·피치·롤·요 제어로 항로 링을 통과하며 스톨/충돌을 피하고 최고 점수를 달성하세요.",
+            "controls": "W/S 피치 · A/D 롤 · Q/E 요 · ↑/↓ 스로틀 · Shift 부스트 · R 재시작",
+        },
         "webgl_three_runner": {
             "label": "WebGL 3D Runner",
             "objective": "WebGL 기반 네온 하이웨이에서 드리프트 라인과 부스트 체인을 유지하며 최장 생존 점수를 노리세요.",
@@ -520,7 +575,9 @@ def _build_hybrid_engine_html(
         sprite_profile: "neon",
         ...(CONFIG.assetPack || {{}}),
       }};
+      const MODE_IS_FLIGHT_SIM = CONFIG.mode === "flight_sim_3d";
       const MODE_IS_3D_RUNNER = CONFIG.mode === "lane_dodge_racer" || CONFIG.mode === "webgl_three_runner";
+      const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FLIGHT_SIM;
       const MODE_IS_SHOOTER = CONFIG.mode === "arena_shooter" || CONFIG.mode === "topdown_roguelike_shooter";
       const MODE_IS_BRAWLER = CONFIG.mode === "duel_brawler" || CONFIG.mode === "comic_action_brawler_3d";
       const canvas = document.getElementById("game");
@@ -528,7 +585,7 @@ def _build_hybrid_engine_html(
       const webglCanvas = document.createElement("canvas");
       webglCanvas.width = canvas.width;
       webglCanvas.height = canvas.height;
-      const gl = CONFIG.mode === "webgl_three_runner" ? webglCanvas.getContext("webgl", {{ antialias: true }}) : null;
+      const gl = MODE_USES_WEBGL_BG ? webglCanvas.getContext("webgl", {{ antialias: true }}) : null;
       const overlay = document.getElementById("overlay");
       const overlayText = document.getElementById("overlay-text");
       const scoreEl = document.getElementById("score");
@@ -578,6 +635,17 @@ def _build_hybrid_engine_html(
         }},
         topdown: {{
           orbitAngle: 0,
+        }},
+        flight: {{
+          speed: 320,
+          throttle: 0.58,
+          pitch: 0,
+          roll: 0,
+          yaw: 0,
+          bankVisual: 0,
+          altitude: 0.5,
+          stability: 1,
+          checkpointCombo: 0,
         }},
       }};
 
@@ -636,6 +704,17 @@ def _build_hybrid_engine_html(
           distance: 0,
         }};
         state.topdown = {{ orbitAngle: 0 }};
+        state.flight = {{
+          speed: 320,
+          throttle: 0.58,
+          pitch: 0,
+          roll: 0,
+          yaw: 0,
+          bankVisual: 0,
+          altitude: 0.5,
+          stability: 1,
+          checkpointCombo: 0,
+        }};
         overlay.classList.remove("show");
         updateHud();
       }}
@@ -816,6 +895,20 @@ def _build_hybrid_engine_html(
         const spdMin = CONFIG.enemy_speed_min || 100;
         const spdMax = CONFIG.enemy_speed_max || 220;
         const difficultyScale = Math.max(1, state.run.difficultyScale || 1);
+        if (MODE_IS_FLIGHT_SIM) {{
+          const kindRoll = Math.random();
+          const kind = kindRoll < 0.2 ? "ring" : kindRoll < 0.82 ? "hazard" : "turbulence";
+          state.enemies.push({{
+            kind,
+            x: rand(canvas.width * 0.2, canvas.width * 0.8),
+            y: rand(canvas.height * 0.22, canvas.height * 0.72),
+            z: rand(0.04, 0.22),
+            speedMul: rand(0.78, 1.22) * (0.9 + difficultyScale * 0.18),
+            w: kind === "ring" ? 56 : kind === "turbulence" ? 72 : 42,
+            h: kind === "ring" ? 56 : kind === "turbulence" ? 72 : 44,
+          }});
+          return;
+        }}
         if (MODE_IS_3D_RUNNER) {{
           const lane = Math.floor(Math.random() * 3) - 1;
           const boostRate = CONFIG.mode === "webgl_three_runner" ? 0.24 : 0.2;
@@ -953,7 +1046,105 @@ def _build_hybrid_engine_html(
         stepProgression(dt);
         const spawnRate = (CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8);
 
-        if (MODE_IS_3D_RUNNER) {{
+        if (MODE_IS_FLIGHT_SIM) {{
+          const pitchInput = (keys.has("w") || keys.has("ArrowUp") ? -1 : 0) + (keys.has("s") || keys.has("ArrowDown") ? 1 : 0);
+          const rollInput = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
+          const yawInput = (keys.has("e") ? 1 : 0) - (keys.has("q") ? 1 : 0);
+          const throttleInput = (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0);
+          state.flight.throttle = clamp(state.flight.throttle + throttleInput * dt * 0.55, 0.18, 1);
+          state.flight.pitch = clamp(state.flight.pitch + pitchInput * dt * 2.4, -1, 1);
+          state.flight.roll = clamp(state.flight.roll + rollInput * dt * 2.6, -1, 1);
+          state.flight.yaw = clamp(state.flight.yaw + yawInput * dt * 1.8, -1, 1);
+          state.flight.pitch *= (1 - Math.min(0.7, dt * 2.8));
+          state.flight.roll *= (1 - Math.min(0.7, dt * 3.2));
+          state.flight.yaw *= (1 - Math.min(0.7, dt * 3.5));
+          if (keys.has("Shift") && consumeDash()) {{
+            state.flight.throttle = Math.min(1, state.flight.throttle + 0.22);
+            state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.35);
+            playSfx("boost");
+          }}
+
+          const targetSpeed = 180 + state.flight.throttle * 420;
+          state.flight.speed += (targetSpeed - state.flight.speed) * Math.min(1, dt * 2.1);
+          if (state.racer.boostTimer > 0) {{
+            state.racer.boostTimer = Math.max(0, state.racer.boostTimer - dt);
+            state.flight.speed = Math.max(state.flight.speed, 430);
+          }}
+          state.racer.speed = state.flight.speed;
+          state.racer.roadScroll += dt * state.flight.speed * 0.07;
+          state.racer.distance += dt * state.flight.speed;
+
+          const lateral = (state.flight.roll * 0.92) + (state.flight.yaw * 0.52);
+          const vertical = state.flight.pitch * 1.1;
+          state.player.x = clamp(state.player.x + lateral * dt * 340, canvas.width * 0.12, canvas.width * 0.88 - state.player.w);
+          state.player.y = clamp(state.player.y + vertical * dt * 240, canvas.height * 0.35, canvas.height * 0.86);
+          state.flight.altitude = 1 - clamp((state.player.y - canvas.height * 0.35) / (canvas.height * 0.51), 0, 1);
+          state.flight.bankVisual += (state.flight.roll - state.flight.bankVisual) * Math.min(1, dt * 7.5);
+          state.flight.stability = clamp(1 - Math.abs(state.flight.pitch) * 0.35 - Math.abs(state.flight.roll) * 0.32, 0.2, 1.1);
+
+          const adaptiveSpawnRate = clamp(spawnRate * (260 / state.flight.speed), 0.2, 0.88);
+          if (state.spawnTimer > adaptiveSpawnRate) {{
+            state.spawnTimer = 0;
+            spawnEnemy();
+          }}
+
+          const playerCx = state.player.x + state.player.w * 0.5;
+          const playerCy = state.player.y + state.player.h * 0.5;
+          for (const e of state.enemies) {{
+            e.z += dt * (state.flight.speed / 310) * (e.speedMul || 1);
+            const depth = clamp(e.z, 0.03, 1.2);
+            const depthScale = 0.28 + depth * 1.35;
+            const ex = e.x + (state.flight.yaw * -120) * (1 - depth);
+            const ey = e.y + (state.flight.pitch * 80) * (1 - depth);
+            e.screenW = (e.w || 32) * depthScale;
+            e.screenH = (e.h || 32) * depthScale;
+            e.screenX = ex - e.screenW * 0.5;
+            e.screenY = ey - e.screenH * 0.5;
+            if (depth > 0.76 && depth < 1.05) {{
+              const dist = Math.hypot((e.screenX + e.screenW * 0.5) - playerCx, (e.screenY + e.screenH * 0.5) - playerCy);
+              const hitRadius = Math.max(24, (e.screenW + e.screenH) * 0.24);
+              if (dist < hitRadius) {{
+                if (e.kind === "ring") {{
+                  const scoreGain = (CONFIG.base_score_value || 10) * (3.2 + state.flight.checkpointCombo * 0.14);
+                  state.score += scoreGain;
+                  state.flight.checkpointCombo += 1;
+                  addCombo(1.2);
+                  grantXp(14 + Math.min(18, state.flight.checkpointCombo));
+                  playSfx("boost");
+                  burst(playerCx, playerCy - 10, ASSET.boost_color, 18);
+                }} else if (e.kind === "turbulence") {{
+                  state.run.shake = Math.max(state.run.shake, 0.26);
+                  state.flight.stability = Math.max(0.28, state.flight.stability - 0.2);
+                  state.score = Math.max(0, state.score - 8);
+                  playSfx("damage");
+                  burst(playerCx, playerCy, ASSET.enemy_primary, 12);
+                }} else {{
+                  state.hp -= 1;
+                  state.flight.checkpointCombo = 0;
+                  state.run.combo = 0;
+                  state.score = Math.max(0, state.score - 22);
+                  playSfx("damage");
+                  burst(playerCx, playerCy, ASSET.enemy_primary, 16);
+                }}
+                e.z = 2;
+              }}
+            }}
+          }}
+
+          state.enemies = state.enemies.filter((e) => {{
+            const passed = e.z > 1.08;
+            if (passed && e.kind === "ring") {{
+              state.flight.checkpointCombo = Math.max(0, state.flight.checkpointCombo - 1);
+            }} else if (passed && e.kind === "hazard") {{
+              state.score += (CONFIG.base_score_value || 10) * (1.1 + state.run.combo * 0.04);
+              addCombo(0.28);
+              grantXp(5);
+            }}
+            return !passed;
+          }});
+
+          state.score += dt * (state.flight.speed * 0.048) * (0.7 + state.flight.altitude * 0.6) * (1 + state.run.combo * 0.026);
+        }} else if (MODE_IS_3D_RUNNER) {{
           const left = keys.has("ArrowLeft") || keys.has("a");
           const right = keys.has("ArrowRight") || keys.has("d");
           const accel = keys.has("ArrowUp") || keys.has("w");
@@ -1203,7 +1394,78 @@ def _build_hybrid_engine_html(
         ctx.fillStyle = ASSET.track;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        if (MODE_IS_3D_RUNNER) {{
+        if (MODE_IS_FLIGHT_SIM) {{
+          const horizonY = canvas.height * 0.52;
+          const webglRendered = renderWebglBackground(1 / 60);
+          if (!webglRendered) {{
+            const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            sky.addColorStop(0, ASSET.bg_top);
+            sky.addColorStop(1, ASSET.bg_bottom);
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }}
+
+          ctx.fillStyle = "rgba(34,211,238,0.35)";
+          ctx.fillRect(0, horizonY, canvas.width, 2);
+          ctx.strokeStyle = "rgba(56,189,248,0.16)";
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 12; i++) {{
+            const t = i / 11;
+            const y = horizonY + (t * t) * (canvas.height - horizonY);
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+          }}
+          for (let i = -6; i <= 6; i++) {{
+            const x = canvas.width * 0.5 + i * 90 - state.flight.yaw * 80;
+            ctx.beginPath();
+            ctx.moveTo(x, horizonY);
+            ctx.lineTo(canvas.width * 0.5 + i * 180, canvas.height);
+            ctx.stroke();
+          }}
+
+          const sortedEnemies = [...state.enemies].sort((a, b) => (a.z || 0) - (b.z || 0));
+          for (const e of sortedEnemies) {{
+            const ex = e.screenX ?? e.x;
+            const ey = e.screenY ?? e.y;
+            const ew = e.screenW ?? e.w ?? 32;
+            const eh = e.screenH ?? e.h ?? 32;
+            if ((e.z || 0) > 1.08) continue;
+            if (e.kind === "ring") {{
+              ctx.strokeStyle = ASSET.boost_color;
+              ctx.lineWidth = Math.max(2, ew * 0.08);
+              ctx.shadowBlur = 16;
+              ctx.shadowColor = ASSET.boost_color;
+              ctx.beginPath();
+              ctx.ellipse(ex + ew * 0.5, ey + eh * 0.5, ew * 0.5, eh * 0.45, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            }} else if (e.kind === "turbulence") {{
+              ctx.strokeStyle = "rgba(148,163,184,0.75)";
+              ctx.lineWidth = 2;
+              ctx.shadowBlur = 10;
+              ctx.shadowColor = "rgba(148,163,184,0.7)";
+              for (let i = 0; i < 3; i++) {{
+                const yy = ey + i * (eh / 2.5);
+                ctx.beginPath();
+                ctx.moveTo(ex, yy);
+                ctx.quadraticCurveTo(ex + ew * 0.45, yy - 8, ex + ew, yy);
+                ctx.stroke();
+              }}
+            }} else {{
+              ctx.fillStyle = ASSET.enemy_primary;
+              ctx.shadowBlur = 14;
+              ctx.shadowColor = ASSET.enemy_primary;
+              ctx.beginPath();
+              ctx.moveTo(ex + ew * 0.5, ey - eh * 0.08);
+              ctx.lineTo(ex + ew * 0.92, ey + eh * 0.45);
+              ctx.lineTo(ex + ew * 0.5, ey + eh * 1.02);
+              ctx.lineTo(ex + ew * 0.08, ey + eh * 0.45);
+              ctx.closePath();
+              ctx.fill();
+            }}
+          }}
+        }} else if (MODE_IS_3D_RUNNER) {{
           const horizonY = canvas.height * 0.2;
           const roadTop = canvas.width * 0.2;
           const roadBottom = canvas.width * 0.78;
@@ -1367,7 +1629,34 @@ def _build_hybrid_engine_html(
           ctx.globalAlpha = 1;
         }}
 
-        if (MODE_IS_3D_RUNNER) {{
+        if (MODE_IS_FLIGHT_SIM) {{
+          const px = state.player.x;
+          const py = state.player.y;
+          const pw = state.player.w;
+          const ph = state.player.h;
+          const bank = state.flight.bankVisual;
+          ctx.save();
+          ctx.translate(px + pw * 0.5, py + ph * 0.5);
+          ctx.rotate(bank * 0.45);
+          ctx.shadowBlur = 18;
+          ctx.shadowColor = state.racer.boostTimer > 0 ? ASSET.boost_color : ASSET.player_primary;
+          ctx.fillStyle = ASSET.player_primary;
+          ctx.beginPath();
+          ctx.moveTo(0, -ph * 0.6);
+          ctx.lineTo(pw * 0.44, ph * 0.34);
+          ctx.lineTo(0, ph * 0.58);
+          ctx.lineTo(-pw * 0.44, ph * 0.34);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = ASSET.player_secondary;
+          ctx.fillRect(-pw * 0.08, -ph * 0.2, pw * 0.16, ph * 0.56);
+          ctx.fillRect(-pw * 0.5, ph * 0.2, pw, ph * 0.12);
+          if (state.racer.boostTimer > 0 || state.flight.throttle > 0.82) {{
+            ctx.fillStyle = ASSET.boost_color;
+            ctx.fillRect(-pw * 0.12, ph * 0.58, pw * 0.24, ph * 0.38);
+          }}
+          ctx.restore();
+        }} else if (MODE_IS_3D_RUNNER) {{
           const px = state.player.x;
           const py = state.player.y;
           const pw = state.player.w;
@@ -1433,6 +1722,11 @@ def _build_hybrid_engine_html(
 
       function updateHud() {{
         scoreEl.textContent = `Score: ${{Math.floor(state.score)}} · Combo: x${{Math.max(1, state.run.combo.toFixed(1))}}`;
+        if (MODE_IS_FLIGHT_SIM) {{
+          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · THR ${{Math.round(state.flight.throttle * 100)}}%`;
+          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · CKP ${{state.flight.checkpointCombo}}`;
+          return;
+        }}
         timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;
         hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}}`;
       }}
@@ -1542,6 +1836,19 @@ def _extract_hybrid_bundle_from_inline_html(
         "entrypoint": f"games/{slug}/index.html",
         "files": [row["path"] for row in artifact_files],
         "bundle_kind": "hybrid_engine",
+        "modules": [
+            "runtime_bootstrap",
+            "input_controls",
+            "spawn_system",
+            "combat_or_navigation_loop",
+            "render_pipeline",
+            "hud_overlay",
+            "audio_feedback",
+        ],
+        "asset_manifest": {
+            "styles": [f"games/{slug}/styles.css"],
+            "scripts": [f"games/{slug}/game.js"],
+        },
     }
     return artifact_files, artifact_manifest
 
@@ -1584,6 +1891,35 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     palette = design_spec.palette
     accent_color = str(palette[0]) if palette else "#22C55E"
     core_loop_type = _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)
+    unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
+    if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = unsupported_scope_reason
+        state["outputs"]["scope_guard_reason"] = unsupported_scope_reason
+        state["outputs"]["requested_keyword"] = state["keyword"]
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.BUILDER,
+            message="빌드 중단: 현재 파이프라인 범위를 초과한 요청입니다.",
+            reason=unsupported_scope_reason,
+            metadata={
+                "keyword": state["keyword"],
+                "title": title,
+                "genre": genre,
+                "supported_modes": [
+                    "flight_sim_3d",
+                    "webgl_three_runner",
+                    "topdown_roguelike_shooter",
+                    "comic_action_brawler_3d",
+                    "lane_dodge_racer",
+                    "arena_shooter",
+                    "duel_brawler",
+                    "arcade_generic",
+                ],
+            },
+        )
     asset_pack = _resolve_asset_pack(core_loop_type=core_loop_type, palette=palette)
     candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
@@ -1627,11 +1963,37 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             game_config=generated_config.payload,
             asset_pack=asset_pack,
         )
+        codegen_meta_rows: list[dict[str, Any]] = []
+        for pass_index in range(max(0, int(deps.vertex_service.settings.builder_codegen_passes))):
+            codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                objective=gdd.objective,
+                core_loop_type=core_loop_type,
+                variation_hint=variation_hint,
+                design_spec=design_spec_dump,
+                asset_pack=asset_pack,
+                html_content=candidate_html,
+            )
+            generated_candidate_html = str(codegen_result.payload.get("artifact_html", "")).strip()
+            if generated_candidate_html:
+                candidate_html = generated_candidate_html
+            codegen_meta_rows.append(
+                {
+                    "pass": pass_index + 1,
+                    "generation_source": codegen_result.meta.get("generation_source", "stub"),
+                    "model": codegen_result.meta.get("model"),
+                    "reason": codegen_result.meta.get("reason"),
+                }
+            )
         quality_probe = deps.quality_service.evaluate_quality_contract(candidate_html, design_spec=design_spec_dump)
         gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
             candidate_html,
             design_spec=design_spec_dump,
             genre=genre,
+            genre_engine=core_loop_type,
+            keyword=state["keyword"],
         )
         composite_score = _candidate_composite_score(
             quality_score=quality_probe.score,
@@ -1651,6 +2013,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "gameplay_score": gameplay_probe.score,
             "composite_score": composite_score,
             "asset_pack": asset_pack["name"],
+            "codegen_passes": codegen_meta_rows,
         }
         candidate_rows.append(candidate_row)
 
@@ -1669,6 +2032,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "generation_source": generated_config.meta.get("generation_source", "stub"),
                 "model": generated_config.meta.get("model"),
                 "asset_pack": asset_pack["name"],
+                "codegen_passes": codegen_meta_rows,
             },
         )
 
@@ -1704,6 +2068,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         polished_html,
         design_spec=design_spec_dump,
         genre=genre,
+        genre_engine=core_loop_type,
+        keyword=state["keyword"],
     )
     polished_composite = _candidate_composite_score(
         quality_score=polished_quality.score,
@@ -1721,7 +2087,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     final_gameplay_score = polished_gameplay.score if use_polished else int(best_candidate["gameplay_score"])
     final_composite_score = polished_composite if use_polished else selected_composite
 
-    builder_strategy = "production_v2_candidates_qa_polish"
+    builder_strategy = "production_v3_candidates_codegen_qa_polish"
     candidate_scoreboard = [
         {
             "index": int(row["index"]),
@@ -1733,6 +2099,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "generation_source": row["generation_meta"].get("generation_source", "stub"),
             "model": row["generation_meta"].get("model"),
             "asset_pack": row.get("asset_pack"),
+            "codegen_passes": row.get("codegen_passes", []),
         }
         for row in candidate_rows
     ]
@@ -1761,6 +2128,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["game_slug"] = build_artifact.game_slug
     state["outputs"]["game_name"] = build_artifact.game_name
     state["outputs"]["game_genre"] = build_artifact.game_genre
+    state["outputs"]["genre_engine"] = core_loop_type
+    state["outputs"]["asset_pack"] = asset_pack["name"]
     state["outputs"]["artifact_path"] = build_artifact.artifact_path
     state["outputs"]["artifact_html"] = build_artifact.artifact_html
     state["outputs"]["artifact_files"] = [row.model_dump() for row in build_artifact.artifact_files or []]
@@ -1787,6 +2156,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "asset_pack": asset_pack["name"],
             "artifact_file_count": len(build_artifact.artifact_files or []),
             "candidate_count": candidate_count,
+            "codegen_enabled": bool(deps.vertex_service.settings.builder_codegen_enabled),
+            "codegen_passes_per_candidate": int(deps.vertex_service.settings.builder_codegen_passes),
             "selected_candidate_index": int(best_candidate["index"]),
             "selected_candidate_score": selected_composite,
             "final_quality_score": final_quality_score,

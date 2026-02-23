@@ -365,16 +365,26 @@ class VertexService:
             raise ValueError("json_response_not_object")
         return parsed, usage
 
-    def _genai_text(self, *, model_name: str, prompt: str, temperature: float) -> tuple[str, dict[str, int]]:
+    def _genai_text(
+        self,
+        *,
+        model_name: str,
+        prompt: str,
+        temperature: float,
+        max_output_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
         if genai_types is None:  # pragma: no cover - import guard
             raise RuntimeError("google_genai types are not available")
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "response_mime_type": "text/plain",
+        }
+        if isinstance(max_output_tokens, int) and max_output_tokens > 0:
+            config_kwargs["max_output_tokens"] = max_output_tokens
         response = self._genai_generate_with_retry(
             model_name=model_name,
             prompt=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=temperature,
-                response_mime_type="text/plain",
-            ),
+            config=genai_types.GenerateContentConfig(**config_kwargs),
         )
         usage = {}
         if hasattr(response, "usage_metadata") and response.usage_metadata:
@@ -591,6 +601,169 @@ class VertexService:
                 },
             )
 
+    def generate_grounded_ai_review(
+        self,
+        *,
+        keyword: str,
+        game_name: str,
+        genre: str,
+        objective: str,
+        evidence: dict[str, Any],
+    ) -> VertexGenerationResult:
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        prompt = (
+            f"게임 이름: {game_name}\n"
+            f"장르: {genre}\n"
+            f"키워드: {keyword}\n"
+            f"목표: {objective}\n"
+            f"근거 데이터(JSON): {evidence_json}\n\n"
+            "당신은 과장 없이 사실 기반으로 쓰는 게임 디자인 리뷰어입니다.\n"
+            "출력 규칙:\n"
+            "- 한국어(ko-KR) 문장 2~4개\n"
+            "- 근거 데이터에 없는 기능(예: 풀3D 물리/콕핏/멀티플레이)을 절대 주장하지 말 것\n"
+            "- 플레이 루프 1개, 난이도/리듬 1개, 시각/피드백 1개를 포함\n"
+            "- 실패/한계가 있으면 명시\n"
+            "- 해시태그/이모지 금지\n"
+            "코멘트 텍스트만 반환하세요."
+        )
+        started = time.perf_counter()
+        try:
+            usage = {}
+            if self._use_genai_sdk():
+                text, usage = self._genai_text(
+                    model_name=self.settings.gemini_flash_model,
+                    prompt=prompt,
+                    temperature=0.35,
+                    max_output_tokens=1024,
+                )
+            else:
+                model = self._flash_model()
+                from langchain_core.messages import HumanMessage
+
+                result = model.invoke([HumanMessage(content=prompt)])
+                text = _strip_code_fences(_coerce_message_text(result.content))
+            normalized = text.strip()
+            if not normalized:
+                raise ValueError("empty_grounded_review")
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return VertexGenerationResult(
+                payload={"ai_review": normalized},
+                meta={
+                    "generation_source": "vertex",
+                    "model": self.settings.gemini_flash_model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Vertex grounded review generation failed: %s", exc)
+            engine = str(evidence.get("genre_engine", "")).strip() or "unknown"
+            quality_score = evidence.get("quality_score")
+            gameplay_score = evidence.get("gameplay_score")
+            fallback_text = (
+                f"현재 빌드는 '{engine}' 루프 기반이며 목표는 '{objective}'입니다. "
+                f"QA 점수(quality={quality_score}, gameplay={gameplay_score}) 기준으로 동작은 확인됐지만, "
+                "요청 대비 장르 깊이/시뮬레이션 정밀도는 추가 개선이 필요합니다."
+            )
+            return VertexGenerationResult(
+                payload={"ai_review": fallback_text},
+                meta={
+                    "generation_source": "stub",
+                    "reason": f"vertex_error:{type(exc).__name__}",
+                    "vertex_error": str(exc),
+                },
+            )
+
+    def generate_codegen_candidate_artifact(
+        self,
+        *,
+        keyword: str,
+        title: str,
+        genre: str,
+        objective: str,
+        core_loop_type: str,
+        variation_hint: str,
+        design_spec: dict[str, Any],
+        asset_pack: dict[str, Any],
+        html_content: str,
+    ) -> VertexGenerationResult:
+        if not self.settings.builder_codegen_enabled:
+            return VertexGenerationResult(
+                payload={"artifact_html": html_content},
+                meta={"generation_source": "stub", "reason": "builder_codegen_disabled"},
+            )
+        if not self._is_enabled():
+            return VertexGenerationResult(
+                payload={"artifact_html": html_content},
+                meta={"generation_source": "stub", "reason": "vertex_not_configured"},
+            )
+
+        design_spec_json = json.dumps(design_spec, ensure_ascii=False)
+        asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
+        prompt = (
+            "You are a senior web game engineer. Rewrite and deepen this game artifact.\n"
+            "Hard constraints:\n"
+            "- Return one complete HTML document only.\n"
+            "- Keep leaderboard contract (`window.IISLeaderboard`) and boot flag (`window.__iis_game_boot_ok`).\n"
+            "- Keep safe-area / overflow-readability guard behavior.\n"
+            "- Keep keyboard controls and restart flow.\n"
+            "- Implement the requested core loop mode faithfully.\n"
+            "- Do not output markdown fences.\n\n"
+            f"Keyword: {keyword}\n"
+            f"Title: {title}\n"
+            f"Genre: {genre}\n"
+            f"Objective: {objective}\n"
+            f"Core loop mode: {core_loop_type}\n"
+            f"Variation: {variation_hint}\n"
+            f"DesignSpec: {design_spec_json}\n"
+            f"AssetPack: {asset_pack_json}\n\n"
+            "Improve gameplay depth by adding clearer mechanics, readable telegraphs, and richer game feel.\n"
+            "Preserve compatibility with plain browser runtime (no external npm imports).\n\n"
+            "Original HTML:\n"
+            f"{html_content}"
+        )
+        started = time.perf_counter()
+        try:
+            usage = {}
+            if self._use_genai_sdk():
+                generated_html, usage = self._genai_text(
+                    model_name=self.settings.gemini_pro_model,
+                    prompt=prompt,
+                    temperature=0.42,
+                    max_output_tokens=self.settings.builder_codegen_max_output_tokens,
+                )
+            else:
+                model = self._pro_model()
+                from langchain_core.messages import HumanMessage
+
+                result = model.invoke([HumanMessage(content=prompt)])
+                generated_html = _strip_code_fences(_coerce_message_text(result.content))
+
+            normalized = generated_html.strip()
+            if not self._looks_like_playable_artifact(normalized):
+                raise ValueError("invalid_codegen_artifact")
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return VertexGenerationResult(
+                payload={"artifact_html": normalized},
+                meta={
+                    "generation_source": "vertex",
+                    "model": self.settings.gemini_pro_model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Vertex codegen artifact generation failed: %s", exc)
+            return VertexGenerationResult(
+                payload={"artifact_html": html_content},
+                meta={
+                    "generation_source": "stub",
+                    "reason": f"vertex_error:{type(exc).__name__}",
+                    "vertex_error": str(exc),
+                },
+            )
+
     def polish_hybrid_artifact(
         self,
         *,
@@ -633,6 +806,7 @@ class VertexService:
                     model_name=self.settings.gemini_pro_model,
                     prompt=prompt,
                     temperature=0.35,
+                    max_output_tokens=self.settings.builder_codegen_max_output_tokens,
                 )
             else:
                 model = self._pro_model()
@@ -664,6 +838,20 @@ class VertexService:
                     "vertex_error": str(exc),
                 },
             )
+
+    @staticmethod
+    def _looks_like_playable_artifact(html_content: str) -> bool:
+        lowered = html_content.casefold()
+        return all(
+            token in lowered
+            for token in (
+                "<html",
+                "window.__iis_game_boot_ok",
+                "window.iisleaderboard",
+                "requestanimationframe",
+                "<canvas",
+            )
+        )
 
     @staticmethod
     def _builder_prompt(

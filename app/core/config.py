@@ -51,7 +51,11 @@ class Settings(BaseSettings):
     qa_smoke_timeout_seconds: float = Field(default=8.0, ge=2.0, le=60.0)
     qa_min_quality_score: int = Field(default=40, ge=0, le=100)
     qa_min_gameplay_score: int = Field(default=55, ge=0, le=100)
-    builder_candidate_count: int = Field(default=3, ge=1, le=5)
+    builder_candidate_count: int = Field(default=4, ge=1, le=5)
+    builder_codegen_enabled: bool = True
+    builder_codegen_passes: int = Field(default=1, ge=0, le=2)
+    builder_codegen_max_output_tokens: int = Field(default=12_000, ge=512, le=65_536)
+    builder_scope_guard_enabled: bool = True
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
 
     pipeline_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30.0)

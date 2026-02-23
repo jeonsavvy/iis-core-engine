@@ -81,6 +81,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         artifact_html,
         design_spec=design_spec if isinstance(design_spec, dict) else None,
         genre=str(state["outputs"].get("game_genre", "")),
+        genre_engine=str(state["outputs"].get("genre_engine", "")),
+        keyword=str(state.get("keyword", "")),
     )
     if not gameplay_result.ok:
         state["needs_rebuild"] = True

@@ -4,10 +4,18 @@ from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
+def _latest_stage_log_metadata(state: PipelineState, stage: PipelineStage) -> dict[str, object]:
+    for log in reversed(state["logs"]):
+        if log.stage == stage and isinstance(log.metadata, dict):
+            return dict(log.metadata)
+    return {}
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     slug = state["outputs"].get("game_slug", "unknown-game")
     game_name = state["outputs"].get("game_name", slug)
     genre = state["outputs"].get("game_genre", "arcade")
+    genre_engine = str(state["outputs"].get("genre_engine", "arcade_generic"))
     keyword = state.get("keyword", "unknown")
     objective = ""
     gdd_payload = state["outputs"].get("gdd")
@@ -16,19 +24,42 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         if isinstance(raw_objective, str):
             objective = raw_objective.strip()
     
+    build_metadata = _latest_stage_log_metadata(state, PipelineStage.BUILD)
+    qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA)
+    grounded_evidence = {
+        "slug": slug,
+        "genre_engine": genre_engine,
+        "candidate_count": build_metadata.get("candidate_count"),
+        "final_quality_score": build_metadata.get("final_quality_score") or qa_metadata.get("quality_score"),
+        "final_gameplay_score": build_metadata.get("final_gameplay_score") or qa_metadata.get("gameplay_score"),
+        "artifact_file_count": build_metadata.get("artifact_file_count"),
+        "asset_pack": build_metadata.get("asset_pack") or state["outputs"].get("asset_pack"),
+        "qa_message": qa_metadata.get("message") if isinstance(qa_metadata.get("message"), str) else None,
+    }
+
     marketing_result = deps.vertex_service.generate_marketing_copy(
         keyword=keyword, slug=slug, genre=genre, game_name=game_name
     )
     marketing_text = marketing_result.payload.get("marketing_copy", "")
-    review_result = deps.vertex_service.generate_ai_review(
-        keyword=keyword,
-        game_name=game_name,
-        genre=genre,
-        objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
-    )
+    review_generator = getattr(deps.vertex_service, "generate_grounded_ai_review", None)
+    if callable(review_generator):
+        review_result = review_generator(
+            keyword=keyword,
+            game_name=game_name,
+            genre=genre,
+            objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
+            evidence=grounded_evidence,
+        )
+    else:
+        review_result = deps.vertex_service.generate_ai_review(
+            keyword=keyword,
+            game_name=game_name,
+            genre=genre,
+            objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
+        )
     ai_review_text = str(review_result.payload.get("ai_review", "")).strip()
     if not ai_review_text:
-        ai_review_text = marketing_text
+        ai_review_text = "리뷰 생성에 실패했습니다. 최신 파이프라인 로그에서 BUILD/QA 근거 데이터를 확인해주세요."
 
     resolved_public_url = ""
     portal_link_candidate = ""
@@ -82,6 +113,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "review_generation_source": review_result.meta.get("generation_source"),
             "review_model": review_result.meta.get("model"),
             "review_usage": review_result.meta.get("usage", {}),
+            "review_grounded_evidence": grounded_evidence,
             "marketing_updated": bool(marketing_updated),
             "marketing_language": "ko-KR",
             "resolved_public_url": resolved_public_url,
