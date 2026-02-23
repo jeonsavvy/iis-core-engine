@@ -206,6 +206,14 @@ class QualityService:
             checks.append(("flight_controls", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 16))
             checks.append(("flight_progression_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 12))
             checks.append(("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 12))
+        if genre_engine_hint == "webgl_three_runner":
+            checks.append(
+                (
+                    "analog_steering_runtime",
+                    "steervelocity" in lowered and "math.round(state.player.lane)" not in lowered,
+                    12,
+                )
+            )
 
         text_overflow_policy = str(spec.get("text_overflow_policy", "")).strip()
         if text_overflow_policy:
@@ -241,6 +249,8 @@ class QualityService:
             missing_flight_token = any(token not in lowered for token in ("state.flight", "checkpointcombo", "throttle"))
             if missing_flight_token:
                 hard_failures.append("flight_mechanics_not_found")
+        if genre_engine_hint == "webgl_three_runner" and "math.round(state.player.lane)" in lowered:
+            hard_failures.append("quantized_lane_steering")
 
         if hard_failures:
             failed_checks.extend(hard_failures)

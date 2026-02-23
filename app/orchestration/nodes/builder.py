@@ -627,6 +627,7 @@ def _build_hybrid_engine_html(
           speed: 280,
           boostTimer: 0,
           laneFloat: 1,
+          steerVelocity: 0,
           roadScroll: 0,
           roadCurve: 0,
           roadCurveTarget: 0,
@@ -697,6 +698,7 @@ def _build_hybrid_engine_html(
           speed: 280,
           boostTimer: 0,
           laneFloat: 1,
+          steerVelocity: 0,
           roadScroll: 0,
           roadCurve: 0,
           roadCurveTarget: 0,
@@ -1151,7 +1153,12 @@ def _build_hybrid_engine_html(
           const brake = keys.has("ArrowDown") || keys.has("s");
 
           const steerDir = (right ? 1 : 0) - (left ? 1 : 0);
-          state.racer.laneFloat = clamp(state.racer.laneFloat + steerDir * dt * 2.8, 0, 2);
+          state.racer.steerVelocity += steerDir * dt * 9.2;
+          state.racer.steerVelocity *= (1 - Math.min(0.82, dt * 7.4));
+          if (!left && !right) {{
+            state.racer.steerVelocity *= (1 - Math.min(0.88, dt * 9.8));
+          }}
+          state.racer.laneFloat = clamp(state.racer.laneFloat + state.racer.steerVelocity * dt, 0, 2);
           state.player.lane = state.racer.laneFloat;
 
           const accelRate = 240;
@@ -1182,8 +1189,8 @@ def _build_hybrid_engine_html(
           }}
 
           const curvePx = state.racer.roadCurve * canvas.width * 0.16;
-          const laneXs = [canvas.width * 0.28 + curvePx * 0.15, canvas.width * 0.5 + curvePx * 0.15, canvas.width * 0.72 + curvePx * 0.15];
-          const laneX = laneXs[Math.round(state.player.lane)] ?? laneXs[1];
+          const laneNormalized = state.player.lane - 1;
+          const laneX = canvas.width * 0.5 + curvePx * 0.15 + laneNormalized * (canvas.width * 0.22);
           state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * 12);
           state.player.y = canvas.height * 0.78;
 
@@ -1480,16 +1487,22 @@ def _build_hybrid_engine_html(
             ctx.fillRect(0, 0, canvas.width, canvas.height);
           }}
 
-          ctx.fillStyle = ASSET.horizon;
-          ctx.beginPath();
-          ctx.moveTo(0, horizonY + 8);
-          ctx.lineTo(canvas.width * 0.2, horizonY - 30);
-          ctx.lineTo(canvas.width * 0.44, horizonY + 2);
-          ctx.lineTo(canvas.width, horizonY - 40);
-          ctx.lineTo(canvas.width, horizonY + 50);
-          ctx.lineTo(0, horizonY + 42);
-          ctx.closePath();
-          ctx.fill();
+          const haze = ctx.createLinearGradient(0, horizonY - 40, 0, horizonY + 90);
+          haze.addColorStop(0, "rgba(56,189,248,0.08)");
+          haze.addColorStop(1, "rgba(15,23,42,0.55)");
+          ctx.fillStyle = haze;
+          ctx.fillRect(0, horizonY - 40, canvas.width, 140);
+
+          ctx.strokeStyle = "rgba(34,211,238,0.2)";
+          ctx.lineWidth = 1.2;
+          for (let i = 0; i < 12; i++) {{
+            const y = horizonY - 22 + i * 6;
+            const w = canvas.width * (0.15 + i * 0.03);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width * 0.5 - w, y);
+            ctx.lineTo(canvas.width * 0.5 + w, y);
+            ctx.stroke();
+          }}
 
           const leftTop = canvas.width / 2 - roadTop + curvePx;
           const rightTop = canvas.width / 2 + roadTop + curvePx;
@@ -1949,7 +1962,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             design_spec=design_spec_dump,
             variation_hint=variation_hint,
         )
-        candidate_html = _build_hybrid_engine_html(
+        base_candidate_html = _build_hybrid_engine_html(
             title=title,
             genre=genre,
             slug=slug,
@@ -1963,6 +1976,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             game_config=generated_config.payload,
             asset_pack=asset_pack,
         )
+        candidate_html = base_candidate_html
         codegen_meta_rows: list[dict[str, Any]] = []
         for pass_index in range(max(0, int(deps.vertex_service.settings.builder_codegen_passes))):
             codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
@@ -1987,6 +2001,20 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "reason": codegen_result.meta.get("reason"),
                 }
             )
+        base_quality_probe = deps.quality_service.evaluate_quality_contract(base_candidate_html, design_spec=design_spec_dump)
+        base_gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
+            base_candidate_html,
+            design_spec=design_spec_dump,
+            genre=genre,
+            genre_engine=core_loop_type,
+            keyword=state["keyword"],
+        )
+        base_composite_score = _candidate_composite_score(
+            quality_score=base_quality_probe.score,
+            gameplay_score=base_gameplay_probe.score,
+            quality_ok=base_quality_probe.ok,
+            gameplay_ok=base_gameplay_probe.ok,
+        )
         quality_probe = deps.quality_service.evaluate_quality_contract(candidate_html, design_spec=design_spec_dump)
         gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
             candidate_html,
@@ -2001,6 +2029,20 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             quality_ok=quality_probe.ok,
             gameplay_ok=gameplay_probe.ok,
         )
+        if base_composite_score > composite_score:
+            candidate_html = base_candidate_html
+            quality_probe = base_quality_probe
+            gameplay_probe = base_gameplay_probe
+            composite_score = base_composite_score
+            codegen_meta_rows.append(
+                {
+                    "pass": 0,
+                    "generation_source": "template_baseline",
+                    "model": None,
+                    "reason": "codegen_regression_guard",
+                    "baseline_composite_score": base_composite_score,
+                }
+            )
 
         candidate_row = {
             "index": index,

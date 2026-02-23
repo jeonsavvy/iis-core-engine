@@ -82,6 +82,8 @@ def test_webgl_builder_html_contains_webgl_audio_and_relic_hooks() -> None:
     assert "renderwebglbackground(" in html
     assert "playsfx(" in html
     assert "state.run.relics" in html
+    assert "steervelocity" in html
+    assert "math.round(state.player.lane)" not in html
 
 
 def test_flight_builder_html_contains_flight_controls_and_progression_hooks() -> None:
@@ -104,3 +106,17 @@ def test_gameplay_gate_rejects_when_keyword_requires_flight_but_mode_mismatches(
     )
     assert gate.ok is False
     assert "flight_mechanics_not_found" in gate.failed_checks or "genre_engine_mismatch" in gate.failed_checks
+
+
+def test_gameplay_gate_rejects_quantized_webgl_lane_steering() -> None:
+    html = _build_sample_html("webgl_three_runner") + "\n// Math.round(state.player.lane)"
+    quality = QualityService(Settings(qa_min_gameplay_score=55))
+    gate = quality.evaluate_gameplay_gate(
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="webgl racing",
+        genre_engine="webgl_three_runner",
+        keyword="neon outrun",
+    )
+    assert gate.ok is False
+    assert "quantized_lane_steering" in gate.failed_checks
