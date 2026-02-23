@@ -247,6 +247,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "index": index,
             "variation_hint": variation_hint,
             "artifact_html": candidate_html,
+            "baseline_artifact_html": base_candidate_html,
             "generation_meta": generated_config.meta,
             "quality_ok": quality_probe.ok,
             "quality_score": quality_probe.score,
@@ -283,6 +284,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     selected_generation_meta = dict(best_candidate.get("generation_meta", {}))
     selected_html = str(best_candidate["artifact_html"])
+    selected_baseline_html = str(best_candidate.get("baseline_artifact_html", selected_html))
 
     append_log(
         state,
@@ -327,6 +329,33 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     final_quality_score = polished_quality.score if use_polished else int(best_candidate["quality_score"])
     final_gameplay_score = polished_gameplay.score if use_polished else int(best_candidate["gameplay_score"])
     final_composite_score = polished_composite if use_polished else selected_composite
+
+    runtime_guard_candidates = [
+        ("polished", artifact_html),
+        ("selected", selected_html),
+        ("baseline", selected_baseline_html),
+    ]
+    runtime_guard_result: dict[str, object] = {"chosen": None, "reason": None, "probes": []}
+    for label, candidate_html in runtime_guard_candidates:
+        smoke_probe = deps.quality_service.run_smoke_check(candidate_html)
+        runtime_guard_result["probes"].append(
+            {
+                "label": label,
+                "ok": bool(smoke_probe.ok),
+                "reason": smoke_probe.reason,
+                "console_errors": smoke_probe.console_errors or [],
+            }
+        )
+        if smoke_probe.ok:
+            artifact_html = candidate_html
+            runtime_guard_result["chosen"] = label
+            runtime_guard_result["reason"] = smoke_probe.reason
+            break
+
+    if runtime_guard_result["chosen"] is None:
+        artifact_html = selected_baseline_html
+        runtime_guard_result["chosen"] = "baseline_force"
+        runtime_guard_result["reason"] = "builder_runtime_guard_all_failed"
 
     builder_strategy = "production_v3_candidates_codegen_qa_polish"
     candidate_scoreboard = [
@@ -450,6 +479,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
             "polish_model": polish_result.meta.get("model"),
             "polish_reason": polish_result.meta.get("reason"),
+            "runtime_guard": runtime_guard_result,
             "candidate_scoreboard": candidate_scoreboard,
         },
     )
