@@ -21,12 +21,6 @@ def _is_safe_slug(value: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value))
 
 
-def _is_usable_vertex_html(value: str) -> bool:
-    html = value.strip().lower()
-    if not html:
-        return False
-    return "<!doctype html" in html and "window.__iis_game_boot_ok" in html and "<script" in html
-
 
 def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     haystack = " ".join([keyword, title, genre]).casefold()
@@ -39,151 +33,6 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     return "arcade_generic"
 
 
-def _looks_trivial_generated_html(value: str) -> tuple[bool, str | None]:
-    html = value.casefold()
-    if not html.strip():
-        return True, "empty_response"
-    if "+100 score".casefold() in html:
-        return True, "score_button_template_detected"
-    if "requestanimationframe" not in html:
-        return True, "missing_game_loop"
-    if "addEventListener(\"keydown\"".casefold() not in html and "addEventListener('keydown'".casefold() not in html:
-        return True, "missing_keyboard_input"
-    return False, None
-
-
-def _build_html(
-    *,
-    title: str,
-    genre: str,
-    slug: str,
-    accent_color: str,
-    viewport_width: int,
-    viewport_height: int,
-    safe_area_padding: int,
-    min_font_size_px: int,
-    text_overflow_policy: str,
-) -> str:
-    return f"""<!doctype html>
-<html lang=\"en\">
-  <head>
-    <meta charset=\"UTF-8\" />
-    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-    <title>{title}</title>
-    <style>
-      :root {{
-        color-scheme: dark;
-        --viewport-width: {viewport_width};
-        --viewport-height: {viewport_height};
-        --safe-area-padding: {safe_area_padding};
-        --min-font-size: {min_font_size_px};
-        --text-overflow-policy: "{text_overflow_policy}";
-      }}
-      body {{
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        font-family: Inter, system-ui, sans-serif;
-        font-size: max(calc(var(--min-font-size) * 1px), 14px);
-        background: radial-gradient(circle, {accent_color}22 0%, #0b1021 60%);
-        color: #f8fafc;
-      }}
-      main {{
-        width: min(92vw, calc(var(--viewport-width) * 1px));
-        min-height: min(88vh, calc(var(--viewport-height) * 1px));
-        padding: calc(var(--safe-area-padding) * 1px);
-        border: 1px solid #1f2937;
-        border-radius: 14px;
-        text-align: center;
-        overflow: hidden;
-      }}
-      button {{
-        border: 1px solid {accent_color};
-        background: {accent_color};
-        color: #0b1021;
-        border-radius: 10px;
-        padding: 8px 14px;
-        font-weight: 700;
-        cursor: pointer;
-      }}
-      .hud {{ display: flex; justify-content: space-between; margin-top: 14px; }}
-      .hint {{ color: #94a3b8; font-size: 13px; }}
-      .overflow-guard {{
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }}
-    </style>
-  </head>
-  <body>
-    <main data-overflow-policy=\"{text_overflow_policy}\">
-      <h1 class=\"overflow-guard\">{title}</h1>
-      <p class=\"overflow-guard\">Genre: {genre}</p>
-      <button id=\"score-btn\">+100 Score</button>
-      <div class=\"hud\">
-        <strong id=\"score\" class=\"overflow-guard\">Score: 0</strong>
-        <span class=\"overflow-guard\">{slug}</span>
-      </div>
-      <p class=\"hint overflow-guard\">Use IISLeaderboard.submitScore(playerName, score, fingerprint) when game over.</p>
-    </main>
-
-    <script>
-      window.__iis_game_boot_ok = true;
-      const state = {{ score: 0 }};
-
-      document.getElementById("score-btn").addEventListener("click", () => {{
-        state.score += 100;
-        document.getElementById("score").textContent = `Score: ${{state.score}}`;
-      }});
-
-      async function submitScore(playerName, score, fingerprint) {{
-        const endpoint = window.__IIS_LEADERBOARD_ENDPOINT;
-        const anonKey = window.__IIS_SUPABASE_ANON_KEY;
-        const gameId = window.__IIS_GAME_ID;
-
-        if (!endpoint || !anonKey || !gameId) {{
-          return {{ status: "skipped", reason: "missing_env" }};
-        }}
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        try {{
-          const response = await fetch(endpoint, {{
-            method: "POST",
-            headers: {{
-              "Content-Type": "application/json",
-              apikey: anonKey,
-              Authorization: `Bearer ${{anonKey}}`,
-              Prefer: "return=minimal",
-            }},
-            body: JSON.stringify({{
-              game_id: gameId,
-              player_name: playerName,
-              score,
-              player_fingerprint: fingerprint,
-            }}),
-            signal: controller.signal,
-          }});
-
-          if (!response.ok) {{
-            return {{ status: "error", reason: `http_${{response.status}}` }};
-          }}
-
-          return {{ status: "ok" }};
-        }} catch (error) {{
-          return {{ status: "error", reason: String(error) }};
-        }} finally {{
-          clearTimeout(timeout);
-        }}
-      }}
-
-      window.IISLeaderboard = {{ submitScore }};
-    </script>
-  </body>
-</html>
-"""
 
 
 def _build_hybrid_engine_html(
@@ -198,6 +47,7 @@ def _build_hybrid_engine_html(
     min_font_size_px: int,
     text_overflow_policy: str,
     core_loop_type: str,
+    game_config: dict[str, Any],
 ) -> str:
     mode_config = {
         "lane_dodge_racer": {
@@ -222,21 +72,20 @@ def _build_hybrid_engine_html(
         },
     }[core_loop_type]
 
-    config_json = json.dumps(
-        {
-            "mode": core_loop_type,
-            "title": title,
-            "genre": genre,
-            "slug": slug,
-            "accentColor": accent_color,
-            "viewportWidth": viewport_width,
-            "viewportHeight": viewport_height,
-            "safeAreaPadding": safe_area_padding,
-            "minFontSizePx": min_font_size_px,
-            "textOverflowPolicy": text_overflow_policy,
-        },
-        ensure_ascii=False,
-    )
+    config_dict = {
+        "mode": core_loop_type,
+        "title": title,
+        "genre": genre,
+        "slug": slug,
+        "accentColor": accent_color,
+        "viewportWidth": viewport_width,
+        "viewportHeight": viewport_height,
+        "safeAreaPadding": safe_area_padding,
+        "minFontSizePx": min_font_size_px,
+        "textOverflowPolicy": text_overflow_policy,
+    }
+    config_dict.update(game_config)
+    config_json = json.dumps(config_dict, ensure_ascii=False)
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -410,15 +259,15 @@ def _build_hybrid_engine_html(
       const state = {{
         running: true,
         score: 0,
-        hp: 3,
-        timeLeft: 60,
+        hp: CONFIG.player_hp || 3,
+        timeLeft: CONFIG.time_limit_sec || 60,
         lastTime: 0,
         player: {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }},
         enemies: [],
         bullets: [],
         particles: [],
         spawnTimer: 0,
-        enemyHp: 8,
+        enemyHp: CONFIG.enemy_hp || 1,
         attackCooldown: 0,
       }};
 
@@ -440,15 +289,15 @@ def _build_hybrid_engine_html(
       function resetState() {{
         state.running = true;
         state.score = 0;
-        state.hp = 3;
-        state.timeLeft = 60;
+        state.hp = CONFIG.player_hp || 3;
+        state.timeLeft = CONFIG.time_limit_sec || 60;
         state.lastTime = 0;
         state.player = {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }};
         state.enemies = [];
         state.bullets = [];
         state.particles = [];
         state.spawnTimer = 0;
-        state.enemyHp = 8;
+        state.enemyHp = CONFIG.enemy_hp || 1;
         state.attackCooldown = 0;
         overlay.classList.remove("show");
         updateHud();
@@ -463,23 +312,25 @@ def _build_hybrid_engine_html(
       }}
 
       function spawnEnemy() {{
+        const spdMin = CONFIG.enemy_speed_min || 100;
+        const spdMax = CONFIG.enemy_speed_max || 220;
         if (CONFIG.mode === "lane_dodge_racer") {{
           const lanes = [0.28, 0.5, 0.72];
           const lane = Math.floor(Math.random() * lanes.length);
-          state.enemies.push({{ x: canvas.width * lanes[lane] - 18, y: -70, w: 36, h: 70, speed: rand(360, 520) }});
+          state.enemies.push({{ x: canvas.width * lanes[lane] - 18, y: -70, w: 36, h: 70, speed: rand(spdMin, spdMax) }});
           return;
         }}
         if (CONFIG.mode === "arena_shooter") {{
-          state.enemies.push({{ x: rand(40, canvas.width - 80), y: -40, w: 30, h: 30, speed: rand(120, 220), hp: 1 }});
+          state.enemies.push({{ x: rand(40, canvas.width - 80), y: -40, w: 30, h: 30, speed: rand(spdMin, spdMax), hp: CONFIG.enemy_hp || 1 }});
           return;
         }}
         if (CONFIG.mode === "duel_brawler") {{
           if (state.enemies.length === 0) {{
-            state.enemies.push({{ x: canvas.width * 0.5 + 120, y: canvas.height * 0.5, w: 46, h: 72, hp: state.enemyHp, speed: 120 }});
+            state.enemies.push({{ x: canvas.width * 0.5 + 120, y: canvas.height * 0.5, w: 46, h: 72, hp: state.enemyHp, speed: spdMin }});
           }}
           return;
         }}
-        state.enemies.push({{ x: rand(40, canvas.width - 80), y: -40, w: 26, h: 26, speed: rand(140, 220) }});
+        state.enemies.push({{ x: rand(40, canvas.width - 80), y: -40, w: 26, h: 26, speed: rand(spdMin, spdMax) }});
       }}
 
       function fireBullet() {{
@@ -489,7 +340,7 @@ def _build_hybrid_engine_html(
 
       function performAttack() {{
         if (!state.running || state.attackCooldown > 0) return;
-        state.attackCooldown = 0.35;
+        state.attackCooldown = CONFIG.player_attack_cooldown || 0.5;
         const enemy = state.enemies[0];
         if (!enemy) return;
         const dx = (enemy.x + enemy.w / 2) - (state.player.x + state.player.w / 2);
@@ -522,6 +373,7 @@ def _build_hybrid_engine_html(
         state.timeLeft = Math.max(0, state.timeLeft - dt);
         state.spawnTimer += dt;
         state.attackCooldown = Math.max(0, state.attackCooldown - dt);
+        const spawnRate = CONFIG.enemy_spawn_rate || 1.0;
 
         if (CONFIG.mode === "lane_dodge_racer") {{
           const laneXs = [canvas.width * 0.28, canvas.width * 0.5, canvas.width * 0.72];
@@ -529,7 +381,7 @@ def _build_hybrid_engine_html(
           if ((keys.has("ArrowRight") || keys.has("d")) && state.player.lane < 2) {{ state.player.lane += 1; keys.delete("ArrowRight"); keys.delete("d"); }}
           const targetX = laneXs[state.player.lane] - state.player.w / 2;
           state.player.x += (targetX - state.player.x) * Math.min(1, dt * 10);
-          if (state.spawnTimer > 0.42) {{ state.spawnTimer = 0; spawnEnemy(); }}
+          if (state.spawnTimer > spawnRate) {{ state.spawnTimer = 0; spawnEnemy(); }}
           for (const e of state.enemies) e.y += e.speed * dt;
           for (const e of state.enemies) {{
             if (rectsOverlap(state.player, e)) {{
@@ -540,16 +392,16 @@ def _build_hybrid_engine_html(
           }}
           state.enemies = state.enemies.filter((e) => {{
             const passed = e.y > canvas.height + 80;
-            if (passed) state.score += 20;
+            if (passed) state.score += (CONFIG.base_score_value || 10);
             return !passed;
           }});
         }} else if (CONFIG.mode === "arena_shooter") {{
-          const speed = 260;
+          const speed = CONFIG.player_speed || 260;
           state.player.vx = (keys.has("ArrowRight") || keys.has("d") ? 1 : 0) - (keys.has("ArrowLeft") || keys.has("a") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0) - (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
           state.player.y = clamp(state.player.y + state.player.vy * speed * dt, 60, canvas.height - state.player.h - 20);
-          if (state.spawnTimer > 0.55) {{ state.spawnTimer = 0; spawnEnemy(); }}
+          if (state.spawnTimer > spawnRate) {{ state.spawnTimer = 0; spawnEnemy(); }}
           for (const e of state.enemies) {{
             e.y += e.speed * dt;
             if (e.y > canvas.height + 40) {{
@@ -568,7 +420,7 @@ def _build_hybrid_engine_html(
               if (e.y < canvas.height + 500 && rectsOverlap(b, e)) {{
                 e.y = canvas.height + 999;
                 b.y = -999;
-                state.score += 35;
+                state.score += (CONFIG.base_score_value || 10);
                 burst(e.x + e.w/2, e.y + e.h/2, "#38bdf8", 8);
               }}
             }}
@@ -576,7 +428,7 @@ def _build_hybrid_engine_html(
           state.enemies = state.enemies.filter((e) => e.y < canvas.height + 120);
           state.bullets = state.bullets.filter((b) => b.y > -40);
         }} else if (CONFIG.mode === "duel_brawler") {{
-          const speed = 220;
+          const speed = CONFIG.player_speed || 220;
           state.player.vx = (keys.has("ArrowRight") || keys.has("d") ? 1 : 0) - (keys.has("ArrowLeft") || keys.has("a") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0) - (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
@@ -848,7 +700,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         },
     )
 
-    generated_html = deps.vertex_service.generate_single_file_game(
+    generated_config = deps.vertex_service.generate_game_config(
         keyword=state["keyword"],
         title=title,
         genre=genre,
@@ -861,15 +713,15 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
         agent_name=PipelineAgentName.BUILDER,
-        message="Validating generated artifact and applying builder guardrails.",
+        message="Generating unified hybrid engine artifact with LLM JSON data.",
         metadata={
             "iteration": state["build_iteration"],
-            "model": generated_html.meta.get("model"),
-            "generation_source": generated_html.meta.get("generation_source", "stub"),
+            "model": generated_config.meta.get("model"),
+            "generation_source": generated_config.meta.get("generation_source", "stub"),
         },
     )
 
-    fallback_html = _build_hybrid_engine_html(
+    artifact_html = _build_hybrid_engine_html(
         title=title,
         genre=genre,
         slug=slug,
@@ -880,27 +732,16 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         min_font_size_px=design_spec.min_font_size_px,
         text_overflow_policy=design_spec.text_overflow_policy,
         core_loop_type=core_loop_type,
+        game_config=generated_config.payload,
     )
-    builder_strategy = "llm_full"
+    builder_strategy = "engine_hybrid_data_driven"
     guardrail_reason: str | None = None
-    artifact_html = generated_html.text
     artifact_files: list[dict[str, str]] | None = None
     artifact_manifest: dict[str, object] | None = None
-    if not _is_usable_vertex_html(generated_html.text):
-        artifact_html = fallback_html
-        builder_strategy = "engine_hybrid_fallback"
-        guardrail_reason = "vertex_html_unusable"
-    else:
-        is_trivial, trivial_reason = _looks_trivial_generated_html(generated_html.text)
-        if is_trivial:
-            artifact_html = fallback_html
-            builder_strategy = "engine_hybrid_guardrail"
-            guardrail_reason = trivial_reason
 
-    if builder_strategy.startswith("engine_hybrid"):
-        hybrid_bundle = _extract_hybrid_bundle_from_inline_html(slug=slug, inline_html=fallback_html)
-        if hybrid_bundle:
-            artifact_files, artifact_manifest = hybrid_bundle
+    hybrid_bundle = _extract_hybrid_bundle_from_inline_html(slug=slug, inline_html=artifact_html)
+    if hybrid_bundle:
+        artifact_files, artifact_manifest = hybrid_bundle
 
     build_artifact = BuildArtifactPayload(
         game_slug=slug,
@@ -932,10 +773,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "artifact": state["outputs"]["artifact_path"],
             "genre": genre,
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
-            "generation_source": generated_html.meta.get("generation_source", "stub"),
+            "generation_source": generated_config.meta.get("generation_source", "stub"),
             **{
                 key: value
-                for key, value in generated_html.meta.items()
+                for key, value in generated_config.meta.items()
                 if key in {"model", "latency_ms", "reason", "vertex_error"}
             },
             "builder_strategy": builder_strategy,

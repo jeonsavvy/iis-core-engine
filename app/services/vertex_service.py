@@ -40,6 +40,29 @@ class VertexTextResult:
     meta: dict[str, Any]
 
 
+class _EnemyConfig(BaseModel):
+    hp: int = 1
+    speed_min: int = 100
+    speed_max: int = 220
+    spawn_rate_sec: float = 1.0
+
+class _PlayerConfig(BaseModel):
+    hp: int = 3
+    speed: int = 240
+    attack_cooldown_sec: float = 0.5
+    
+class _GameConfigModel(BaseModel):
+    player_hp: int = 3
+    player_speed: int = 240
+    player_attack_cooldown: float = 0.5
+    enemy_hp: int = 1
+    enemy_speed_min: int = 100
+    enemy_speed_max: int = 220
+    enemy_spawn_rate: float = 1.0
+    time_limit_sec: int = 60
+    base_score_value: int = 10
+
+
 class _GDDModel(BaseModel):
     title: str
     genre: str
@@ -199,7 +222,7 @@ class VertexService:
                 },
             )
 
-    def generate_single_file_game(
+    def generate_game_config(
         self,
         *,
         keyword: str,
@@ -207,10 +230,10 @@ class VertexService:
         genre: str,
         objective: str,
         design_spec: dict[str, Any],
-    ) -> VertexTextResult:
+    ) -> VertexGenerationResult:
         if not self._is_enabled():
-            return VertexTextResult(
-                text="",
+            return VertexGenerationResult(
+                payload=self._fallback_game_config().dict(),
                 meta={"generation_source": "stub", "reason": "vertex_not_configured"},
             )
 
@@ -224,21 +247,21 @@ class VertexService:
                 design_spec=design_spec,
             )
             if self._use_genai_sdk():
-                content = self._genai_text(
+                raw = self._genai_json(
                     model_name=self.settings.gemini_pro_model,
                     prompt=prompt,
-                    temperature=0.4,
+                    schema=_GameConfigModel,
+                    temperature=0.3,
                 )
             else:
                 model = self._pro_model()
-                raw = self._invoke_with_retry(model, prompt)
-                content = _strip_code_fences(_coerce_message_text(getattr(raw, "content", raw)))
+                runnable = model.with_structured_output(_GameConfigModel, method="json_mode")
+                raw = self._invoke_with_retry(runnable, prompt)
+            parsed = raw if isinstance(raw, _GameConfigModel) else _GameConfigModel.model_validate(raw)
             latency_ms = int((time.perf_counter() - started) * 1000)
-            if not content:
-                raise ValueError("empty_builder_response")
 
-            return VertexTextResult(
-                text=content,
+            return VertexGenerationResult(
+                payload=parsed.model_dump(),
                 meta={
                     "generation_source": "vertex",
                     "model": self.settings.gemini_pro_model,
@@ -246,9 +269,9 @@ class VertexService:
                 },
             )
         except Exception as exc:  # pragma: no cover - external API path
-            logger.warning("Vertex builder generation failed, using fallback template: %s", exc)
-            return VertexTextResult(
-                text="",
+            logger.warning("Vertex config generation failed, using fallback: %s", exc)
+            return VertexGenerationResult(
+                payload=self._fallback_game_config().dict(),
                 meta={
                     "generation_source": "stub",
                     "reason": f"vertex_error:{type(exc).__name__}",
@@ -442,40 +465,33 @@ class VertexService:
     ) -> str:
         spec_json = json.dumps(design_spec, ensure_ascii=False)
         return (
-            "Generate a polished single-file browser game as HTML (inline CSS + JS) and return ONLY HTML.\n"
-            "No markdown fences. No explanations.\n\n"
-            "Requirements:\n"
-            "- Must include <!doctype html>\n"
-            "- Must include <meta name=\"viewport\">\n"
-            "- Must set window.__iis_game_boot_ok = true\n"
-            "- Must define window.IISLeaderboard.submitScore usage contract (call-safe wrapper)\n"
-            "- Must be genuinely playable with keyboard and/or mouse (not a single increment button toy)\n"
-            "- Keep scope simple and stable (arcade prototype) but include a real game loop\n"
-            "- Use dark theme and readable HUD text\n"
-            "- Avoid external assets/CDNs\n\n"
-            "Hard gameplay constraints:\n"
-            "- Include a render/update loop (e.g., requestAnimationFrame)\n"
-            "- Include player movement or aiming input\n"
-            "- Include at least one threat/obstacle/enemy or time pressure mechanic\n"
-            "- Include failure condition and restart flow\n"
-            "- Include score progression tied to gameplay events, not only manual increment click\n"
-            "- If genre/fantasy implies combat (shooting/fighting/duel), include attack + hit detection\n"
-            "- Prefer canvas-based rendering for action genres; DOM-only is acceptable only if still dynamic/playable\n\n"
-            "Quality contract compatibility (important for QA):\n"
-            "- Include CSS vars: --viewport-width, --viewport-height, --safe-area-padding, --min-font-size\n"
-            "- Include data-overflow-policy attribute on the main container\n"
-            "- Use overflow-guard class on HUD/title labels where text can grow\n"
-            "- Keep text UTF-8 safe and avoid mojibake by using standard UTF-8 HTML output\n\n"
-            "Anti-patterns (must avoid):\n"
-            "- A page with only one '+score' button and no movement/threat loop\n"
-            "- Static mockup without continuous gameplay updates\n"
-            "- Broken JS, missing script tags, or missing boot flag\n\n"
+            "You are a master game balancer and level designer for arcade games. "
+            "Return JSON only.\n"
             f"Keyword: {keyword}\n"
             f"Title: {title}\n"
             f"Genre: {genre}\n"
             f"Objective: {objective}\n"
-            f"DesignSpec JSON: {spec_json}\n"
+            f"DesignSpec JSON: {spec_json}\n\n"
+            "Based on the game's theme, objective, and pace, provide a fine-tuned configuration JSON "
+            "that defines the balance and mechanics of the game. Output fields exactly according to the schema:\n"
+            "- player_hp: integer (e.g. 1 to 5, default 3)\n"
+            "- player_speed: integer (e.g. 150 to 400, default 240)\n"
+            "- player_attack_cooldown: float (e.g. 0.2 to 1.5, default 0.5)\n"
+            "- enemy_hp: integer (e.g. 1 to 20, default 1)\n"
+            "- enemy_speed_min: integer (e.g. 50 to 150, default 100)\n"
+            "- enemy_speed_max: integer (e.g. 150 to 300, default 220)\n"
+            "- enemy_spawn_rate: float (sec between spawns, e.g. 0.3 to 2.0, default 1.0)\n"
+            "- time_limit_sec: integer (e.g. 30 to 120, default 60)\n"
+            "- base_score_value: integer (e.g. 10 to 100, default 10)\n\n"
+            "Quality bar:\n"
+            "- If the game is a fast-paced racing game, increase speeds and lower HP.\n"
+            "- If the game is a brawl, increase enemy HP and adjust attack cooldowns.\n"
+            "- Ensure values provide a fair but challenging experience suitable for a 90-second arcade game."
         )
+
+    @staticmethod
+    def _fallback_game_config() -> _GameConfigModel:
+        return _GameConfigModel()
 
     @staticmethod
     def _fallback_gdd_bundle(keyword: str, *, reason: str) -> VertexGenerationResult:
