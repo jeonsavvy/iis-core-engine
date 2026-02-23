@@ -49,6 +49,18 @@ class FakePublisherService:
             "game_id": "fake-game-id",
         }
 
+    def upload_screenshot(self, *, slug: str, screenshot_png: bytes) -> dict[str, str]:
+        assert slug
+        assert isinstance(screenshot_png, bytes)
+        return {"status": "uploaded", "screenshot_url": f"https://example.com/screenshots/{slug}.png"}
+
+    def update_game_marketing(self, *, slug: str, ai_review: str, screenshot_url: str | None = None) -> dict[str, str]:
+        assert slug
+        assert ai_review
+        if screenshot_url is not None:
+            assert isinstance(screenshot_url, str)
+        return {"status": "updated"}
+
 
 class FakeGitHubArchiveService:
     def commit_archive_game(
@@ -70,18 +82,11 @@ class FakeGitHubArchiveService:
         return {"status": "committed"}
 
 
-class FakeXService:
-    def publish_update(self, game_slug: str, text: str):
-        assert game_slug
-        assert text
-        return {"status": "posted"}
-
-
 def _make_runner(repository: PipelineRepository) -> PipelineRunner:
+    settings = Settings(telegram_bot_token="")
     return PipelineRunner(
         repository=repository,
-        settings=Settings(),
-        x_service=FakeXService(),
+        settings=settings,
         quality_service=FakeQualityService(),
         publisher_service=FakePublisherService(),
         github_archive_service=FakeGitHubArchiveService(),
@@ -89,10 +94,10 @@ def _make_runner(repository: PipelineRepository) -> PipelineRunner:
 
 
 def _make_runner_with_quality(repository: PipelineRepository, quality_service) -> PipelineRunner:
+    settings = Settings(telegram_bot_token="")
     return PipelineRunner(
         repository=repository,
-        settings=Settings(),
-        x_service=FakeXService(),
+        settings=settings,
         quality_service=quality_service,
         publisher_service=FakePublisherService(),
         github_archive_service=FakeGitHubArchiveService(),
@@ -118,6 +123,10 @@ def test_pipeline_runner_success_flow_contains_style_and_publish() -> None:
     assert "style" in stages
     assert "publish" in stages
     assert "done" in stages
+    usage_summary = final_job.metadata.get("usage_summary")
+    assert isinstance(usage_summary, dict)
+    assert usage_summary.get("schema_version") == 1
+    assert usage_summary.get("game_slug")
 
 
 def test_pipeline_runner_marks_error_after_three_qa_retries() -> None:
@@ -196,3 +205,14 @@ def test_manual_mode_pauses_and_resumes_with_stage_approval() -> None:
     assert paused_again is not None
     assert paused_again.status == PipelineStatus.SKIPPED
     assert paused_again.error_reason == "awaiting_approval:style"
+
+    repository.approve_stage(job.pipeline_id, PipelineStage.STYLE)
+    third_claim = repository.claim_next_queued_pipeline()
+    assert third_claim is not None
+
+    runner.run(third_claim)
+
+    paused_build = repository.get_pipeline(job.pipeline_id)
+    assert paused_build is not None
+    assert paused_build.status == PipelineStatus.SKIPPED
+    assert paused_build.error_reason == "awaiting_approval:build"

@@ -6,7 +6,7 @@ from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatu
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     slug = state["outputs"].get("game_slug", "unknown-game")
-    genre = state["outputs"].get("genre", "arcade")
+    genre = state["outputs"].get("game_genre", "arcade")
     keyword = state.get("keyword", "unknown")
     
     marketing_result = deps.vertex_service.generate_marketing_copy(
@@ -14,8 +14,21 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     marketing_text = marketing_result.payload.get("marketing_copy", "")
     
-    public_url = f"{deps.telegram_service.settings.public_games_base_url}/{slug}"
-    telegram_text = f"🎮 *New Game Published!*\n\n{marketing_text}\n\n🕹️ Play now: {public_url}"
+    resolved_public_url = ""
+    publish_result = state["outputs"].get("publish_result")
+    if isinstance(publish_result, dict):
+        maybe_public_url = publish_result.get("public_url")
+        if isinstance(maybe_public_url, str):
+            resolved_public_url = maybe_public_url.strip()
+    if not resolved_public_url:
+        raw_public_url = state["outputs"].get("public_url")
+        if isinstance(raw_public_url, str):
+            resolved_public_url = raw_public_url.strip()
+    if not resolved_public_url:
+        base_url = deps.telegram_service.settings.public_games_base_url.rstrip("/")
+        resolved_public_url = f"{base_url}/{slug}/index.html"
+
+    telegram_text = f"🎮 신규 게임 게시됨\n\n{marketing_text}\n\n🕹️ 플레이: {resolved_public_url}"
     
     result = deps.telegram_service.broadcast_message(telegram_text)
     
@@ -40,6 +53,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "model": marketing_result.meta.get("model"),
             "latency_ms": marketing_result.meta.get("latency_ms"),
             "usage": marketing_result.meta.get("usage", {}),
+            "marketing_language": "ko-KR",
+            "resolved_public_url": resolved_public_url,
         },
         reason=reason,
     )

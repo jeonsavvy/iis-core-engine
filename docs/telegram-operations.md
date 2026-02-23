@@ -1,42 +1,78 @@
-# Telegram 운영 절차서 (MVP)
+# Telegram 운영 절차서 (단일 관리자 제어)
 
 ## 1) 기본 정책
 
-- 허용된 chat id(`TELEGRAM_ALLOWED_CHAT_IDS`)만 실행
-- 비허용 chat의 `/run` 요청은 큐 등록 대신 `status=skipped` 감사 엔트리로 기록
-- 명령어:
-  - `/run <keyword>`
-  - `/status <pipeline_id>`
+- Telegram 제어는 `TELEGRAM_CONTROL_ENABLED=true`일 때만 동작합니다.
+- 제어 명령은 아래 **3가지 조건을 모두** 만족해야 실행됩니다.
+  1. webhook secret 헤더(`X-Telegram-Bot-Api-Secret-Token`) 일치
+  2. chat id가 `TELEGRAM_ALLOWED_CHAT_IDS`에 포함
+  3. user id가 `TELEGRAM_ALLOWED_USER_IDS`에 포함
+- 비인가 요청은 전부 차단되며 감사 로그(`admin_config`)로 남습니다.
+- 위험 명령은 `/confirm` 2단계 확인 전까지 실행되지 않습니다.
 
 ## 2) 환경변수
 
 - `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET` (**필수**, 없으면 webhook 503)
+- `TELEGRAM_CONTROL_ENABLED` (`true/false`)
 - `TELEGRAM_ALLOWED_CHAT_IDS` (쉼표 구분)
-- `TELEGRAM_WEBHOOK_SECRET` (권장)
+- `TELEGRAM_ALLOWED_USER_IDS` (쉼표 구분)
+- `TELEGRAM_ALLOW_DANGEROUS_COMMANDS` (`true`일 때만 위험 명령 허용)
+- `TELEGRAM_CONFIRM_TTL_SECONDS` (`30~600`)
+- `TELEGRAM_CONFIRM_SECRET` (없으면 webhook secret으로 서명)
 
-## 3) Webhook 모드
+## 3) 명령어
 
-1. API 엔드포인트 준비
-   - `POST /api/v1/telegram/webhook`
-2. Telegram webhook 등록
-   - secret token을 `TELEGRAM_WEBHOOK_SECRET`와 동일하게 설정
-3. API 로그에서 403 여부 확인
-   - secret mismatch 시 403
+- 일반 명령
+  - `/run <keyword>`
+  - `/status <pipeline_id>`
+  - `/approve <pipeline_id> <stage>`
+  - `/logs <pipeline_id> [limit]`
+- 위험 명령 (항상 2단계 확인)
+  - `/retry <pipeline_id>`
+  - `/cancel <pipeline_id>`
+  - `/reset <pipeline_id>`
+  - `/delete_game <game_id>`
+  - `/confirm <token>`
 
-## 4) 장애 대응
+## 4) 위험 명령 확인 플로우
 
-- 잘못된 chat 유입 급증:
-  - `TELEGRAM_ALLOWED_CHAT_IDS` 축소
-  - 필요 시 webhook 일시 해제
-- Bot token 유출 의심:
-  - 즉시 token revoke/reissue
-  - `.env` 교체 후 API 재시작
-- Supabase 또는 worker 장애:
-  - Telegram은 접수만 하고 큐 적재 실패를 반환할 수 있음
-  - `admin_config` insert 에러 우선 확인
+1. 운영자가 `/retry ...` 등 위험 명령 전송
+2. 봇이 `telegram_confirm_required` 감사 로그 생성
+3. 봇이 `/confirm <token>` 안내 메시지 전송
+4. 운영자가 TTL 내 `/confirm <token>` 실행 시에만 실제 작업 수행
+5. 토큰 만료/서명 오류/user/chat 불일치 시 즉시 거부
 
-## 5) 점검 체크리스트
+## 5) 차단/감사 reason 코드
+
+- `telegram_control_disabled`
+- `telegram_webhook_secret_required`
+- `telegram_allowed_chat_ids_missing`
+- `telegram_allowed_user_ids_missing`
+- `telegram_chat_not_allowed`
+- `telegram_user_not_allowed`
+- `telegram_confirm_required`
+- `confirm_signature_invalid`
+- `confirm_token_expired`
+- `confirm_chat_mismatch`
+- `confirm_user_mismatch`
+
+## 6) 장애 대응
+
+- 비인가 요청 급증:
+  - `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_ALLOWED_USER_IDS` 재검증
+  - 감사 로그의 reason 코드 기준으로 차단 정책 점검
+- secret 유출 의심:
+  - bot token / webhook secret 즉시 재발급
+  - `TELEGRAM_CONFIRM_SECRET`도 함께 교체
+- 위험 명령 일시 차단:
+  - `TELEGRAM_ALLOW_DANGEROUS_COMMANDS=false`
+- 전체 제어 중지:
+  - `TELEGRAM_CONTROL_ENABLED=false`
+
+## 7) 점검 체크리스트
 
 - `/run` 실행 시 `trigger_source='telegram'` 확인
-- `/status`에서 pipeline 상태 회신 확인
-- 차단 chat에서 `telegram_chat_not_allowed` 감사 엔트리 확인
+- `/status`, `/approve`, `/logs` 정상 응답 확인
+- 비허용 user/chat 요청에서 `status=blocked` + 감사 로그 생성 확인
+- 위험 명령이 `/confirm` 없이는 실행되지 않는지 확인

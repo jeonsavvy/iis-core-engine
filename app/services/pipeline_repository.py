@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -29,6 +30,8 @@ MANUAL_APPROVAL_STAGES: tuple[PipelineStage, ...] = (
     PipelineStage.ECHO,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class PipelineJob:
@@ -56,9 +59,14 @@ class PipelineRepository:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PipelineRepository":
-        if settings.supabase_url and settings.supabase_service_role_key:
-            client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-            return cls(client=client, settings=settings)
+        supabase_url = (settings.supabase_url or "").strip()
+        service_key = (settings.supabase_service_role_key or "").strip()
+        if supabase_url and service_key and supabase_url.startswith(("http://", "https://")):
+            try:
+                client = create_client(supabase_url, service_key)
+                return cls(client=client, settings=settings)
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning("Failed to initialize Supabase client; falling back to in-memory repository: %s", exc)
         return cls(client=None, settings=settings)
 
     def create_pipeline(self, request: TriggerRequest) -> PipelineJob:

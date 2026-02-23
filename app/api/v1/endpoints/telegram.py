@@ -19,7 +19,13 @@ def telegram_webhook(
 ) -> TelegramWebhookResponse:
     settings = get_settings()
 
-    if settings.telegram_webhook_secret and x_telegram_secret != settings.telegram_webhook_secret:
+    if not settings.telegram_webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="TELEGRAM_WEBHOOK_SECRET is required for telegram control",
+        )
+
+    if x_telegram_secret != settings.telegram_webhook_secret:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid telegram webhook secret token")
 
     service = TelegramService(settings)

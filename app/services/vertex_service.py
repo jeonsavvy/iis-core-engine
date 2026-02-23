@@ -476,9 +476,10 @@ class VertexService:
 
     def generate_marketing_copy(self, *, keyword: str, slug: str, genre: str) -> VertexGenerationResult:
         prompt = (
-            f"Write a short, engaging, 1-2 sentence AI designer review and promotional tweet "
-            f"for an indie arcade game named '{slug}'. The genre is '{genre}' and the keyword is '{keyword}'. "
-            f"Include emojis and #indiegame #html5. Return ONLY the text, nothing else."
+            f"게임 이름은 '{slug}', 장르는 '{genre}', 키워드는 '{keyword}'입니다. "
+            "한국어(ko-KR)로 1~2문장 분량의 게임 디자이너 코멘트 겸 홍보 문구를 작성하세요. "
+            "과장된 표현은 피하고 실제 플레이 감각(조작/목표/긴장감)을 담아주세요. "
+            "이모지 1~2개와 #indiegame #html5 해시태그를 포함하고, 오직 문구 텍스트만 반환하세요."
         )
         started = time.perf_counter()
         try:
@@ -506,7 +507,7 @@ class VertexService:
             )
         except Exception as exc:
             logger.warning("Vertex marketing generation failed: %s", exc)
-            fallback_text = f"New game launched: {slug} #indiegame #html5 based on '{keyword}'!"
+            fallback_text = f"🎮 '{slug}' 새 게임이 공개되었습니다! 키워드 '{keyword}' 기반 아케이드 액션을 지금 플레이해보세요. #indiegame #html5"
             return VertexGenerationResult(
                 payload={"marketing_copy": fallback_text},
                 meta={

@@ -8,9 +8,17 @@ class TelegramChat(BaseModel):
     type: str | None = None
 
 
+class TelegramUser(BaseModel):
+    id: int
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+
+
 class TelegramMessage(BaseModel):
     message_id: int | None = None
     chat: TelegramChat
+    from_user: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
 
 

@@ -47,6 +47,7 @@ class GitHubArchiveService:
         except Exception:
             manifest = {"schema_version": 1, "games": []}
 
+        manifest = self._normalize_manifest(manifest)
         games = manifest.get("games", [])
         if not isinstance(games, list):
             games = []
@@ -124,6 +125,7 @@ class GitHubArchiveService:
         except Exception:
             manifest = {"schema_version": 1, "games": []}
 
+        manifest = self._normalize_manifest(manifest)
         games = manifest.get("games", [])
         if not isinstance(games, list):
             games = []
@@ -159,3 +161,25 @@ class GitHubArchiveService:
             logger.error(f"Git delete/push failed: {exc}")
             return {"status": "error", "reason": f"git_operation_failed: {exc}"}
 
+    @staticmethod
+    def _normalize_manifest(raw_manifest: Any) -> dict[str, Any]:
+        if isinstance(raw_manifest, dict):
+            schema_version = raw_manifest.get("schema_version", 1)
+            games = raw_manifest.get("games", [])
+            if not isinstance(games, list):
+                games = []
+            try:
+                normalized_schema_version = int(schema_version)
+            except Exception:
+                normalized_schema_version = 1
+            return {
+                **raw_manifest,
+                "schema_version": normalized_schema_version,
+                "games": games,
+            }
+
+        if isinstance(raw_manifest, list):
+            games = [item for item in raw_manifest if isinstance(item, dict)]
+            return {"schema_version": 1, "games": games}
+
+        return {"schema_version": 1, "games": []}
