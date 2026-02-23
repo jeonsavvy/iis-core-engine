@@ -52,7 +52,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         stage=PipelineStage.QA,
         status=PipelineStatus.RUNNING,
         agent_name=PipelineAgentName.SENTINEL,
-        message="Quality gate evaluation started.",
+        message="Quality + gameplay gate evaluation started.",
         metadata={"attempt": state["qa_attempt"]},
     )
     quality_result = deps.quality_service.evaluate_quality_contract(
@@ -101,7 +101,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     state["needs_rebuild"] = False
-    qa_message = "QA passed via Playwright smoke check and quality gate."
+    qa_message = "QA passed via Playwright smoke check and quality/gameplay gates."
     if smoke_result.reason:
         qa_message = f"QA passed with fallback: {smoke_result.reason}"
 

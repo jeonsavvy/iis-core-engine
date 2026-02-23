@@ -158,7 +158,7 @@ class QualityService:
         design_spec: dict[str, Any] | None = None,
         genre: str | None = None,
     ) -> GameplayGateResult:
-        _ = design_spec
+        spec = design_spec or {}
         lowered = html_content.lower()
         genre_hint = (genre or "").strip().casefold()
 
@@ -171,14 +171,31 @@ class QualityService:
             ("feedback_fx", any(token in lowered for token in ("shadowblur", "burst(", "particles", "screen")), 13),
             ("readability_guard", "safe-area" in lowered and "overflow-guard" in lowered, 10),
             ("mode_branching", lowered.count("config.mode") >= 2, 10),
+            ("progression_curve", any(token in lowered for token in ("difficultyscale", "run.level", "leveltimer", "adaptive")), 12),
+            ("replay_loop", any(token in lowered for token in ("restartgame", "combo", "timeleft")), 10),
+            ("telegraph_or_counterplay", any(token in lowered for token in ("attackcooldown", "dashcooldown", "kind === \"elite\"", "lanefloat")), 10),
+            ("failure_feedback", "overlaytext" in lowered and "endgame(" in lowered, 8),
         ]
 
         if any(token in genre_hint for token in ("racing", "레이싱", "drift", "드리프트")):
             checks.append(("racing_specific_mechanics", any(token in lowered for token in ("boosttimer", "roadcurve", "accel", "brake")), 10))
         if any(token in genre_hint for token in ("shooter", "슈팅")):
             checks.append(("shooter_specific_mechanics", "firebullet" in lowered and "bullets" in lowered, 10))
+            checks.append(("shooter_enemy_behaviors", any(token in lowered for token in ("charger", "elite", "orbit")), 8))
         if any(token in genre_hint for token in ("fighter", "격투", "brawler")):
             checks.append(("fighter_specific_mechanics", "performattack" in lowered and "attackcooldown" in lowered, 10))
+        if any(token in genre_hint for token in ("로그라이크", "roguelike", "탑다운", "topdown")):
+            checks.append(("roguelike_progression", any(token in lowered for token in ("run.level", "difficultyscale", "dashcooldown")), 10))
+
+        text_overflow_policy = str(spec.get("text_overflow_policy", "")).strip()
+        if text_overflow_policy:
+            checks.append(
+                (
+                    "style_contract_preserved",
+                    text_overflow_policy.casefold() in lowered and "assetpack" in lowered,
+                    8,
+                )
+            )
 
         total_weight = sum(weight for _, _, weight in checks)
         passed_weight = sum(weight for _, passed, weight in checks if passed)
@@ -186,9 +203,22 @@ class QualityService:
         threshold = self.settings.qa_min_gameplay_score
         check_map = {name: passed for name, passed, _ in checks}
         failed_checks = [name for name, passed, _ in checks if not passed]
+        hard_failures: list[str] = []
+
+        if "requestanimationframe" not in lowered:
+            hard_failures.append("missing_realtime_loop")
+        if "spawnenemy(" not in lowered and "state.enemies.push" not in lowered:
+            hard_failures.append("no_enemy_pressure")
+        if lowered.count("score +=") <= 1 and "combo" not in lowered:
+            hard_failures.append("flat_scoring_loop")
+
+        if hard_failures:
+            failed_checks.extend(hard_failures)
+            for failure in hard_failures:
+                check_map[failure] = False
 
         return GameplayGateResult(
-            ok=score >= threshold,
+            ok=(score >= threshold) and not hard_failures,
             score=score,
             threshold=threshold,
             failed_checks=failed_checks,
