@@ -122,6 +122,7 @@ class VertexService:
         self.settings = settings
         self._pro_llm = None
         self._flash_llm = None
+        self._builder_llm = None
         self._genai_client = None
 
     def generate_gdd_bundle(self, keyword: str) -> VertexGenerationResult:
@@ -243,6 +244,7 @@ class VertexService:
             )
 
         started = time.perf_counter()
+        builder_model = self._builder_model_name()
         try:
             prompt = self._builder_prompt(
                 keyword=keyword,
@@ -255,13 +257,13 @@ class VertexService:
             usage = {}
             if self._use_genai_sdk():
                 raw, usage = self._genai_json(
-                    model_name=self.settings.gemini_pro_model,
+                    model_name=builder_model,
                     prompt=prompt,
                     schema=_GameConfigModel,
                     temperature=0.3,
                 )
             else:
-                model = self._pro_model()
+                model = self._builder_model()
                 runnable = model.with_structured_output(_GameConfigModel, method="json_mode")
                 raw = self._invoke_with_retry(runnable, prompt)
             parsed = raw if isinstance(raw, _GameConfigModel) else _GameConfigModel.model_validate(raw)
@@ -271,7 +273,7 @@ class VertexService:
                 payload=parsed.model_dump(),
                 meta={
                     "generation_source": "vertex",
-                    "model": self.settings.gemini_pro_model,
+                    "model": builder_model,
                     "latency_ms": latency_ms,
                     "usage": usage,
                 },
@@ -284,7 +286,7 @@ class VertexService:
                     "generation_source": "stub",
                     "reason": f"vertex_error:{type(exc).__name__}",
                     "vertex_error": str(exc),
-                    "model": self.settings.gemini_pro_model,
+                    "model": builder_model,
                 },
             )
 
@@ -315,6 +317,21 @@ class VertexService:
         if self._flash_llm is None:
             self._flash_llm = self._build_model(self.settings.gemini_flash_model, temperature=0.3)
         return self._flash_llm
+
+    def _builder_model_name(self) -> str:
+        configured = str(self.settings.gemini_pro_model or "").strip()
+        fallback = "gemini-2.5-pro"
+        if not configured:
+            return fallback
+        if self.settings.builder_force_pro_model and "flash" in configured.casefold():
+            logger.warning("BUILDER_FORCE_PRO_MODEL enabled, but GEMINI_PRO_MODEL points to flash model: %s", configured)
+            return fallback
+        return configured
+
+    def _builder_model(self):
+        if self._builder_llm is None:
+            self._builder_llm = self._build_model(self._builder_model_name(), temperature=0.4)
+        return self._builder_llm
 
     def _build_model(self, model_name: str, *, temperature: float):
         if ChatVertexAI is None:  # pragma: no cover - import guard
@@ -723,17 +740,18 @@ class VertexService:
             f"{html_content}"
         )
         started = time.perf_counter()
+        builder_model = self._builder_model_name()
         try:
             usage = {}
             if self._use_genai_sdk():
                 generated_html, usage = self._genai_text(
-                    model_name=self.settings.gemini_pro_model,
+                    model_name=builder_model,
                     prompt=prompt,
                     temperature=0.42,
                     max_output_tokens=self.settings.builder_codegen_max_output_tokens,
                 )
             else:
-                model = self._pro_model()
+                model = self._builder_model()
                 from langchain_core.messages import HumanMessage
 
                 result = model.invoke([HumanMessage(content=prompt)])
@@ -748,7 +766,7 @@ class VertexService:
                 payload={"artifact_html": normalized},
                 meta={
                     "generation_source": "vertex",
-                    "model": self.settings.gemini_pro_model,
+                    "model": builder_model,
                     "latency_ms": latency_ms,
                     "usage": usage,
                 },
@@ -761,6 +779,7 @@ class VertexService:
                     "generation_source": "stub",
                     "reason": f"vertex_error:{type(exc).__name__}",
                     "vertex_error": str(exc),
+                    "model": builder_model,
                 },
             )
 
@@ -799,17 +818,18 @@ class VertexService:
             f"{html_content}"
         )
         started = time.perf_counter()
+        builder_model = self._builder_model_name()
         try:
             usage = {}
             if self._use_genai_sdk():
                 polished_html, usage = self._genai_text(
-                    model_name=self.settings.gemini_pro_model,
+                    model_name=builder_model,
                     prompt=prompt,
                     temperature=0.35,
                     max_output_tokens=self.settings.builder_codegen_max_output_tokens,
                 )
             else:
-                model = self._pro_model()
+                model = self._builder_model()
                 from langchain_core.messages import HumanMessage
 
                 result = model.invoke([HumanMessage(content=prompt)])
@@ -823,7 +843,7 @@ class VertexService:
                 payload={"artifact_html": polished_html},
                 meta={
                     "generation_source": "vertex",
-                    "model": self.settings.gemini_pro_model,
+                    "model": builder_model,
                     "latency_ms": latency_ms,
                     "usage": usage,
                 },
@@ -836,6 +856,7 @@ class VertexService:
                     "generation_source": "stub",
                     "reason": f"vertex_error:{type(exc).__name__}",
                     "vertex_error": str(exc),
+                    "model": builder_model,
                 },
             )
 
