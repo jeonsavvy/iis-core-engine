@@ -194,13 +194,13 @@ class VertexService:
             usage = {}
             if self._use_genai_sdk():
                 raw, usage = self._genai_json(
-                    model_name=self.settings.gemini_flash_model,
+                    model_name=self.settings.gemini_pro_model,
                     prompt=prompt,
                     schema=_DesignSpecModel,
                     temperature=0.3,
                 )
             else:
-                model = self._flash_model()
+                model = self._pro_model()
                 runnable = model.with_structured_output(_DesignSpecModel, method="json_mode")
                 raw = self._invoke_with_retry(runnable, prompt)
             parsed = raw if isinstance(raw, _DesignSpecModel) else _DesignSpecModel.model_validate(raw)
@@ -209,7 +209,7 @@ class VertexService:
                 payload=parsed.model_dump(),
                 meta={
                     "generation_source": "vertex",
-                    "model": self.settings.gemini_flash_model,
+                    "model": self.settings.gemini_pro_model,
                     "latency_ms": latency_ms,
                     "usage": usage,
                 },
@@ -222,7 +222,7 @@ class VertexService:
                 meta={
                     **failed.meta,
                     "vertex_error": str(exc),
-                    "model": self.settings.gemini_flash_model,
+                    "model": self.settings.gemini_pro_model,
                 },
             )
 
