@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from app.core.config import Settings
 from app.orchestration.nodes.builder import (
+    _build_hybrid_asset_bank,
     _build_hybrid_engine_html,
+    _extract_hybrid_bundle_from_inline_html,
     _infer_core_loop_type,
     _resolve_asset_pack,
 )
@@ -120,3 +122,58 @@ def test_gameplay_gate_rejects_quantized_webgl_lane_steering() -> None:
     )
     assert gate.ok is False
     assert "quantized_lane_steering" in gate.failed_checks
+
+
+def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> None:
+    mode = "webgl_three_runner"
+    slug = "asset-contract-sample"
+    asset_pack = _resolve_asset_pack(core_loop_type=mode, palette=["#22c55e", "#10162c", "#60a5fa", "#f43f5e"])
+    asset_files, runtime_manifest = _build_hybrid_asset_bank(
+        slug=slug,
+        core_loop_type=mode,
+        asset_pack=asset_pack,
+    )
+    html = _build_hybrid_engine_html(
+        title="Asset Sample",
+        genre="arcade",
+        slug=slug,
+        accent_color="#22c55e",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=24,
+        min_font_size_px=14,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type=mode,
+        game_config={"time_limit_sec": 60},
+        asset_pack=asset_pack,
+        asset_manifest=runtime_manifest,
+    )
+    bundle = _extract_hybrid_bundle_from_inline_html(
+        slug=slug,
+        inline_html=html,
+        asset_bank_files=asset_files,
+        runtime_asset_manifest=runtime_manifest,
+    )
+    assert bundle is not None
+    artifact_files, artifact_manifest = bundle
+    assert any(row["path"].endswith("/player.svg") for row in artifact_files)
+    assert any(row["path"].endswith("/ring.svg") for row in artifact_files)
+    runtime_hooks = artifact_manifest.get("runtime_hooks")
+    assert isinstance(runtime_hooks, list)
+    assert len(runtime_hooks) >= 4
+    asset_manifest = artifact_manifest.get("asset_manifest")
+    assert isinstance(asset_manifest, dict)
+    images = asset_manifest.get("images")
+    assert isinstance(images, dict)
+    assert images.get("player") == "./player.svg"
+
+    quality = QualityService(Settings(qa_min_artifact_contract_score=70))
+    contract_result = quality.evaluate_artifact_contract(
+        artifact_manifest,
+        art_direction_contract={
+            "min_image_assets": 5,
+            "min_render_layers": 4,
+            "min_animation_hooks": 3,
+        },
+    )
+    assert contract_result.ok is True

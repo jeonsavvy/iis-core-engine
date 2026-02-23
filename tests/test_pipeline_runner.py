@@ -4,18 +4,41 @@ from app.core.config import Settings
 from app.orchestration.runner import PipelineRunner
 from app.schemas.pipeline import ExecutionMode, PipelineStage, PipelineStatus, TriggerRequest
 from app.services.pipeline_repository import PipelineRepository
-from app.services.quality_service import GameplayGateResult, QualityGateResult, SmokeCheckResult
+from app.services.quality_service import ArtifactContractResult, GameplayGateResult, QualityGateResult, SmokeCheckResult
 
 
 class FakeQualityService:
     def run_smoke_check(self, _html: str) -> SmokeCheckResult:
-        return SmokeCheckResult(ok=True)
+        return SmokeCheckResult(
+            ok=True,
+            visual_metrics={
+                "canvas_width": 1280.0,
+                "canvas_height": 720.0,
+                "luminance_std": 36.0,
+                "non_dark_ratio": 0.32,
+                "color_bucket_count": 34.0,
+                "edge_energy": 0.052,
+                "motion_delta": 0.0054,
+            },
+        )
 
     def evaluate_quality_contract(self, _html: str, *, design_spec=None, **_kwargs) -> QualityGateResult:
         return QualityGateResult(ok=True, score=90, threshold=75, failed_checks=[], checks={"quality": True})
 
     def evaluate_gameplay_gate(self, _html: str, *, design_spec=None, genre=None, **_kwargs) -> GameplayGateResult:
         return GameplayGateResult(ok=True, score=85, threshold=55, failed_checks=[], checks={"gameplay": True})
+
+    def evaluate_visual_gate(self, _visual_metrics, *, genre_engine=None, **_kwargs) -> QualityGateResult:
+        return QualityGateResult(ok=True, score=88, threshold=45, failed_checks=[], checks={"visual": True})
+
+    def evaluate_artifact_contract(self, _artifact_manifest, *, art_direction_contract=None, **_kwargs) -> ArtifactContractResult:
+        return ArtifactContractResult(
+            ok=True,
+            score=90,
+            threshold=70,
+            failed_checks=[],
+            checks={"artifact_contract": True},
+        )
 
 
 class FakeLowQualityService(FakeQualityService):
@@ -52,10 +75,10 @@ class FakePublisherService:
             "game_id": "fake-game-id",
         }
 
-    def upload_screenshot(self, *, slug: str, screenshot_png: bytes) -> dict[str, str]:
+    def upload_screenshot(self, *, slug: str, screenshot_bytes: bytes) -> str:
         assert slug
-        assert isinstance(screenshot_png, bytes)
-        return {"status": "uploaded", "screenshot_url": f"https://example.com/screenshots/{slug}.png"}
+        assert isinstance(screenshot_bytes, bytes)
+        return f"https://example.com/screenshots/{slug}.png"
 
     def update_game_marketing(self, *, slug: str, ai_review: str, screenshot_url: str | None = None) -> dict[str, str]:
         assert slug

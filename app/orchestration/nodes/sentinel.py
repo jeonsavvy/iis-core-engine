@@ -102,6 +102,53 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             },
         )
 
+    visual_result = deps.quality_service.evaluate_visual_gate(
+        smoke_result.visual_metrics,
+        genre_engine=str(state["outputs"].get("genre_engine", "")),
+    )
+    if not visual_result.ok:
+        state["needs_rebuild"] = True
+        return append_log(
+            state,
+            stage=PipelineStage.QA,
+            status=PipelineStatus.RETRY,
+            agent_name=PipelineAgentName.SENTINEL,
+            message="QA failed: visual quality gate below threshold.",
+            reason="visual_quality_below_threshold",
+            metadata={
+                "attempt": state["qa_attempt"],
+                "visual_score": visual_result.score,
+                "visual_threshold": visual_result.threshold,
+                "failed_checks": visual_result.failed_checks,
+                "checks": visual_result.checks,
+                "visual_metrics": smoke_result.visual_metrics or {},
+            },
+        )
+
+    artifact_result = deps.quality_service.evaluate_artifact_contract(
+        state["outputs"].get("artifact_manifest") if isinstance(state["outputs"].get("artifact_manifest"), dict) else None,
+        art_direction_contract=state["outputs"].get("art_direction_contract")
+        if isinstance(state["outputs"].get("art_direction_contract"), dict)
+        else None,
+    )
+    if not artifact_result.ok:
+        state["needs_rebuild"] = True
+        return append_log(
+            state,
+            stage=PipelineStage.QA,
+            status=PipelineStatus.RETRY,
+            agent_name=PipelineAgentName.SENTINEL,
+            message="QA failed: artifact contract gate below threshold.",
+            reason="artifact_contract_below_threshold",
+            metadata={
+                "attempt": state["qa_attempt"],
+                "artifact_score": artifact_result.score,
+                "artifact_threshold": artifact_result.threshold,
+                "failed_checks": artifact_result.failed_checks,
+                "checks": artifact_result.checks,
+            },
+        )
+
     state["needs_rebuild"] = False
     qa_message = "QA passed via Playwright smoke check and quality/gameplay gates."
     if smoke_result.reason:
@@ -130,7 +177,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "quality_threshold": quality_result.threshold,
             "gameplay_score": gameplay_result.score,
             "gameplay_threshold": gameplay_result.threshold,
+            "visual_score": visual_result.score,
+            "visual_threshold": visual_result.threshold,
+            "artifact_score": artifact_result.score,
+            "artifact_threshold": artifact_result.threshold,
             "checks": quality_result.checks,
             "gameplay_checks": gameplay_result.checks,
+            "visual_checks": visual_result.checks,
+            "artifact_checks": artifact_result.checks,
+            "visual_metrics": smoke_result.visual_metrics or {},
         },
     )

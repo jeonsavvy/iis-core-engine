@@ -318,6 +318,104 @@ def _resolve_asset_pack(
     return resolved
 
 
+def _build_hybrid_asset_bank(
+    *,
+    slug: str,
+    core_loop_type: str,
+    asset_pack: dict[str, str],
+) -> tuple[list[dict[str, str]], dict[str, object]]:
+    player_primary = str(asset_pack.get("player_primary", "#38bdf8"))
+    player_secondary = str(asset_pack.get("player_secondary", "#0f172a"))
+    enemy_primary = str(asset_pack.get("enemy_primary", "#ef4444"))
+    enemy_elite = str(asset_pack.get("enemy_elite", "#f97316"))
+    boost_color = str(asset_pack.get("boost_color", "#22d3ee"))
+    hud_primary = str(asset_pack.get("hud_primary", "#e2e8f0"))
+
+    svg_map = {
+        "player.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<rect width='96' height='96' fill='none'/>"
+            f"<path d='M48 6 L84 66 L60 64 L60 90 L36 90 L36 64 L12 66 Z' fill='{player_primary}'/>"
+            f"<rect x='42' y='34' width='12' height='24' rx='4' fill='{player_secondary}'/>"
+            f"</svg>"
+        ),
+        "enemy.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<rect width='96' height='96' fill='none'/>"
+            f"<rect x='22' y='14' width='52' height='68' rx='10' fill='{enemy_primary}'/>"
+            f"<rect x='30' y='24' width='36' height='20' rx='6' fill='{player_secondary}'/>"
+            f"</svg>"
+        ),
+        "elite.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<rect width='96' height='96' fill='none'/>"
+            f"<polygon points='48,6 90,30 74,90 22,90 6,30' fill='{enemy_elite}'/>"
+            f"<circle cx='48' cy='46' r='10' fill='{hud_primary}'/>"
+            f"</svg>"
+        ),
+        "boost.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<rect width='96' height='96' fill='none'/>"
+            f"<polygon points='48,4 80,48 48,92 16,48' fill='{boost_color}'/>"
+            f"<polygon points='48,18 66,48 48,78 30,48' fill='{hud_primary}' opacity='0.35'/>"
+            f"</svg>"
+        ),
+        "ring.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+            f"<circle cx='64' cy='64' r='48' fill='none' stroke='{boost_color}' stroke-width='10'/>"
+            f"<circle cx='64' cy='64' r='28' fill='none' stroke='{hud_primary}' stroke-width='3' opacity='0.7'/>"
+            f"</svg>"
+        ),
+        "hazard.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<polygon points='48,4 92,86 4,86' fill='{enemy_primary}'/>"
+            f"<rect x='44' y='30' width='8' height='30' rx='4' fill='{hud_primary}'/>"
+            f"<circle cx='48' cy='72' r='5' fill='{hud_primary}'/>"
+            f"</svg>"
+        ),
+        "trail.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>"
+            f"<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
+            f"<stop offset='0%' stop-color='{boost_color}' stop-opacity='1'/>"
+            f"<stop offset='100%' stop-color='{boost_color}' stop-opacity='0'/>"
+            f"</linearGradient></defs>"
+            f"<rect x='34' y='8' width='28' height='80' rx='14' fill='url(#g)'/>"
+            f"</svg>"
+        ),
+    }
+
+    image_keys = {
+        "player": "player.svg",
+        "enemy": "enemy.svg",
+        "elite": "elite.svg",
+        "boost": "boost.svg",
+        "ring": "ring.svg",
+        "hazard": "hazard.svg",
+        "trail": "trail.svg",
+    }
+    artifact_files = [
+        {
+            "path": f"games/{slug}/{filename}",
+            "content": content,
+            "content_type": "image/svg+xml; charset=utf-8",
+        }
+        for filename, content in svg_map.items()
+    ]
+    asset_manifest: dict[str, object] = {
+        "schema_version": 1,
+        "pack_name": str(asset_pack.get("name", "hybrid-asset-pack")),
+        "genre_engine": core_loop_type,
+        "images": {key: f"./{filename}" for key, filename in image_keys.items()},
+        "audio": {"profile": str(asset_pack.get("sfx_profile", "synth"))},
+        "contract": {
+            "min_image_assets": 5,
+            "min_render_layers": 4,
+            "min_animation_hooks": 3,
+        },
+    }
+    return artifact_files, asset_manifest
+
+
 def _build_hybrid_engine_html(
     *,
     title: str,
@@ -332,6 +430,7 @@ def _build_hybrid_engine_html(
     core_loop_type: str,
     game_config: dict[str, Any],
     asset_pack: dict[str, str],
+    asset_manifest: dict[str, object] | None = None,
 ) -> str:
     mode_config = {
         "flight_sim_3d": {
@@ -388,6 +487,7 @@ def _build_hybrid_engine_html(
         "minFontSizePx": min_font_size_px,
         "textOverflowPolicy": text_overflow_policy,
         "assetPack": asset_pack,
+        "assetManifest": asset_manifest or {},
     }
     config_dict.update(game_config)
     config_json = json.dumps(config_dict, ensure_ascii=False)
@@ -575,6 +675,9 @@ def _build_hybrid_engine_html(
         sprite_profile: "neon",
         ...(CONFIG.assetPack || {{}}),
       }};
+      const ASSET_MANIFEST = CONFIG.assetManifest && typeof CONFIG.assetManifest === "object" ? CONFIG.assetManifest : {{}};
+      const SPRITE_PATHS = ASSET_MANIFEST.images && typeof ASSET_MANIFEST.images === "object" ? ASSET_MANIFEST.images : {{}};
+      const SPRITES = {{}};
       const MODE_IS_FLIGHT_SIM = CONFIG.mode === "flight_sim_3d";
       const MODE_IS_3D_RUNNER = CONFIG.mode === "lane_dodge_racer" || CONFIG.mode === "webgl_three_runner";
       const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FLIGHT_SIM;
@@ -727,6 +830,26 @@ def _build_hybrid_engine_html(
       function rand(min, max) {{ return Math.random() * (max - min) + min; }}
       function rectsOverlap(a, b) {{
         return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+      }}
+
+      function loadSprites() {{
+        for (const [key, path] of Object.entries(SPRITE_PATHS)) {{
+          if (typeof path !== "string" || !path.trim()) continue;
+          const img = new Image();
+          img.decoding = "async";
+          img.src = path;
+          SPRITES[key] = img;
+        }}
+      }}
+
+      function drawSprite(key, x, y, w, h, alpha = 1) {{
+        const img = SPRITES[key];
+        if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) return false;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(img, x, y, w, h);
+        ctx.restore();
+        return true;
       }}
 
       function ensureAudio() {{
@@ -1440,6 +1563,7 @@ def _build_hybrid_engine_html(
             const eh = e.screenH ?? e.h ?? 32;
             if ((e.z || 0) > 1.08) continue;
             if (e.kind === "ring") {{
+              if (drawSprite("ring", ex, ey, ew, eh, 0.95)) continue;
               ctx.strokeStyle = ASSET.boost_color;
               ctx.lineWidth = Math.max(2, ew * 0.08);
               ctx.shadowBlur = 16;
@@ -1448,6 +1572,7 @@ def _build_hybrid_engine_html(
               ctx.ellipse(ex + ew * 0.5, ey + eh * 0.5, ew * 0.5, eh * 0.45, 0, 0, Math.PI * 2);
               ctx.stroke();
             }} else if (e.kind === "turbulence") {{
+              if (drawSprite("hazard", ex, ey, ew, eh, 0.78)) continue;
               ctx.strokeStyle = "rgba(148,163,184,0.75)";
               ctx.lineWidth = 2;
               ctx.shadowBlur = 10;
@@ -1460,6 +1585,7 @@ def _build_hybrid_engine_html(
                 ctx.stroke();
               }}
             }} else {{
+              if (drawSprite("hazard", ex, ey, ew, eh, 0.92)) continue;
               ctx.fillStyle = ASSET.enemy_primary;
               ctx.shadowBlur = 14;
               ctx.shadowColor = ASSET.enemy_primary;
@@ -1563,6 +1689,7 @@ def _build_hybrid_engine_html(
             const ey = y - eh;
 
             if (e.kind === "boost") {{
+              if (drawSprite("boost", ex, ey, ew, eh, 0.96)) continue;
               ctx.save();
               ctx.translate(ex + ew / 2, ey + eh / 2);
               ctx.rotate((state.racer.roadScroll * 0.05) % (Math.PI * 2));
@@ -1578,6 +1705,7 @@ def _build_hybrid_engine_html(
               ctx.fill();
               ctx.restore();
             }} else {{
+              if (drawSprite(e.kind === "elite" ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
               ctx.fillStyle = ASSET.enemy_primary;
               ctx.shadowBlur = 14;
               ctx.shadowColor = ASSET.enemy_primary;
@@ -1603,6 +1731,16 @@ def _build_hybrid_engine_html(
             ctx.shadowBlur = isElite ? 18 : 14;
             ctx.shadowColor = isElite ? ASSET.enemy_elite : ASSET.enemy_primary;
             if (CONFIG.mode === "topdown_roguelike_shooter") {{
+              if (drawSprite(isElite ? "elite" : "enemy", e.x, e.y, e.w, e.h, 0.95)) {{
+                if (e.kind === "charger") {{
+                  ctx.strokeStyle = ASSET.boost_color;
+                  ctx.lineWidth = 2;
+                  ctx.beginPath();
+                  ctx.arc(e.x + e.w / 2, e.y + e.h / 2, (e.w / 2) + 5, 0, Math.PI * 2);
+                  ctx.stroke();
+                }}
+                continue;
+              }}
               const cx = e.x + e.w / 2;
               const cy = e.y + e.h / 2;
               const radius = e.w / 2;
@@ -1629,6 +1767,7 @@ def _build_hybrid_engine_html(
           }}
         }}
         for (const b of state.bullets) {{
+          if (drawSprite("trail", b.x - b.w * 0.5, b.y - b.h * 1.2, b.w * 2.0, b.h * 2.4, 0.7)) continue;
           ctx.fillStyle = ASSET.boost_color;
           ctx.shadowBlur = 10;
           ctx.shadowColor = ASSET.boost_color;
@@ -1648,6 +1787,11 @@ def _build_hybrid_engine_html(
           const pw = state.player.w;
           const ph = state.player.h;
           const bank = state.flight.bankVisual;
+          if (drawSprite("player", px - 6, py - 8, pw + 12, ph + 18, 0.98)) {{
+            if (state.racer.boostTimer > 0 || state.flight.throttle > 0.82) {{
+              drawSprite("trail", px + pw * 0.28, py + ph * 0.84, pw * 0.45, ph * 0.72, 0.72);
+            }}
+          }} else {{
           ctx.save();
           ctx.translate(px + pw * 0.5, py + ph * 0.5);
           ctx.rotate(bank * 0.45);
@@ -1669,11 +1813,17 @@ def _build_hybrid_engine_html(
             ctx.fillRect(-pw * 0.12, ph * 0.58, pw * 0.24, ph * 0.38);
           }}
           ctx.restore();
+          }}
         }} else if (MODE_IS_3D_RUNNER) {{
           const px = state.player.x;
           const py = state.player.y;
           const pw = state.player.w;
           const ph = state.player.h;
+          if (drawSprite("player", px - 2, py - 6, pw + 4, ph + 10, 0.98)) {{
+            if (state.racer.boostTimer > 0) {{
+              drawSprite("trail", px + pw * 0.34, py + ph * 0.9, pw * 0.32, ph * 0.62, 0.74);
+            }}
+          }} else {{
           ctx.shadowBlur = 18;
           ctx.shadowColor = state.racer.boostTimer > 0 ? ASSET.boost_color : ASSET.player_primary;
           ctx.fillStyle = ASSET.player_primary;
@@ -1694,10 +1844,14 @@ def _build_hybrid_engine_html(
             ctx.fillStyle = ASSET.boost_color;
             ctx.fillRect(px + pw * 0.4, py + ph * 0.95, pw * 0.2, ph * 0.35);
           }}
+          }}
         }} else {{
           ctx.shadowBlur = 18;
           ctx.shadowColor = ASSET.player_primary;
           if (CONFIG.mode === "topdown_roguelike_shooter") {{
+            if (drawSprite("player", state.player.x - 2, state.player.y - 2, state.player.w + 4, state.player.h + 4, 0.96)) {{
+              // sprite path loaded
+            }} else {{
             const px = state.player.x + state.player.w / 2;
             const py = state.player.y + state.player.h / 2;
             ctx.fillStyle = ASSET.player_primary;
@@ -1706,6 +1860,7 @@ def _build_hybrid_engine_html(
             ctx.fill();
             ctx.fillStyle = ASSET.player_secondary;
             ctx.fillRect(px - 5, py - 18, 10, 20);
+            }}
           }} else if (ASSET.sprite_profile === "comic") {{
             const w = state.player.w;
             const h = state.player.h;
@@ -1796,6 +1951,7 @@ def _build_hybrid_engine_html(
       }}
 
       window.IISLeaderboard = {{ submitScore }};
+      loadSprites();
       resetState();
       requestAnimationFrame(frame);
     </script>
@@ -1808,6 +1964,8 @@ def _extract_hybrid_bundle_from_inline_html(
     *,
     slug: str,
     inline_html: str,
+    asset_bank_files: list[dict[str, str]] | None = None,
+    runtime_asset_manifest: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, object]] | None:
     style_match = re.search(r"<style>\s*(.*?)\s*</style>", inline_html, flags=re.DOTALL)
     script_match = re.search(r"<script>\s*(.*?)\s*</script>\s*</body>", inline_html, flags=re.DOTALL)
@@ -1844,6 +2002,52 @@ def _extract_hybrid_bundle_from_inline_html(
             "content_type": "application/javascript; charset=utf-8",
         },
     ]
+    files_by_path = {row["path"]: row for row in artifact_files}
+    for row in asset_bank_files or []:
+        if not isinstance(row, dict):
+            continue
+        path = str(row.get("path", "")).strip()
+        content = str(row.get("content", ""))
+        content_type = str(row.get("content_type", "")).strip()
+        if not path.startswith(f"games/{slug}/"):
+            continue
+        if not content or not content_type:
+            continue
+        files_by_path[path] = {
+            "path": path,
+            "content": content,
+            "content_type": content_type,
+        }
+    artifact_files = list(files_by_path.values())
+
+    resolved_asset_manifest: dict[str, object] = {}
+    if isinstance(runtime_asset_manifest, dict):
+        resolved_asset_manifest = dict(runtime_asset_manifest)
+
+    image_manifest = resolved_asset_manifest.get("images")
+    if not isinstance(image_manifest, dict):
+        image_manifest = {}
+    for row in artifact_files:
+        path = str(row["path"])
+        if not path.endswith(".svg"):
+            continue
+        filename = path.rsplit("/", 1)[-1]
+        image_key = filename[:-4]
+        image_manifest.setdefault(image_key, f"./{filename}")
+    resolved_asset_manifest["images"] = image_manifest
+    resolved_asset_manifest["styles"] = ["./styles.css"]
+    resolved_asset_manifest["scripts"] = ["./game.js"]
+
+    runtime_hooks = [
+        "requestAnimationFrame",
+        "loadSprites",
+        "renderWebglBackground",
+        "spawnEnemy",
+        "stepProgression",
+        "update",
+        "draw",
+        "playSfx",
+    ]
     artifact_manifest = {
         "schema_version": 1,
         "entrypoint": f"games/{slug}/index.html",
@@ -1858,10 +2062,8 @@ def _extract_hybrid_bundle_from_inline_html(
             "hud_overlay",
             "audio_feedback",
         ],
-        "asset_manifest": {
-            "styles": [f"games/{slug}/styles.css"],
-            "scripts": [f"games/{slug}/game.js"],
-        },
+        "runtime_hooks": runtime_hooks,
+        "asset_manifest": resolved_asset_manifest,
     }
     return artifact_files, artifact_manifest
 
@@ -1934,6 +2136,25 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             },
         )
     asset_pack = _resolve_asset_pack(core_loop_type=core_loop_type, palette=palette)
+    art_direction_contract = state["outputs"].get("art_direction_contract")
+    if not isinstance(art_direction_contract, dict):
+        art_direction_contract = {}
+    asset_bank_files, runtime_asset_manifest = _build_hybrid_asset_bank(
+        slug=slug,
+        core_loop_type=core_loop_type,
+        asset_pack=asset_pack,
+    )
+    contract = runtime_asset_manifest.get("contract")
+    if isinstance(contract, dict):
+        for key in ("min_image_assets", "min_render_layers", "min_animation_hooks"):
+            value = art_direction_contract.get(key)
+            if isinstance(value, int) and value > 0:
+                contract[key] = int(value)
+    if art_direction_contract:
+        runtime_asset_manifest["art_direction"] = {
+            key: art_direction_contract.get(key)
+            for key in ("style_tag", "motif", "required_visual_keywords", "forbidden_visual_tokens")
+        }
     candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
     design_spec_dump = design_spec.model_dump()
@@ -1975,6 +2196,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             core_loop_type=core_loop_type,
             game_config=generated_config.payload,
             asset_pack=asset_pack,
+            asset_manifest=runtime_asset_manifest,
         )
         candidate_html = base_candidate_html
         codegen_meta_rows: list[dict[str, Any]] = []
@@ -2149,7 +2371,40 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     artifact_files: list[dict[str, str]] | None = None
     artifact_manifest: dict[str, object] | None = None
 
-    hybrid_bundle = _extract_hybrid_bundle_from_inline_html(slug=slug, inline_html=artifact_html)
+    hybrid_bundle = _extract_hybrid_bundle_from_inline_html(
+        slug=slug,
+        inline_html=artifact_html,
+        asset_bank_files=asset_bank_files,
+        runtime_asset_manifest=runtime_asset_manifest,
+    )
+    if not hybrid_bundle:
+        fallback_files = [
+            {
+                "path": f"games/{slug}/index.html",
+                "content": artifact_html,
+                "content_type": "text/html; charset=utf-8",
+            },
+            *asset_bank_files,
+        ]
+        fallback_asset_manifest = runtime_asset_manifest if isinstance(runtime_asset_manifest, dict) else {}
+        fallback_manifest = {
+            "schema_version": 1,
+            "entrypoint": f"games/{slug}/index.html",
+            "files": [row["path"] for row in fallback_files],
+            "bundle_kind": "hybrid_engine",
+            "modules": [
+                "runtime_bootstrap",
+                "input_controls",
+                "spawn_system",
+                "combat_or_navigation_loop",
+                "render_pipeline",
+                "hud_overlay",
+                "audio_feedback",
+            ],
+            "runtime_hooks": ["requestAnimationFrame", "update", "draw", "playSfx"],
+            "asset_manifest": fallback_asset_manifest,
+        }
+        hybrid_bundle = (fallback_files, fallback_manifest)
     if hybrid_bundle:
         artifact_files, artifact_manifest = hybrid_bundle
         artifact_manifest["genre_engine"] = core_loop_type
