@@ -64,6 +64,9 @@ def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> Non
     assert "assetpack" in html
     assert "state.run.level" in html
     assert "topdown_roguelike_shooter" in html
+    assert "depth_packs" in html
+    assert "spawnminiboss" in html
+    assert "relic_synergy_rules" in html
 
 
 def test_gameplay_gate_passes_for_topdown_candidate() -> None:
@@ -86,6 +89,11 @@ def test_webgl_builder_html_contains_webgl_audio_and_relic_hooks() -> None:
     assert "state.run.relics" in html
     assert "steervelocity" in html
     assert "math.round(state.player.lane)" not in html
+    assert "control_presets" in html
+    assert "const control =" in html
+    assert "active_depth_pack" in html
+    assert "applyrelicsynergy" in html
+    assert "drawpostfx" in html
 
 
 def test_flight_builder_html_contains_flight_controls_and_progression_hooks() -> None:

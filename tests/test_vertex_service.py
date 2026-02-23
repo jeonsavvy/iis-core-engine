@@ -43,3 +43,5 @@ def test_builder_prompt_mentions_procedural_asset_policy() -> None:
     lowered = prompt.casefold()
     assert "procedural" in lowered
     assert "analog control" in lowered
+    assert "miniboss" in lowered
+    assert "relic synergy" in lowered

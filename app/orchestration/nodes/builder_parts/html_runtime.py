@@ -271,6 +271,127 @@ def _build_hybrid_engine_html(
       const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FLIGHT_SIM;
       const MODE_IS_SHOOTER = CONFIG.mode === "arena_shooter" || CONFIG.mode === "topdown_roguelike_shooter";
       const MODE_IS_BRAWLER = CONFIG.mode === "duel_brawler" || CONFIG.mode === "comic_action_brawler_3d";
+      const CONTROL_PRESETS = {{
+        flight_sim_3d: {{
+          throttle_response: 0.62,
+          pitch_response: 2.7,
+          roll_response: 2.9,
+          yaw_response: 2.0,
+          damping_pitch: 2.9,
+          damping_roll: 3.3,
+          damping_yaw: 3.6,
+          lateral_sensitivity: 362,
+          vertical_sensitivity: 248,
+          cruise_speed_min: 190,
+          cruise_speed_max: 438,
+          camera_sensitivity: 1.18,
+          boost_floor_speed: 452,
+        }},
+        webgl_three_runner: {{
+          steer_accel: 10.2,
+          steer_drag: 7.6,
+          steer_return: 10.4,
+          accel_rate: 268,
+          brake_rate: 304,
+          drag_rate: 126,
+          speed_min: 185,
+          speed_max: 548,
+          lane_lerp: 13.5,
+          curve_response: 1.55,
+          curve_interval_min: 0.85,
+          curve_interval_max: 2.25,
+        }},
+        lane_dodge_racer: {{
+          steer_accel: 9.2,
+          steer_drag: 7.2,
+          steer_return: 9.6,
+          accel_rate: 238,
+          brake_rate: 278,
+          drag_rate: 122,
+          speed_min: 180,
+          speed_max: 520,
+          lane_lerp: 12.2,
+          curve_response: 1.42,
+          curve_interval_min: 1.0,
+          curve_interval_max: 2.4,
+        }},
+        topdown_roguelike_shooter: {{
+          move_speed: 262,
+          dash_multiplier: 1.92,
+          orbit_speed: 2.05,
+        }},
+        arena_shooter: {{
+          move_speed: 268,
+        }},
+        comic_action_brawler_3d: {{
+          move_speed: 232,
+          dash_multiplier: 1.85,
+        }},
+        duel_brawler: {{
+          move_speed: 220,
+          dash_multiplier: 1.75,
+        }},
+        arcade_generic: {{
+          move_speed: 240,
+        }},
+      }};
+      const DEPTH_PACKS = {{
+        flight_sim_3d: {{
+          wave_interval_sec: 8.0,
+          miniboss_interval_sec: 24.0,
+          wave_modifiers: [1.0, 1.12, 1.25, 1.4],
+          pattern: [["ring", 0.24], ["hazard", 0.6], ["turbulence", 0.16]],
+        }},
+        webgl_three_runner: {{
+          wave_interval_sec: 7.0,
+          miniboss_interval_sec: 22.0,
+          wave_modifiers: [1.0, 1.1, 1.23, 1.36],
+          pattern: [["boost", 0.2], ["obstacle", 0.64], ["elite", 0.16]],
+        }},
+        lane_dodge_racer: {{
+          wave_interval_sec: 7.5,
+          miniboss_interval_sec: 24.0,
+          wave_modifiers: [1.0, 1.08, 1.18, 1.28],
+          pattern: [["boost", 0.18], ["obstacle", 0.72], ["elite", 0.1]],
+        }},
+        topdown_roguelike_shooter: {{
+          wave_interval_sec: 8.5,
+          miniboss_interval_sec: 26.0,
+          wave_modifiers: [1.0, 1.15, 1.3, 1.45],
+          pattern: [["grunt", 0.5], ["charger", 0.28], ["elite", 0.22]],
+        }},
+        arena_shooter: {{
+          wave_interval_sec: 9.0,
+          miniboss_interval_sec: 27.0,
+          wave_modifiers: [1.0, 1.12, 1.24, 1.36],
+          pattern: [["grunt", 0.66], ["elite", 0.34]],
+        }},
+        comic_action_brawler_3d: {{
+          wave_interval_sec: 8.0,
+          miniboss_interval_sec: 23.0,
+          wave_modifiers: [1.0, 1.14, 1.28, 1.44],
+          pattern: [["grunt", 0.62], ["elite", 0.38]],
+        }},
+        duel_brawler: {{
+          wave_interval_sec: 9.0,
+          miniboss_interval_sec: 24.0,
+          wave_modifiers: [1.0, 1.1, 1.22, 1.32],
+          pattern: [["grunt", 0.72], ["elite", 0.28]],
+        }},
+        arcade_generic: {{
+          wave_interval_sec: 9.0,
+          miniboss_interval_sec: 28.0,
+          wave_modifiers: [1.0, 1.08, 1.16, 1.24],
+          pattern: [["grunt", 0.82], ["elite", 0.18]],
+        }},
+      }};
+      const RELIC_SYNERGY_RULES = [
+        {{ id: "velocity-chain", requires: ["mobility", "burst"], score_mul: 1.14, boost_bonus: 0.45, spawn_ease: 0.94 }},
+        {{ id: "precision-overdrive", requires: ["attack_speed", "damage"], score_mul: 1.2, damage_bonus: 0.28, spawn_ease: 0.92 }},
+        {{ id: "endurance-loop", requires: ["sustain", "mobility"], score_mul: 1.08, hp_regen_tick: 0.08, spawn_ease: 0.95 }},
+      ];
+      const CONTROL = CONTROL_PRESETS[CONFIG.mode] || CONTROL_PRESETS.arcade_generic;
+      const ACTIVE_DEPTH_PACK = DEPTH_PACKS[CONFIG.mode] || DEPTH_PACKS.arcade_generic;
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
       const webglCanvas = document.createElement("canvas");
@@ -303,16 +424,29 @@ def _build_hybrid_engine_html(
         run: {{
           level: 1,
           levelTimer: 0,
+          waveTimer: 0,
+          waveIndex: 0,
+          waveModifier: 1,
+          minibossTimer: 0,
           difficultyScale: 1,
           combo: 0,
           comboTimer: 0,
           eliteTimer: 0,
           autoFireTimer: 0,
           shake: 0,
+          fxPulse: 0,
           relics: [],
           upgrades: [],
           xp: 0,
           nextXp: 120,
+          synergy: {{
+            scoreMul: 1,
+            spawnEase: 1,
+            boostBonus: 0,
+            damageBonus: 0,
+            hpRegenTick: 0,
+            active: [],
+          }},
         }},
         racer: {{
           speed: 280,
@@ -374,16 +508,29 @@ def _build_hybrid_engine_html(
         state.run = {{
           level: 1,
           levelTimer: 0,
+          waveTimer: 0,
+          waveIndex: 0,
+          waveModifier: 1,
+          minibossTimer: 0,
           difficultyScale: 1,
           combo: 0,
           comboTimer: 0,
           eliteTimer: 0,
           autoFireTimer: 0,
           shake: 0,
+          fxPulse: 0,
           relics: [],
           upgrades: [],
           xp: 0,
           nextXp: 120,
+          synergy: {{
+            scoreMul: 1,
+            spawnEase: 1,
+            boostBonus: 0,
+            damageBonus: 0,
+            hpRegenTick: 0,
+            active: [],
+          }},
         }};
         state.racer = {{
           speed: 280,
@@ -440,6 +587,47 @@ def _build_hybrid_engine_html(
         return true;
       }}
 
+      function pickWeighted(entries, fallback) {{
+        if (!Array.isArray(entries) || entries.length === 0) return fallback;
+        let total = 0;
+        for (const entry of entries) {{
+          const weight = Number(entry?.[1] || 0);
+          if (weight > 0) total += weight;
+        }}
+        if (total <= 0) return fallback;
+        let roll = Math.random() * total;
+        for (const entry of entries) {{
+          const weight = Number(entry?.[1] || 0);
+          if (weight <= 0) continue;
+          roll -= weight;
+          if (roll <= 0) return String(entry?.[0] || fallback);
+        }}
+        return fallback;
+      }}
+
+      function applyRelicSynergy() {{
+        const upgrades = new Set(state.run.upgrades);
+        const synergy = {{
+          scoreMul: 1,
+          spawnEase: 1,
+          boostBonus: 0,
+          damageBonus: 0,
+          hpRegenTick: 0,
+          active: [],
+        }};
+        for (const rule of RELIC_SYNERGY_RULES) {{
+          const requires = Array.isArray(rule.requires) ? rule.requires : [];
+          if (!requires.every((token) => upgrades.has(token))) continue;
+          synergy.scoreMul *= Number(rule.score_mul || 1);
+          synergy.spawnEase *= Number(rule.spawn_ease || 1);
+          synergy.boostBonus += Number(rule.boost_bonus || 0);
+          synergy.damageBonus += Number(rule.damage_bonus || 0);
+          synergy.hpRegenTick += Number(rule.hp_regen_tick || 0);
+          synergy.active.push(String(rule.id || "synergy"));
+        }}
+        state.run.synergy = synergy;
+      }}
+
       function ensureAudio() {{
         if (audioCtx) return audioCtx;
         const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -476,6 +664,21 @@ def _build_hybrid_engine_html(
         gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
         osc.start(now);
         osc.stop(now + 0.16);
+
+        if (kind === "boost" || kind === "levelup" || kind === "relic") {{
+          const pad = ac.createOscillator();
+          const padGain = ac.createGain();
+          pad.connect(padGain);
+          padGain.connect(ac.destination);
+          pad.type = "sine";
+          pad.frequency.setValueAtTime(Math.max(90, freq * 0.5), now);
+          pad.frequency.exponentialRampToValueAtTime(Math.max(80, freq * 0.38), now + 0.2);
+          padGain.gain.setValueAtTime(0.0001, now);
+          padGain.gain.exponentialRampToValueAtTime(0.03, now + 0.04);
+          padGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+          pad.start(now);
+          pad.stop(now + 0.24);
+        }}
       }}
 
       function ensureWebglRuntime() {{
@@ -571,24 +774,45 @@ def _build_hybrid_engine_html(
           if (pick === "sustain") state.hp = Math.min((CONFIG.player_hp || 3) + 2, state.hp + 1);
           if (pick === "burst") state.run.combo = Math.min(20, state.run.combo + 1.8);
           state.run.relics.push(`Relic-${{pick}}-${{state.run.level}}`);
+          applyRelicSynergy();
           playSfx("levelup");
           playSfx("relic");
+          state.run.fxPulse = Math.max(state.run.fxPulse, 0.28);
         }}
       }}
 
       function stepProgression(dt) {{
         state.run.levelTimer += dt;
+        state.run.waveTimer += dt;
+        state.run.minibossTimer += dt;
         state.run.comboTimer = Math.max(0, state.run.comboTimer - dt);
         state.run.shake = Math.max(0, state.run.shake - dt * 1.8);
+        state.run.fxPulse = Math.max(0, state.run.fxPulse - dt * 0.8);
         state.run.eliteTimer += dt;
+        if (state.run.synergy.hpRegenTick > 0 && state.timeLeft > 0) {{
+          state.hp = Math.min((CONFIG.player_hp || 3) + 2, state.hp + state.run.synergy.hpRegenTick * dt);
+        }}
         if (state.run.comboTimer <= 0) state.run.combo = Math.max(0, state.run.combo - dt * 2.2);
+        if (state.run.waveTimer >= Number(ACTIVE_DEPTH_PACK.wave_interval_sec || 8.0)) {{
+          state.run.waveTimer = 0;
+          const waveMods = Array.isArray(ACTIVE_DEPTH_PACK.wave_modifiers) ? ACTIVE_DEPTH_PACK.wave_modifiers : [1.0];
+          state.run.waveIndex = (state.run.waveIndex + 1) % Math.max(1, waveMods.length);
+          state.run.waveModifier = Number(waveMods[state.run.waveIndex] || 1);
+          state.run.shake = Math.max(state.run.shake, 0.12);
+          state.run.fxPulse = Math.max(state.run.fxPulse, 0.24);
+        }}
+        if (state.run.minibossTimer >= Number(ACTIVE_DEPTH_PACK.miniboss_interval_sec || 24.0)) {{
+          state.run.minibossTimer = 0;
+          spawnMiniBoss();
+        }}
         if (state.run.levelTimer >= 12) {{
           state.run.levelTimer = 0;
           state.run.level += 1;
-          state.run.difficultyScale = 1 + (state.run.level - 1) * 0.11;
+          state.run.difficultyScale = (1 + (state.run.level - 1) * 0.11) * Math.max(1, state.run.waveModifier);
           burst(canvas.width * 0.5, 80, ASSET.particle, 20);
           grantXp(30 + state.run.level * 6);
           playSfx("levelup");
+          state.run.fxPulse = Math.max(state.run.fxPulse, 0.35);
         }}
       }}
 
@@ -604,13 +828,56 @@ def _build_hybrid_engine_html(
         return true;
       }}
 
+      function spawnMiniBoss() {{
+        const difficultyScale = Math.max(1, state.run.difficultyScale || 1);
+        if (MODE_IS_FLIGHT_SIM) {{
+          state.enemies.push({{
+            kind: "hazard",
+            x: rand(canvas.width * 0.26, canvas.width * 0.74),
+            y: rand(canvas.height * 0.28, canvas.height * 0.62),
+            z: 0.08,
+            speedMul: 1.05 + difficultyScale * 0.16,
+            w: 78,
+            h: 80,
+            hp: Math.max(2, Math.floor(2 + state.run.level * 0.2)),
+            miniBoss: true,
+          }});
+          return;
+        }}
+        if (MODE_IS_3D_RUNNER) {{
+          state.enemies.push({{
+            lane: Math.floor(Math.random() * 3) - 1,
+            z: 0.08,
+            speedMul: 0.9 + difficultyScale * 0.18,
+            kind: "elite",
+            w: 54,
+            h: 86,
+            hp: Math.max(2, Math.floor(2 + state.run.level * 0.18)),
+            miniBoss: true,
+          }});
+          return;
+        }}
+        if (MODE_IS_SHOOTER || MODE_IS_BRAWLER || CONFIG.mode === "arcade_generic") {{
+          state.enemies.push({{
+            x: rand(canvas.width * 0.22, canvas.width * 0.78),
+            y: rand(20, canvas.height * 0.18),
+            w: MODE_IS_BRAWLER ? 66 : 54,
+            h: MODE_IS_BRAWLER ? 86 : 58,
+            speed: (CONFIG.enemy_speed_max || 220) * (0.56 + difficultyScale * 0.16),
+            hp: Math.max(3, Math.floor((CONFIG.enemy_hp || 1) + state.run.level * 0.5)),
+            kind: "elite",
+            miniBoss: true,
+          }});
+        }}
+      }}
+
       function spawnEnemy() {{
         const spdMin = CONFIG.enemy_speed_min || 100;
         const spdMax = CONFIG.enemy_speed_max || 220;
-        const difficultyScale = Math.max(1, state.run.difficultyScale || 1);
+        const difficultyScale = Math.max(1, state.run.difficultyScale || 1) * Math.max(1, state.run.waveModifier || 1);
+        const weightedPattern = Array.isArray(ACTIVE_DEPTH_PACK.pattern) ? ACTIVE_DEPTH_PACK.pattern : [];
         if (MODE_IS_FLIGHT_SIM) {{
-          const kindRoll = Math.random();
-          const kind = kindRoll < 0.2 ? "ring" : kindRoll < 0.82 ? "hazard" : "turbulence";
+          const kind = pickWeighted(weightedPattern, "hazard");
           state.enemies.push({{
             kind,
             x: rand(canvas.width * 0.2, canvas.width * 0.8),
@@ -624,22 +891,22 @@ def _build_hybrid_engine_html(
         }}
         if (MODE_IS_3D_RUNNER) {{
           const lane = Math.floor(Math.random() * 3) - 1;
-          const boostRate = CONFIG.mode === "webgl_three_runner" ? 0.24 : 0.2;
-          const kind = Math.random() < boostRate ? "boost" : "obstacle";
+          const kind = pickWeighted(weightedPattern, "obstacle");
+          const isElite = kind === "elite";
           state.enemies.push({{
             lane,
             z: rand(0.04, 0.14),
             speedMul: rand(0.86, 1.24) * (0.9 + difficultyScale * 0.15),
             kind,
-            w: kind === "boost" ? 24 : 34,
-            h: kind === "boost" ? 24 : 56,
+            w: kind === "boost" ? 24 : isElite ? 42 : 34,
+            h: kind === "boost" ? 24 : isElite ? 74 : 56,
+            hp: isElite ? Math.max(2, Math.floor(1 + state.run.level * 0.18)) : 1,
           }});
           return;
         }}
         if (CONFIG.mode === "topdown_roguelike_shooter") {{
           const edge = Math.floor(rand(0, 4));
-          const enemyKindRoll = Math.random();
-          const enemyKind = enemyKindRoll < 0.14 ? "elite" : enemyKindRoll < 0.36 ? "charger" : "grunt";
+          const enemyKind = pickWeighted(weightedPattern, "grunt");
           let ex = 0;
           let ey = 0;
           if (edge === 0) {{ ex = rand(20, canvas.width - 20); ey = -30; }}
@@ -658,14 +925,15 @@ def _build_hybrid_engine_html(
           return;
         }}
         if (CONFIG.mode === "arena_shooter") {{
+          const enemyKind = pickWeighted(weightedPattern, "grunt");
           state.enemies.push({{
             x: rand(40, canvas.width - 80),
             y: -40,
-            w: 30,
-            h: 30,
+            w: enemyKind === "elite" ? 38 : 30,
+            h: enemyKind === "elite" ? 38 : 30,
             speed: rand(spdMin, spdMax) * (0.84 + difficultyScale * 0.2),
-            hp: CONFIG.enemy_hp || 1,
-            kind: Math.random() < 0.18 ? "elite" : "grunt",
+            hp: enemyKind === "elite" ? Math.max(2, Math.floor((CONFIG.enemy_hp || 1) + state.run.level * 0.25)) : (CONFIG.enemy_hp || 1),
+            kind: enemyKind,
           }});
           return;
         }}
@@ -674,14 +942,15 @@ def _build_hybrid_engine_html(
           if (state.enemies.length < maxWave) {{
             const spawnX = rand(canvas.width * 0.25, canvas.width * 0.82);
             const spawnY = rand(canvas.height * 0.2, canvas.height * 0.72);
+            const enemyKind = pickWeighted(weightedPattern, "grunt");
             state.enemies.push({{
               x: spawnX,
               y: spawnY,
               w: CONFIG.mode === "comic_action_brawler_3d" ? 42 : 46,
               h: CONFIG.mode === "comic_action_brawler_3d" ? 64 : 72,
-              hp: Math.max(1, Math.floor(state.enemyHp * (CONFIG.mode === "comic_action_brawler_3d" ? 0.55 : 1))),
+              hp: Math.max(1, Math.floor(state.enemyHp * (CONFIG.mode === "comic_action_brawler_3d" ? 0.55 : 1) * (enemyKind === "elite" ? 1.5 : 1))),
               speed: spdMin * (0.6 + difficultyScale * 0.26),
-              kind: Math.random() < 0.22 ? "elite" : "grunt",
+              kind: enemyKind,
             }});
           }}
           return;
@@ -724,10 +993,10 @@ def _build_hybrid_engine_html(
           enemy.hp -= 1;
           hitCount += 1;
           playSfx("hit");
-          state.score += CONFIG.mode === "comic_action_brawler_3d" ? 62 : 45;
+          state.score += (CONFIG.mode === "comic_action_brawler_3d" ? 62 : 45) * (1 + Number(state.run.synergy.damageBonus || 0));
           burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, ASSET.enemy_elite, 10);
           if (enemy.hp <= 0) {{
-            state.score += 170;
+            state.score += 170 * Number(state.run.synergy.scoreMul || 1);
             addCombo(1.4);
             grantXp(18);
             burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, ASSET.particle, 18);
@@ -742,10 +1011,12 @@ def _build_hybrid_engine_html(
       }}
 
       function burst(x, y, color, count) {{
+        state.run.fxPulse = Math.max(state.run.fxPulse, Math.min(0.42, 0.08 + count * 0.008));
         for (let i = 0; i < count; i++) {{
           state.particles.push({{
             x, y, life: rand(0.2, 0.6), t: 0, color,
-            vx: rand(-160, 160), vy: rand(-160, 160)
+            vx: rand(-160, 160), vy: rand(-160, 160),
+            size: rand(1.5, MODE_USES_WEBGL_BG ? 4.8 : 3.8),
           }});
         }}
       }}
@@ -757,31 +1028,32 @@ def _build_hybrid_engine_html(
         state.attackCooldown = Math.max(0, state.attackCooldown - dt);
         state.dashCooldown = Math.max(0, state.dashCooldown - dt);
         stepProgression(dt);
-        const spawnRate = (CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8);
+        const spawnRate = ((CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8))
+          * Math.max(0.78, Number(state.run.synergy.spawnEase || 1));
 
         if (MODE_IS_FLIGHT_SIM) {{
           const pitchInput = (keys.has("w") || keys.has("ArrowUp") ? -1 : 0) + (keys.has("s") || keys.has("ArrowDown") ? 1 : 0);
           const rollInput = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
           const yawInput = (keys.has("e") ? 1 : 0) - (keys.has("q") ? 1 : 0);
           const throttleInput = (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0);
-          state.flight.throttle = clamp(state.flight.throttle + throttleInput * dt * 0.55, 0.18, 1);
-          state.flight.pitch = clamp(state.flight.pitch + pitchInput * dt * 2.4, -1, 1);
-          state.flight.roll = clamp(state.flight.roll + rollInput * dt * 2.6, -1, 1);
-          state.flight.yaw = clamp(state.flight.yaw + yawInput * dt * 1.8, -1, 1);
-          state.flight.pitch *= (1 - Math.min(0.7, dt * 2.8));
-          state.flight.roll *= (1 - Math.min(0.7, dt * 3.2));
-          state.flight.yaw *= (1 - Math.min(0.7, dt * 3.5));
+          state.flight.throttle = clamp(state.flight.throttle + throttleInput * dt * Number(CONTROL.throttle_response || 0.55), 0.18, 1);
+          state.flight.pitch = clamp(state.flight.pitch + pitchInput * dt * Number(CONTROL.pitch_response || 2.4), -1, 1);
+          state.flight.roll = clamp(state.flight.roll + rollInput * dt * Number(CONTROL.roll_response || 2.6), -1, 1);
+          state.flight.yaw = clamp(state.flight.yaw + yawInput * dt * Number(CONTROL.yaw_response || 1.8), -1, 1);
+          state.flight.pitch *= (1 - Math.min(0.7, dt * Number(CONTROL.damping_pitch || 2.8)));
+          state.flight.roll *= (1 - Math.min(0.7, dt * Number(CONTROL.damping_roll || 3.2)));
+          state.flight.yaw *= (1 - Math.min(0.7, dt * Number(CONTROL.damping_yaw || 3.5)));
           if (keys.has("Shift") && consumeDash()) {{
             state.flight.throttle = Math.min(1, state.flight.throttle + 0.22);
             state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.35);
             playSfx("boost");
           }}
 
-          const targetSpeed = 180 + state.flight.throttle * 420;
+          const targetSpeed = Number(CONTROL.cruise_speed_min || 180) + state.flight.throttle * Number(CONTROL.cruise_speed_max || 420);
           state.flight.speed += (targetSpeed - state.flight.speed) * Math.min(1, dt * 2.1);
           if (state.racer.boostTimer > 0) {{
             state.racer.boostTimer = Math.max(0, state.racer.boostTimer - dt);
-            state.flight.speed = Math.max(state.flight.speed, 430);
+            state.flight.speed = Math.max(state.flight.speed, Number(CONTROL.boost_floor_speed || 430));
           }}
           state.racer.speed = state.flight.speed;
           state.racer.roadScroll += dt * state.flight.speed * 0.07;
@@ -789,10 +1061,10 @@ def _build_hybrid_engine_html(
 
           const lateral = (state.flight.roll * 0.92) + (state.flight.yaw * 0.52);
           const vertical = state.flight.pitch * 1.1;
-          state.player.x = clamp(state.player.x + lateral * dt * 340, canvas.width * 0.12, canvas.width * 0.88 - state.player.w);
-          state.player.y = clamp(state.player.y + vertical * dt * 240, canvas.height * 0.35, canvas.height * 0.86);
+          state.player.x = clamp(state.player.x + lateral * dt * Number(CONTROL.lateral_sensitivity || 340), canvas.width * 0.12, canvas.width * 0.88 - state.player.w);
+          state.player.y = clamp(state.player.y + vertical * dt * Number(CONTROL.vertical_sensitivity || 240), canvas.height * 0.35, canvas.height * 0.86);
           state.flight.altitude = 1 - clamp((state.player.y - canvas.height * 0.35) / (canvas.height * 0.51), 0, 1);
-          state.flight.bankVisual += (state.flight.roll - state.flight.bankVisual) * Math.min(1, dt * 7.5);
+          state.flight.bankVisual += (state.flight.roll - state.flight.bankVisual) * Math.min(1, dt * (6.9 + Number(CONTROL.camera_sensitivity || 1) * 0.8));
           state.flight.stability = clamp(1 - Math.abs(state.flight.pitch) * 0.35 - Math.abs(state.flight.roll) * 0.32, 0.2, 1.1);
 
           const adaptiveSpawnRate = clamp(spawnRate * (260 / state.flight.speed), 0.2, 0.88);
@@ -818,7 +1090,7 @@ def _build_hybrid_engine_html(
               const hitRadius = Math.max(24, (e.screenW + e.screenH) * 0.24);
               if (dist < hitRadius) {{
                 if (e.kind === "ring") {{
-                  const scoreGain = (CONFIG.base_score_value || 10) * (3.2 + state.flight.checkpointCombo * 0.14);
+                  const scoreGain = (CONFIG.base_score_value || 10) * (3.2 + state.flight.checkpointCombo * 0.14) * Number(state.run.synergy.scoreMul || 1);
                   state.score += scoreGain;
                   state.flight.checkpointCombo += 1;
                   addCombo(1.2);
@@ -856,7 +1128,7 @@ def _build_hybrid_engine_html(
             return !passed;
           }});
 
-          state.score += dt * (state.flight.speed * 0.048) * (0.7 + state.flight.altitude * 0.6) * (1 + state.run.combo * 0.026);
+          state.score += dt * (state.flight.speed * 0.048) * (0.7 + state.flight.altitude * 0.6) * (1 + state.run.combo * 0.026) * Number(state.run.synergy.scoreMul || 1);
         }} else if (MODE_IS_3D_RUNNER) {{
           const left = keys.has("ArrowLeft") || keys.has("a");
           const right = keys.has("ArrowRight") || keys.has("d");
@@ -864,28 +1136,28 @@ def _build_hybrid_engine_html(
           const brake = keys.has("ArrowDown") || keys.has("s");
 
           const steerDir = (right ? 1 : 0) - (left ? 1 : 0);
-          state.racer.steerVelocity += steerDir * dt * 9.2;
-          state.racer.steerVelocity *= (1 - Math.min(0.82, dt * 7.4));
+          state.racer.steerVelocity += steerDir * dt * Number(CONTROL.steer_accel || 9.2);
+          state.racer.steerVelocity *= (1 - Math.min(0.82, dt * Number(CONTROL.steer_drag || 7.4)));
           if (!left && !right) {{
-            state.racer.steerVelocity *= (1 - Math.min(0.88, dt * 9.8));
+            state.racer.steerVelocity *= (1 - Math.min(0.88, dt * Number(CONTROL.steer_return || 9.8)));
           }}
           state.racer.laneFloat = clamp(state.racer.laneFloat + state.racer.steerVelocity * dt, 0, 2);
           state.player.lane = state.racer.laneFloat;
 
-          const accelRate = 240;
-          const brakeRate = 280;
-          const drag = 120;
+          const accelRate = Number(CONTROL.accel_rate || 240);
+          const brakeRate = Number(CONTROL.brake_rate || 280);
+          const drag = Number(CONTROL.drag_rate || 120);
           if (accel) state.racer.speed += accelRate * dt;
           if (brake) state.racer.speed -= brakeRate * dt;
           if (!accel && !brake) state.racer.speed -= drag * dt;
-          state.racer.speed = clamp(state.racer.speed, 180, 520);
+          state.racer.speed = clamp(state.racer.speed, Number(CONTROL.speed_min || 180), Number(CONTROL.speed_max || 520));
 
           state.racer.curveTimer -= dt;
           if (state.racer.curveTimer <= 0) {{
-            state.racer.curveTimer = rand(1.0, 2.4);
+            state.racer.curveTimer = rand(Number(CONTROL.curve_interval_min || 1.0), Number(CONTROL.curve_interval_max || 2.4));
             state.racer.roadCurveTarget = rand(-0.38, 0.38);
           }}
-          state.racer.roadCurve += (state.racer.roadCurveTarget - state.racer.roadCurve) * Math.min(1, dt * 1.4);
+          state.racer.roadCurve += (state.racer.roadCurveTarget - state.racer.roadCurve) * Math.min(1, dt * Number(CONTROL.curve_response || 1.4));
           state.racer.roadScroll += dt * state.racer.speed * 0.055;
           state.racer.distance += dt * state.racer.speed;
 
@@ -902,7 +1174,7 @@ def _build_hybrid_engine_html(
           const curvePx = state.racer.roadCurve * canvas.width * 0.16;
           const laneNormalized = state.player.lane - 1;
           const laneX = canvas.width * 0.5 + curvePx * 0.15 + laneNormalized * (canvas.width * 0.22);
-          state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * 12);
+          state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * Number(CONTROL.lane_lerp || 12));
           state.player.y = canvas.height * 0.78;
 
           const adaptiveSpawnRate = clamp(spawnRate * (260 / state.racer.speed), 0.22, 1.1);
@@ -918,7 +1190,7 @@ def _build_hybrid_engine_html(
               const laneDiff = Math.abs((e.lane || 0) - playerLaneNorm);
               if (laneDiff < 0.35) {{
                 if (e.kind === "boost") {{
-                  state.racer.boostTimer = Math.max(state.racer.boostTimer, 2.0);
+                  state.racer.boostTimer = Math.max(state.racer.boostTimer, 2.0 + Number(state.run.synergy.boostBonus || 0));
                   state.score += 30;
                   addCombo(0.8);
                   grantXp(10);
@@ -946,14 +1218,16 @@ def _build_hybrid_engine_html(
             return !passed;
           }});
 
-          state.score += dt * (state.racer.speed * 0.045) * (1 + state.run.combo * 0.03);
+          state.score += dt * (state.racer.speed * 0.045) * (1 + state.run.combo * 0.03) * Number(state.run.synergy.scoreMul || 1);
         }} else if (CONFIG.mode === "topdown_roguelike_shooter") {{
-          const speed = (CONFIG.player_speed || 255) * (keys.has("Shift") && consumeDash() ? 1.95 : 1);
+          const tunedSpeed = Number(CONTROL.move_speed || (CONFIG.player_speed || 255));
+          const dashMul = Number(CONTROL.dash_multiplier || 1.95);
+          const speed = tunedSpeed * (keys.has("Shift") && consumeDash() ? dashMul : 1);
           state.player.vx = (keys.has("ArrowRight") || keys.has("d") ? 1 : 0) - (keys.has("ArrowLeft") || keys.has("a") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0) - (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
           state.player.y = clamp(state.player.y + state.player.vy * speed * dt, 60, canvas.height - state.player.h - 20);
-          state.topdown.orbitAngle += dt * 1.8;
+          state.topdown.orbitAngle += dt * Number(CONTROL.orbit_speed || 1.8);
 
           if (state.spawnTimer > clamp(spawnRate * 0.82, 0.14, 0.9)) {{
             state.spawnTimer = 0;
@@ -988,7 +1262,7 @@ def _build_hybrid_engine_html(
               if (e.hp > 0 && rectsOverlap(b, e)) {{
                 e.hp -= 1;
                 b.y = -999;
-                state.score += (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.2 : 1);
+                state.score += (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.2 : 1) * (1 + Number(state.run.synergy.damageBonus || 0));
                 addCombo(e.kind === "elite" ? 1.6 : 0.8);
                 playSfx("hit");
                 burst(e.x + e.w / 2, e.y + e.h / 2, ASSET.boost_color, e.kind === "elite" ? 12 : 8);
@@ -999,9 +1273,9 @@ def _build_hybrid_engine_html(
 
           state.enemies = state.enemies.filter((e) => e.hp > 0);
           state.bullets = state.bullets.filter((b) => b.y > -40);
-          state.score += dt * 14 * (1 + state.run.combo * 0.04);
+          state.score += dt * 14 * (1 + state.run.combo * 0.04) * Number(state.run.synergy.scoreMul || 1);
         }} else if (CONFIG.mode === "arena_shooter") {{
-          const speed = CONFIG.player_speed || 260;
+          const speed = Number(CONTROL.move_speed || (CONFIG.player_speed || 260));
           state.player.vx = (keys.has("ArrowRight") || keys.has("d") ? 1 : 0) - (keys.has("ArrowLeft") || keys.has("a") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0) - (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
@@ -1029,7 +1303,7 @@ def _build_hybrid_engine_html(
               if (e.y < canvas.height + 500 && rectsOverlap(b, e)) {{
                 e.y = canvas.height + 999;
                 b.y = -999;
-                const scoreGain = (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.0 : 1);
+                const scoreGain = (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.0 : 1) * (1 + Number(state.run.synergy.damageBonus || 0));
                 state.score += scoreGain * (1 + state.run.combo * 0.04);
                 addCombo(e.kind === "elite" ? 1.2 : 0.7);
                 playSfx("hit");
@@ -1040,10 +1314,11 @@ def _build_hybrid_engine_html(
           }}
           state.enemies = state.enemies.filter((e) => e.y < canvas.height + 120);
           state.bullets = state.bullets.filter((b) => b.y > -40);
-          state.score += dt * 8 * (1 + state.run.combo * 0.03);
+          state.score += dt * 8 * (1 + state.run.combo * 0.03) * Number(state.run.synergy.scoreMul || 1);
         }} else if (MODE_IS_BRAWLER) {{
-          const baseSpeed = CONFIG.player_speed || 220;
-          const speed = keys.has("Shift") && consumeDash() ? baseSpeed * 1.8 : baseSpeed;
+          const baseSpeed = Number(CONTROL.move_speed || (CONFIG.player_speed || 220));
+          const dashMultiplier = Number(CONTROL.dash_multiplier || 1.8);
+          const speed = keys.has("Shift") && consumeDash() ? baseSpeed * dashMultiplier : baseSpeed;
           state.player.vx = (keys.has("ArrowRight") || keys.has("d") ? 1 : 0) - (keys.has("ArrowLeft") || keys.has("a") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0) - (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
@@ -1067,9 +1342,9 @@ def _build_hybrid_engine_html(
               burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 10);
             }}
           }}
-          state.score += dt * (CONFIG.mode === "comic_action_brawler_3d" ? 12 : 8) * (1 + state.run.combo * 0.03);
+          state.score += dt * (CONFIG.mode === "comic_action_brawler_3d" ? 12 : 8) * (1 + state.run.combo * 0.03) * Number(state.run.synergy.scoreMul || 1);
         }} else {{
-          const speed = 240;
+          const speed = Number(CONTROL.move_speed || 240);
           state.player.vx = (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0);
           state.player.vy = (keys.has("ArrowDown") ? 1 : 0) - (keys.has("ArrowUp") ? 1 : 0);
           state.player.x = clamp(state.player.x + state.player.vx * speed * dt, 20, canvas.width - state.player.w - 20);
@@ -1086,7 +1361,7 @@ def _build_hybrid_engine_html(
             }}
           }}
           state.enemies = state.enemies.filter((e) => e.y < canvas.height + 100);
-          state.score += dt * 10 * (1 + state.run.combo * 0.03);
+          state.score += dt * 10 * (1 + state.run.combo * 0.03) * Number(state.run.synergy.scoreMul || 1);
         }}
 
         for (const p of state.particles) {{
@@ -1100,6 +1375,37 @@ def _build_hybrid_engine_html(
           endGame();
         }}
         updateHud();
+      }}
+
+      function drawPostFx() {{
+        const pulse = clamp(Number(state.run.fxPulse || 0), 0, 1);
+        const boostGlow = clamp((state.racer.boostTimer || 0) * 0.3, 0, 0.65);
+        const vignette = ctx.createRadialGradient(
+          canvas.width * 0.5,
+          canvas.height * 0.46,
+          canvas.height * 0.18,
+          canvas.width * 0.5,
+          canvas.height * 0.52,
+          canvas.height * 0.88,
+        );
+        vignette.addColorStop(0, "rgba(2, 6, 23, 0)");
+        vignette.addColorStop(1, "rgba(2, 6, 23, 0.42)");
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const accentAlpha = Math.min(0.32, 0.08 + pulse * 0.42 + boostGlow * 0.35);
+        const overlay = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        overlay.addColorStop(0, `rgba(34, 211, 238, ${{accentAlpha * 0.45}})`);
+        overlay.addColorStop(0.6, "rgba(15, 23, 42, 0)");
+        overlay.addColorStop(1, `rgba(16, 24, 40, ${{accentAlpha}})`);
+        ctx.fillStyle = overlay;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const scanAlpha = 0.05 + pulse * 0.06;
+        ctx.fillStyle = `rgba(148, 163, 184, ${{scanAlpha}})`;
+        for (let y = 0; y < canvas.height; y += 4) {{
+          ctx.fillRect(0, y, canvas.width, 1);
+        }}
       }}
 
       function draw() {{
@@ -1293,7 +1599,8 @@ def _build_hybrid_engine_html(
               ctx.fill();
               ctx.restore();
             }} else {{
-              if (drawSprite(e.kind === "elite" ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
+              const eliteRender = e.kind === "elite" || e.miniBoss || (e.hp || 0) > 1;
+              if (drawSprite(eliteRender ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
               ctx.fillStyle = ASSET.enemy_primary;
               ctx.shadowBlur = 14;
               ctx.shadowColor = ASSET.enemy_primary;
@@ -1314,7 +1621,7 @@ def _build_hybrid_engine_html(
           }}
 
           for (const e of state.enemies) {{
-            const isElite = e.kind === "elite";
+            const isElite = e.kind === "elite" || e.miniBoss || (e.hp || 0) > 2;
             ctx.fillStyle = isElite ? ASSET.enemy_elite : ASSET.enemy_primary;
             ctx.shadowBlur = isElite ? 18 : 14;
             ctx.shadowColor = isElite ? ASSET.enemy_elite : ASSET.enemy_primary;
@@ -1472,6 +1779,7 @@ def _build_hybrid_engine_html(
             ctx.stroke();
           }}
         }}
+        drawPostFx();
         ctx.shadowBlur = 0;
         ctx.restore();
       }}
@@ -1479,19 +1787,20 @@ def _build_hybrid_engine_html(
       function updateHud() {{
         scoreEl.textContent = `Score: ${{Math.floor(state.score)}} · Combo: x${{Math.max(1, state.run.combo.toFixed(1))}}`;
         if (MODE_IS_FLIGHT_SIM) {{
-          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · THR ${{Math.round(state.flight.throttle * 100)}}%`;
+          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · THR ${{Math.round(state.flight.throttle * 100)}}%`;
           hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · CKP ${{state.flight.checkpointCombo}}`;
           return;
         }}
-        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;
-        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}}`;
+        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;
+        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · Syn:${{state.run.synergy.active.length}}`;
       }}
 
       function endGame() {{
         if (!state.running) return;
         state.running = false;
         const buildSummary = state.run.upgrades.slice(-3).join(", ") || "none";
-        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 콤보 x${{Math.max(1, state.run.combo.toFixed(1))}} · 빌드(${{buildSummary}}) · R 재시작`;
+        const synergySummary = state.run.synergy.active.slice(0, 2).join("+") || "none";
+        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 콤보 x${{Math.max(1, state.run.combo.toFixed(1))}} · 웨이브 ${{state.run.waveIndex + 1}} · 시너지(${{synergySummary}}) · 빌드(${{buildSummary}}) · R 재시작`;
         playSfx("gameover");
         overlay.classList.add("show");
       }}

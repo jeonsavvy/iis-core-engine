@@ -729,6 +729,7 @@ class VertexService:
             "- Do not rely on external image generation services or remote image URLs.\n"
             "- Do not regress to flat placeholder rectangle-only visuals.\n"
             "- Movement and steering must remain analog/time-based; avoid one-step quantized control.\n"
+            "- Preserve/expand depth-pack systems: enemy pattern tables, wave escalation, miniboss events, relic synergies.\n"
             "- Do not output markdown fences.\n\n"
             f"Keyword: {keyword}\n"
             f"Title: {title}\n"
@@ -811,6 +812,7 @@ class VertexService:
             "- Keep responsive/safe-area/readability rules.\n"
             "- Keep procedural_threejs_first asset policy: improve via procedural rendering layers, not external generated image dependencies.\n"
             "- Keep analog control smoothness; never convert movement into one-step lane snapping.\n"
+            "- Keep depth systems (wave/miniboss/relic synergy) functional and visible.\n"
             "- Return only the final HTML text (no markdown fences).\n\n"
             f"Game title: {title}\n"
             f"Keyword: {keyword}\n"
@@ -922,6 +924,7 @@ class VertexService:
             "- If the game is a brawl, increase enemy HP and adjust attack cooldowns.\n"
             "- Preserve analog control headroom (no quantized one-step movement assumptions).\n"
             "- Prefer procedural scene layering (parallax/depth/particles) over bitmap dependency.\n"
+            "- Ensure wave escalation + miniboss cadence + relic synergy potential can emerge from numeric tuning.\n"
             "- Ensure values provide a fair but challenging experience suitable for a 90-second arcade game."
         )
 

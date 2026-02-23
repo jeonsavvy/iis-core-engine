@@ -84,7 +84,11 @@ def _extract_hybrid_bundle_from_inline_html(
     runtime_hooks = [
         "requestAnimationFrame",
         "loadSprites",
+        "pickWeighted",
+        "applyRelicSynergy",
+        "spawnMiniBoss",
         "renderWebglBackground",
+        "drawPostFx",
         "spawnEnemy",
         "stepProgression",
         "update",

@@ -374,7 +374,16 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "hud_overlay",
                 "audio_feedback",
             ],
-            "runtime_hooks": ["requestAnimationFrame", "update", "draw", "playSfx"],
+            "runtime_hooks": [
+                "requestAnimationFrame",
+                "pickWeighted",
+                "applyRelicSynergy",
+                "spawnMiniBoss",
+                "drawPostFx",
+                "update",
+                "draw",
+                "playSfx",
+            ],
             "asset_manifest": fallback_asset_manifest,
         }
         hybrid_bundle = (fallback_files, fallback_manifest)
