@@ -42,6 +42,11 @@ def test_infer_topdown_roguelike_mode_from_keyword() -> None:
     assert mode == "topdown_roguelike_shooter"
 
 
+def test_infer_webgl_runner_mode_from_keyword() -> None:
+    mode = _infer_core_loop_type(keyword="웹글 3D 드리프트 레이싱", title="Neon Outrun", genre="arcade")
+    assert mode == "webgl_three_runner"
+
+
 def test_infer_comic_action_mode_from_keyword() -> None:
     mode = _infer_core_loop_type(keyword="코믹액션 3D 난투", title="Turbo Smash", genre="arcade")
     assert mode == "comic_action_brawler_3d"
@@ -64,3 +69,11 @@ def test_gameplay_gate_passes_for_topdown_candidate() -> None:
     )
     assert gate.ok is True
     assert gate.score >= gate.threshold
+
+
+def test_webgl_builder_html_contains_webgl_audio_and_relic_hooks() -> None:
+    html = _build_sample_html("webgl_three_runner").lower()
+    assert "getcontext(\"webgl\"" in html
+    assert "renderwebglbackground(" in html
+    assert "playsfx(" in html
+    assert "state.run.relics" in html

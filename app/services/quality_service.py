@@ -169,6 +169,8 @@ class QualityService:
             ("risk_reward", any(token in lowered for token in ("boost", "combo", "score +=", "state.score +=")), 14),
             ("pacing_control", any(token in lowered for token in ("spawnrate", "enemy_spawn_rate", "difficulty", "speed")), 12),
             ("feedback_fx", any(token in lowered for token in ("shadowblur", "burst(", "particles", "screen")), 13),
+            ("audio_feedback", "playsfx(" in lowered or "audiocontext" in lowered, 8),
+            ("sprite_pack_usage", "sprite_profile" in lowered or "roundrect" in lowered, 8),
             ("readability_guard", "safe-area" in lowered and "overflow-guard" in lowered, 10),
             ("mode_branching", lowered.count("config.mode") >= 2, 10),
             ("progression_curve", any(token in lowered for token in ("difficultyscale", "run.level", "leveltimer", "adaptive")), 12),
@@ -179,6 +181,8 @@ class QualityService:
 
         if any(token in genre_hint for token in ("racing", "레이싱", "drift", "드리프트")):
             checks.append(("racing_specific_mechanics", any(token in lowered for token in ("boosttimer", "roadcurve", "accel", "brake")), 10))
+        if any(token in genre_hint for token in ("webgl", "three", "3d")):
+            checks.append(("webgl_background_runtime", "getcontext(\"webgl\")" in lowered and "renderwebglbackground(" in lowered, 12))
         if any(token in genre_hint for token in ("shooter", "슈팅")):
             checks.append(("shooter_specific_mechanics", "firebullet" in lowered and "bullets" in lowered, 10))
             checks.append(("shooter_enemy_behaviors", any(token in lowered for token in ("charger", "elite", "orbit")), 8))

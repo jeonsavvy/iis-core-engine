@@ -28,6 +28,22 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     if any(
         token in haystack
         for token in (
+            "webgl",
+            "three.js",
+            "threejs",
+            "3d 레이싱",
+            "3d 드리프트",
+            "3d racing",
+            "3d drift",
+            "outrun",
+            "아웃런",
+            "voxel race",
+        )
+    ):
+        return "webgl_three_runner"
+    if any(
+        token in haystack
+        for token in (
             "탑뷰",
             "탑다운",
             "로그라이크",
@@ -55,6 +71,13 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
 
 def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> list[str]:
     presets = {
+        "webgl_three_runner": [
+            "Variant A: ultra-fast neon sprint with aggressive traffic and boost-chain risk/reward.",
+            "Variant B: technical drift line with sharper corner pressure and stricter recovery windows.",
+            "Variant C: endurance outrun loop with escalating depth speed and combo streak scoring.",
+            "Variant D: cinematic sunset highway run with moderate pace and dense late-wave threats.",
+            "Variant E: arcade sprint with high readability, low randomness, and skill expression focus.",
+        ],
         "topdown_roguelike_shooter": [
             "Variant A: high-mobility dash shooter with aggressive close-range swarms and fast loop resets.",
             "Variant B: methodical dungeon skirmish with elite enemy telegraphs and tactical spacing.",
@@ -145,8 +168,24 @@ def _resolve_asset_pack(
         "accent": fallback_accent,
         "particle": "#22c55e",
         "sfx_profile": "synth",
+        "sprite_profile": "neon",
     }
     by_mode = {
+        "webgl_three_runner": {
+            "name": "webgl_neon_highway",
+            "bg_top": "#071125",
+            "bg_bottom": "#020617",
+            "horizon": "#13233f",
+            "track": "#080f1d",
+            "player_primary": "#38bdf8",
+            "player_secondary": "#0f172a",
+            "enemy_primary": "#fb7185",
+            "enemy_elite": "#f97316",
+            "boost_color": "#22d3ee",
+            "particle": "#38bdf8",
+            "sfx_profile": "synth_race",
+            "sprite_profile": "neon",
+        },
         "topdown_roguelike_shooter": {
             "name": "fantasy_topdown",
             "bg_top": "#10162c",
@@ -160,6 +199,7 @@ def _resolve_asset_pack(
             "boost_color": "#a78bfa",
             "particle": "#c4b5fd",
             "sfx_profile": "fantasy_arcade",
+            "sprite_profile": "fantasy",
         },
         "comic_action_brawler_3d": {
             "name": "comic_brawler",
@@ -174,6 +214,7 @@ def _resolve_asset_pack(
             "boost_color": "#facc15",
             "particle": "#fde047",
             "sfx_profile": "comic_arcade",
+            "sprite_profile": "comic",
         },
         "lane_dodge_racer": {
             "name": "neon_racer",
@@ -186,6 +227,7 @@ def _resolve_asset_pack(
             "boost_color": "#22d3ee",
             "particle": "#38bdf8",
             "sfx_profile": "synth_race",
+            "sprite_profile": "neon",
         },
         "arena_shooter": {
             "name": "arena_assault",
@@ -198,6 +240,7 @@ def _resolve_asset_pack(
             "boost_color": "#22d3ee",
             "particle": "#38bdf8",
             "sfx_profile": "pulse_shooter",
+            "sprite_profile": "neon",
         },
         "duel_brawler": {
             "name": "duel_fighter",
@@ -211,6 +254,7 @@ def _resolve_asset_pack(
             "boost_color": "#22d3ee",
             "particle": "#f59e0b",
             "sfx_profile": "impact_duel",
+            "sprite_profile": "comic",
         },
     }
     resolved = {**defaults, **by_mode.get(core_loop_type, {})}
@@ -240,6 +284,11 @@ def _build_hybrid_engine_html(
     asset_pack: dict[str, str],
 ) -> str:
     mode_config = {
+        "webgl_three_runner": {
+            "label": "WebGL 3D Runner",
+            "objective": "WebGL 기반 네온 하이웨이에서 드리프트 라인과 부스트 체인을 유지하며 최장 생존 점수를 노리세요.",
+            "controls": "← → 조향 / ↑ 가속 / ↓ 브레이크 / Shift 부스트 / R 재시작",
+        },
         "topdown_roguelike_shooter": {
             "label": "Topdown Roguelike",
             "objective": "대시와 집중 사격으로 몬스터 웨이브를 돌파하고 생존 콤보를 이어가세요.",
@@ -468,18 +517,26 @@ def _build_hybrid_engine_html(
         accent: "#22c55e",
         particle: "#22c55e",
         sfx_profile: "synth",
+        sprite_profile: "neon",
         ...(CONFIG.assetPack || {{}}),
       }};
+      const MODE_IS_3D_RUNNER = CONFIG.mode === "lane_dodge_racer" || CONFIG.mode === "webgl_three_runner";
       const MODE_IS_SHOOTER = CONFIG.mode === "arena_shooter" || CONFIG.mode === "topdown_roguelike_shooter";
       const MODE_IS_BRAWLER = CONFIG.mode === "duel_brawler" || CONFIG.mode === "comic_action_brawler_3d";
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
+      const webglCanvas = document.createElement("canvas");
+      webglCanvas.width = canvas.width;
+      webglCanvas.height = canvas.height;
+      const gl = CONFIG.mode === "webgl_three_runner" ? webglCanvas.getContext("webgl", {{ antialias: true }}) : null;
       const overlay = document.getElementById("overlay");
       const overlayText = document.getElementById("overlay-text");
       const scoreEl = document.getElementById("score");
       const timerEl = document.getElementById("timer");
       const hpEl = document.getElementById("hp");
       const keys = new Set();
+      let audioCtx = null;
+      let webglRuntime = null;
 
       const state = {{
         running: true,
@@ -504,6 +561,10 @@ def _build_hybrid_engine_html(
           eliteTimer: 0,
           autoFireTimer: 0,
           shake: 0,
+          relics: [],
+          upgrades: [],
+          xp: 0,
+          nextXp: 120,
         }},
         racer: {{
           speed: 280,
@@ -521,6 +582,7 @@ def _build_hybrid_engine_html(
       }};
 
       document.addEventListener("keydown", (e) => {{
+        ensureAudio();
         keys.add(e.key);
         if (!state.running && (e.key === "r" || e.key === "R")) restartGame();
         if (MODE_IS_SHOOTER && e.code === "Space") {{
@@ -558,6 +620,10 @@ def _build_hybrid_engine_html(
           eliteTimer: 0,
           autoFireTimer: 0,
           shake: 0,
+          relics: [],
+          upgrades: [],
+          xp: 0,
+          nextXp: 120,
         }};
         state.racer = {{
           speed: 280,
@@ -582,6 +648,142 @@ def _build_hybrid_engine_html(
         return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
       }}
 
+      function ensureAudio() {{
+        if (audioCtx) return audioCtx;
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (!Ctor) return null;
+        audioCtx = new Ctor();
+        return audioCtx;
+      }}
+
+      function playSfx(kind) {{
+        const ac = ensureAudio();
+        if (!ac) return;
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.connect(gain);
+        gain.connect(ac.destination);
+        const now = ac.currentTime;
+        const profile = ASSET.sfx_profile || "synth";
+        const base = profile.includes("fantasy") ? 240 : profile.includes("comic") ? 180 : 220;
+        const freqMap = {{
+          shoot: base + 120,
+          hit: base + 60,
+          damage: base - 70,
+          boost: base + 220,
+          levelup: base + 320,
+          relic: base + 260,
+          gameover: base - 120,
+        }};
+        const freq = freqMap[kind] || base;
+        osc.type = kind === "damage" ? "sawtooth" : kind === "boost" ? "triangle" : "square";
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(80, freq * 0.62), now + 0.12);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.05, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+        osc.start(now);
+        osc.stop(now + 0.16);
+      }}
+
+      function ensureWebglRuntime() {{
+        if (!gl || webglRuntime) return webglRuntime;
+        const vert = `
+          attribute vec2 aPos;
+          void main() {{
+            gl_Position = vec4(aPos, 0.0, 1.0);
+          }}
+        `;
+        const frag = `
+          precision mediump float;
+          uniform vec2 uRes;
+          uniform float uTime;
+          uniform float uSpeed;
+          uniform vec3 uAccent;
+          void main() {{
+            vec2 uv = (gl_FragCoord.xy / uRes.xy) * 2.0 - 1.0;
+            uv.x *= uRes.x / uRes.y;
+            float depth = max(0.01, 1.0 - (uv.y + 1.0) * 0.5);
+            float lane = abs(fract((uv.x / depth + 0.5) * 0.5) - 0.5);
+            float laneLine = smoothstep(0.06, 0.0, lane);
+            float speedFlow = fract((uTime * (0.35 + uSpeed * 0.0008)) + depth * 4.0);
+            float grid = smoothstep(0.05, 0.0, abs(fract(speedFlow) - 0.5));
+            vec3 bg = mix(vec3(0.03,0.06,0.14), vec3(0.01,0.03,0.08), depth);
+            vec3 road = mix(vec3(0.04,0.06,0.11), vec3(0.08,0.11,0.18), (uv.y + 1.0) * 0.5);
+            vec3 color = mix(bg, road, smoothstep(-0.1, -0.9, uv.y));
+            color += uAccent * laneLine * 0.28;
+            color += vec3(0.15,0.2,0.35) * grid * 0.22;
+            gl_FragColor = vec4(color, 1.0);
+          }}
+        `;
+        const compile = (type, src) => {{
+          const shader = gl.createShader(type);
+          gl.shaderSource(shader, src);
+          gl.compileShader(shader);
+          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return null;
+          return shader;
+        }};
+        const vs = compile(gl.VERTEX_SHADER, vert);
+        const fs = compile(gl.FRAGMENT_SHADER, frag);
+        if (!vs || !fs) return null;
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+        const aPos = gl.getAttribLocation(program, "aPos");
+        const uRes = gl.getUniformLocation(program, "uRes");
+        const uTime = gl.getUniformLocation(program, "uTime");
+        const uSpeed = gl.getUniformLocation(program, "uSpeed");
+        const uAccent = gl.getUniformLocation(program, "uAccent");
+        webglRuntime = {{ program, buffer, aPos, uRes, uTime, uSpeed, uAccent, t: 0 }};
+        return webglRuntime;
+      }}
+
+      function renderWebglBackground(dt) {{
+        const rt = ensureWebglRuntime();
+        if (!rt) return false;
+        rt.t += dt;
+        const hex = (ASSET.boost_color || "#22d3ee").replace("#", "");
+        const r = parseInt(hex.slice(0, 2), 16) / 255 || 0.13;
+        const g = parseInt(hex.slice(2, 4), 16) / 255 || 0.83;
+        const b = parseInt(hex.slice(4, 6), 16) / 255 || 0.93;
+        gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+        gl.useProgram(rt.program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, rt.buffer);
+        gl.enableVertexAttribArray(rt.aPos);
+        gl.vertexAttribPointer(rt.aPos, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform2f(rt.uRes, webglCanvas.width, webglCanvas.height);
+        gl.uniform1f(rt.uTime, rt.t);
+        gl.uniform1f(rt.uSpeed, state.racer.speed || 260);
+        gl.uniform3f(rt.uAccent, r, g, b);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        ctx.drawImage(webglCanvas, 0, 0, canvas.width, canvas.height);
+        return true;
+      }}
+
+      function grantXp(amount) {{
+        state.run.xp += amount;
+        while (state.run.xp >= state.run.nextXp) {{
+          state.run.xp -= state.run.nextXp;
+          state.run.nextXp = Math.floor(state.run.nextXp * 1.2);
+          const picks = ["attack_speed", "mobility", "damage", "sustain", "burst"];
+          const pick = picks[Math.floor(Math.random() * picks.length)];
+          state.run.upgrades.push(pick);
+          if (pick === "attack_speed") CONFIG.player_attack_cooldown = Math.max(0.16, (CONFIG.player_attack_cooldown || 0.5) * 0.88);
+          if (pick === "mobility") CONFIG.player_speed = Math.min(460, (CONFIG.player_speed || 240) + 20);
+          if (pick === "damage") CONFIG.base_score_value = Math.min(220, (CONFIG.base_score_value || 10) + 5);
+          if (pick === "sustain") state.hp = Math.min((CONFIG.player_hp || 3) + 2, state.hp + 1);
+          if (pick === "burst") state.run.combo = Math.min(20, state.run.combo + 1.8);
+          state.run.relics.push(`Relic-${{pick}}-${{state.run.level}}`);
+          playSfx("levelup");
+          playSfx("relic");
+        }}
+      }}
+
       function stepProgression(dt) {{
         state.run.levelTimer += dt;
         state.run.comboTimer = Math.max(0, state.run.comboTimer - dt);
@@ -593,6 +795,8 @@ def _build_hybrid_engine_html(
           state.run.level += 1;
           state.run.difficultyScale = 1 + (state.run.level - 1) * 0.11;
           burst(canvas.width * 0.5, 80, ASSET.particle, 20);
+          grantXp(30 + state.run.level * 6);
+          playSfx("levelup");
         }}
       }}
 
@@ -612,9 +816,10 @@ def _build_hybrid_engine_html(
         const spdMin = CONFIG.enemy_speed_min || 100;
         const spdMax = CONFIG.enemy_speed_max || 220;
         const difficultyScale = Math.max(1, state.run.difficultyScale || 1);
-        if (CONFIG.mode === "lane_dodge_racer") {{
+        if (MODE_IS_3D_RUNNER) {{
           const lane = Math.floor(Math.random() * 3) - 1;
-          const kind = Math.random() < 0.2 ? "boost" : "obstacle";
+          const boostRate = CONFIG.mode === "webgl_three_runner" ? 0.24 : 0.2;
+          const kind = Math.random() < boostRate ? "boost" : "obstacle";
           state.enemies.push({{
             lane,
             z: rand(0.04, 0.14),
@@ -687,6 +892,7 @@ def _build_hybrid_engine_html(
 
       function fireBullet() {{
         if (!state.running) return;
+        playSfx("shoot");
         const bulletSpeed = CONFIG.mode === "topdown_roguelike_shooter" ? 620 : 520;
         const bulletW = CONFIG.mode === "topdown_roguelike_shooter" ? 7 : 6;
         const bulletH = CONFIG.mode === "topdown_roguelike_shooter" ? 18 : 16;
@@ -711,11 +917,13 @@ def _build_hybrid_engine_html(
           if (dist > 96) continue;
           enemy.hp -= 1;
           hitCount += 1;
+          playSfx("hit");
           state.score += CONFIG.mode === "comic_action_brawler_3d" ? 62 : 45;
           burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, ASSET.enemy_elite, 10);
           if (enemy.hp <= 0) {{
             state.score += 170;
             addCombo(1.4);
+            grantXp(18);
             burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, ASSET.particle, 18);
           }}
         }}
@@ -745,7 +953,7 @@ def _build_hybrid_engine_html(
         stepProgression(dt);
         const spawnRate = (CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8);
 
-        if (CONFIG.mode === "lane_dodge_racer") {{
+        if (MODE_IS_3D_RUNNER) {{
           const left = keys.has("ArrowLeft") || keys.has("a");
           const right = keys.has("ArrowRight") || keys.has("d");
           const accel = keys.has("ArrowUp") || keys.has("w");
@@ -776,6 +984,11 @@ def _build_hybrid_engine_html(
             state.racer.boostTimer = Math.max(0, state.racer.boostTimer - dt);
             state.racer.speed = Math.max(state.racer.speed, 390);
           }}
+          if (CONFIG.mode === "webgl_three_runner" && keys.has("Shift") && consumeDash()) {{
+            state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.4);
+            state.racer.speed = Math.min(560, state.racer.speed + 70);
+            playSfx("boost");
+          }}
 
           const curvePx = state.racer.roadCurve * canvas.width * 0.16;
           const laneXs = [canvas.width * 0.28 + curvePx * 0.15, canvas.width * 0.5 + curvePx * 0.15, canvas.width * 0.72 + curvePx * 0.15];
@@ -799,11 +1012,14 @@ def _build_hybrid_engine_html(
                   state.racer.boostTimer = Math.max(state.racer.boostTimer, 2.0);
                   state.score += 30;
                   addCombo(0.8);
+                  grantXp(10);
+                  playSfx("boost");
                   burst(state.player.x + state.player.w / 2, state.player.y + 4, ASSET.boost_color, 14);
                 }} else {{
                   state.hp -= 1;
                   state.run.combo = 0;
                   state.score = Math.max(0, state.score - 15);
+                  playSfx("damage");
                   burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
                 }}
                 e.z = 2;
@@ -816,6 +1032,7 @@ def _build_hybrid_engine_html(
             if (passed && e.kind !== "boost") {{
               state.score += (CONFIG.base_score_value || 10) * (1 + state.run.combo * 0.06);
               addCombo(0.3);
+              grantXp(4);
             }}
             return !passed;
           }});
@@ -850,6 +1067,7 @@ def _build_hybrid_engine_html(
               state.hp -= e.kind === "elite" ? 2 : 1;
               state.run.combo = 0;
               state.run.shake = 0.22;
+              playSfx("damage");
               burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
               e.hp = 0;
             }}
@@ -863,7 +1081,9 @@ def _build_hybrid_engine_html(
                 b.y = -999;
                 state.score += (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.2 : 1);
                 addCombo(e.kind === "elite" ? 1.6 : 0.8);
+                playSfx("hit");
                 burst(e.x + e.w / 2, e.y + e.h / 2, ASSET.boost_color, e.kind === "elite" ? 12 : 8);
+                if (e.hp <= 0) grantXp(e.kind === "elite" ? 24 : 12);
               }}
             }}
           }}
@@ -884,11 +1104,13 @@ def _build_hybrid_engine_html(
               e.y = canvas.height + 999;
               state.hp -= 1;
               state.run.combo = 0;
+              playSfx("damage");
             }}
             if (rectsOverlap(state.player, e)) {{
               e.y = canvas.height + 999;
               state.hp -= 1;
               state.run.combo = 0;
+              playSfx("damage");
               burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 14);
             }}
           }}
@@ -901,6 +1123,8 @@ def _build_hybrid_engine_html(
                 const scoreGain = (CONFIG.base_score_value || 10) * (e.kind === "elite" ? 2.0 : 1);
                 state.score += scoreGain * (1 + state.run.combo * 0.04);
                 addCombo(e.kind === "elite" ? 1.2 : 0.7);
+                playSfx("hit");
+                grantXp(e.kind === "elite" ? 18 : 8);
                 burst(e.x + e.w/2, e.y + e.h/2, ASSET.boost_color, e.kind === "elite" ? 10 : 8);
               }}
             }}
@@ -928,6 +1152,7 @@ def _build_hybrid_engine_html(
             if (rectsOverlap(state.player, e)) {{
               state.hp -= e.kind === "elite" ? 2 : 1;
               state.run.combo = 0;
+              playSfx("damage");
               state.player.x = clamp(state.player.x - (dx / len) * 35, 20, canvas.width - state.player.w - 20);
               state.player.y = clamp(state.player.y - (dy / len) * 35, 60, canvas.height - state.player.h - 20);
               burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 10);
@@ -946,6 +1171,7 @@ def _build_hybrid_engine_html(
             if (rectsOverlap(state.player, e)) {{
               state.hp -= 1;
               state.run.combo = 0;
+              playSfx("damage");
               e.y = canvas.height + 999;
               burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 8);
             }}
@@ -977,17 +1203,20 @@ def _build_hybrid_engine_html(
         ctx.fillStyle = ASSET.track;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        if (CONFIG.mode === "lane_dodge_racer") {{
+        if (MODE_IS_3D_RUNNER) {{
           const horizonY = canvas.height * 0.2;
           const roadTop = canvas.width * 0.2;
           const roadBottom = canvas.width * 0.78;
           const curvePx = state.racer.roadCurve * canvas.width * 0.16;
 
-          const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
-          sky.addColorStop(0, ASSET.bg_top);
-          sky.addColorStop(1, ASSET.bg_bottom);
-          ctx.fillStyle = sky;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          const webglRendered = CONFIG.mode === "webgl_three_runner" ? renderWebglBackground(1 / 60) : false;
+          if (!webglRendered) {{
+            const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            sky.addColorStop(0, ASSET.bg_top);
+            sky.addColorStop(1, ASSET.bg_bottom);
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }}
 
           ctx.fillStyle = ASSET.horizon;
           ctx.beginPath();
@@ -1112,6 +1341,13 @@ def _build_hybrid_engine_html(
                 ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2);
                 ctx.stroke();
               }}
+            }} else if (ASSET.sprite_profile === "comic") {{
+              const r = Math.max(6, e.w * 0.18);
+              ctx.beginPath();
+              ctx.roundRect(e.x, e.y, e.w, e.h, r);
+              ctx.fill();
+              ctx.fillStyle = "rgba(255,255,255,0.16)";
+              ctx.fillRect(e.x + e.w * 0.16, e.y + e.h * 0.12, e.w * 0.2, e.h * 0.16);
             }} else {{
               ctx.fillRect(e.x, e.y, e.w, e.h);
             }}
@@ -1131,7 +1367,7 @@ def _build_hybrid_engine_html(
           ctx.globalAlpha = 1;
         }}
 
-        if (CONFIG.mode === "lane_dodge_racer") {{
+        if (MODE_IS_3D_RUNNER) {{
           const px = state.player.x;
           const py = state.player.y;
           const pw = state.player.w;
@@ -1168,6 +1404,17 @@ def _build_hybrid_engine_html(
             ctx.fill();
             ctx.fillStyle = ASSET.player_secondary;
             ctx.fillRect(px - 5, py - 18, 10, 20);
+          }} else if (ASSET.sprite_profile === "comic") {{
+            const w = state.player.w;
+            const h = state.player.h;
+            const x = state.player.x;
+            const y = state.player.y;
+            ctx.fillStyle = ASSET.player_primary;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, Math.max(7, w * 0.2));
+            ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.fillRect(x + w * 0.18, y + h * 0.12, w * 0.22, h * 0.14);
           }} else {{
             ctx.fillStyle = ASSET.player_primary;
             ctx.fillRect(state.player.x, state.player.y, state.player.w, state.player.h);
@@ -1186,14 +1433,16 @@ def _build_hybrid_engine_html(
 
       function updateHud() {{
         scoreEl.textContent = `Score: ${{Math.floor(state.score)}} · Combo: x${{Math.max(1, state.run.combo.toFixed(1))}}`;
-        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}}`;
-        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}}`;
+        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;
+        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}}`;
       }}
 
       function endGame() {{
         if (!state.running) return;
         state.running = false;
-        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 최고 콤보 x${{Math.max(1, state.run.combo.toFixed(1))}} · 다시 시작하려면 R`;
+        const buildSummary = state.run.upgrades.slice(-3).join(", ") || "none";
+        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 콤보 x${{Math.max(1, state.run.combo.toFixed(1))}} · 빌드(${{buildSummary}}) · R 재시작`;
+        playSfx("gameover");
         overlay.classList.add("show");
       }}
 
