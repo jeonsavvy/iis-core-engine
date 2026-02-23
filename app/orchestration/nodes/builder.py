@@ -297,7 +297,7 @@ def _build_hybrid_engine_html(
         </div>
       </div>
       <p class="hint overflow-guard">{mode_config["objective"]} / {mode_config["controls"]}</p>
-      <p class="hint overflow-guard">Use IISLeaderboard.submitScore(playerName, score, fingerprint) when game over.</p>
+      <!-- leaderboard contract exposed as window.IISLeaderboard.submitScore -->
     </main>
     <script>
       window.__iis_game_boot_ok = true;
