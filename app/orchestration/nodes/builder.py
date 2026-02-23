@@ -98,6 +98,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         slug=slug,
         core_loop_type=core_loop_type,
         asset_pack=asset_pack,
+        art_direction_contract=art_direction_contract,
     )
     contract = runtime_asset_manifest.get("contract")
     if isinstance(contract, dict):
@@ -127,6 +128,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "asset_strategy_mode",
                 "asset_provider",
                 "external_image_generation",
+                "asset_variant_count",
+                "asset_detail_tier",
             )
         }
     candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))

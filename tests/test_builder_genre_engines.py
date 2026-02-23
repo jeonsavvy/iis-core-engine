@@ -205,6 +205,11 @@ def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> Non
     assert isinstance(asset_policy, dict)
     assert asset_policy.get("mode") == "procedural_threejs_first"
     assert asset_policy.get("external_image_generation") is False
+    asset_pipeline = asset_manifest.get("asset_pipeline")
+    assert isinstance(asset_pipeline, dict)
+    assert asset_pipeline.get("automated") is True
+    assert int(asset_pipeline.get("variant_count", 0)) >= 2
+    assert asset_pipeline.get("selected_variant")
     procedural_layers = asset_manifest.get("procedural_layers")
     assert isinstance(procedural_layers, list)
     assert len(procedural_layers) >= 3
@@ -220,3 +225,21 @@ def test_hybrid_bundle_extract_includes_asset_bank_and_runtime_contract() -> Non
         },
     )
     assert contract_result.ok is True
+
+
+def test_hybrid_asset_bank_applies_contract_variant_count() -> None:
+    mode = "webgl_three_runner"
+    asset_pack = _resolve_asset_pack(core_loop_type=mode, palette=["#22c55e", "#10162c", "#60a5fa", "#f43f5e"])
+    _, runtime_manifest = _build_hybrid_asset_bank(
+        slug="variant-contract",
+        core_loop_type=mode,
+        asset_pack=asset_pack,
+        art_direction_contract={
+            "asset_variant_count": 5,
+            "asset_detail_tier": "cinematic",
+        },
+    )
+    pipeline_meta = runtime_manifest.get("asset_pipeline")
+    assert isinstance(pipeline_meta, dict)
+    assert int(pipeline_meta.get("variant_count", 0)) == 5
+    assert pipeline_meta.get("profile") == "cinematic"

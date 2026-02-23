@@ -12,8 +12,16 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
         motif = "fantasy-arcane"
     elif any(token in keyword_hint for token in ("비행", "flight", "항공", "pilot")):
         motif = "aero-cinematic"
+    elif any(token in keyword_hint for token in ("f1", "포뮬러", "formula", "그랑프리", "circuit")):
+        motif = "formula-aerodynamic"
     elif any(token in keyword_hint for token in ("코믹", "comic", "brawler")):
         motif = "comic-impact"
+
+    detail_tier = "enhanced"
+    if motif in {"formula-aerodynamic", "aero-cinematic"}:
+        detail_tier = "cinematic"
+    elif motif == "fantasy-arcane":
+        detail_tier = "illustrative"
 
     return {
         "style_tag": visual_style,
@@ -24,6 +32,8 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
         "external_image_generation": False,
         "required_visual_keywords": [motif, "readable_silhouette", "high_contrast_hud"],
         "forbidden_visual_tokens": ["placeholder", "temp", "debug-ui", "plain-rectangle-only"],
+        "asset_variant_count": 4,
+        "asset_detail_tier": detail_tier,
         "min_image_assets": 5,
         "min_render_layers": 4,
         "min_animation_hooks": 3,

@@ -1,5 +1,188 @@
 from __future__ import annotations
 
+import re
+
+
+def _normalize_hex_color(color: str, *, fallback: str) -> str:
+    raw = str(color or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", raw):
+        return raw.lower()
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", raw):
+        return "#" + "".join(ch * 2 for ch in raw[1:]).lower()
+    return fallback.lower()
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    normalized = _normalize_hex_color(color, fallback="#000000")
+    return (
+        int(normalized[1:3], 16),
+        int(normalized[3:5], 16),
+        int(normalized[5:7], 16),
+    )
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    rc = max(0, min(255, int(r)))
+    gc = max(0, min(255, int(g)))
+    bc = max(0, min(255, int(b)))
+    return f"#{rc:02x}{gc:02x}{bc:02x}"
+
+
+def _mix_hex(color_a: str, color_b: str, ratio: float) -> str:
+    ar, ag, ab = _hex_to_rgb(color_a)
+    br, bg, bb = _hex_to_rgb(color_b)
+    r = ar + (br - ar) * ratio
+    g = ag + (bg - ag) * ratio
+    b = ab + (bb - ab) * ratio
+    return _rgb_to_hex(r, g, b)
+
+
+def _relative_luminance(color: str) -> float:
+    r, g, b = _hex_to_rgb(color)
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+
+
+def _build_asset_variant_candidates(
+    *,
+    core_loop_type: str,
+    asset_pack: dict[str, str],
+    art_direction_contract: dict[str, object] | None,
+) -> list[dict[str, object]]:
+    contract = art_direction_contract if isinstance(art_direction_contract, dict) else {}
+    requested_count = int(contract.get("asset_variant_count", 3) or 3)
+    variant_count = max(1, min(5, requested_count))
+    motif = str(contract.get("motif", "")).strip().casefold()
+
+    bg_top = _normalize_hex_color(asset_pack.get("bg_top", "#08122f"), fallback="#08122f")
+    bg_bottom = _normalize_hex_color(asset_pack.get("bg_bottom", "#050915"), fallback="#050915")
+    track = _normalize_hex_color(asset_pack.get("track", "#111827"), fallback="#111827")
+    player = _normalize_hex_color(asset_pack.get("player_primary", "#38bdf8"), fallback="#38bdf8")
+    enemy = _normalize_hex_color(asset_pack.get("enemy_primary", "#ef4444"), fallback="#ef4444")
+    elite = _normalize_hex_color(asset_pack.get("enemy_elite", "#f97316"), fallback="#f97316")
+    boost = _normalize_hex_color(asset_pack.get("boost_color", "#22d3ee"), fallback="#22d3ee")
+    hud = _normalize_hex_color(asset_pack.get("hud_primary", "#e2e8f0"), fallback="#e2e8f0")
+    particle = _normalize_hex_color(asset_pack.get("particle", "#22c55e"), fallback="#22c55e")
+
+    templates: list[dict[str, object]] = [
+        {
+            "id": "baseline-balanced",
+            "theme": "balanced",
+            "bg_top": bg_top,
+            "bg_bottom": bg_bottom,
+            "track": track,
+            "player_primary": player,
+            "enemy_primary": enemy,
+            "enemy_elite": elite,
+            "boost_color": boost,
+            "hud_primary": hud,
+            "particle": particle,
+        },
+        {
+            "id": "high-contrast-racing",
+            "theme": "high-contrast",
+            "bg_top": _mix_hex(bg_top, "#0b1020", 0.45),
+            "bg_bottom": _mix_hex(bg_bottom, "#010409", 0.6),
+            "track": _mix_hex(track, "#0b1120", 0.55),
+            "player_primary": _mix_hex(player, "#67e8f9", 0.35),
+            "enemy_primary": _mix_hex(enemy, "#fb7185", 0.42),
+            "enemy_elite": _mix_hex(elite, "#f59e0b", 0.45),
+            "boost_color": _mix_hex(boost, "#22d3ee", 0.35),
+            "hud_primary": _mix_hex(hud, "#ffffff", 0.2),
+            "particle": _mix_hex(particle, "#fde047", 0.42),
+        },
+        {
+            "id": "cinematic-glow",
+            "theme": "cinematic",
+            "bg_top": _mix_hex(bg_top, "#111827", 0.28),
+            "bg_bottom": _mix_hex(bg_bottom, "#020617", 0.52),
+            "track": _mix_hex(track, "#1e293b", 0.3),
+            "player_primary": _mix_hex(player, "#60a5fa", 0.24),
+            "enemy_primary": _mix_hex(enemy, "#f43f5e", 0.26),
+            "enemy_elite": _mix_hex(elite, "#f97316", 0.24),
+            "boost_color": _mix_hex(boost, "#38bdf8", 0.18),
+            "hud_primary": _mix_hex(hud, "#f8fafc", 0.18),
+            "particle": _mix_hex(particle, "#93c5fd", 0.22),
+        },
+        {
+            "id": "aggressive-arcade",
+            "theme": "aggressive",
+            "bg_top": _mix_hex(bg_top, "#020617", 0.68),
+            "bg_bottom": _mix_hex(bg_bottom, "#000000", 0.65),
+            "track": _mix_hex(track, "#0f172a", 0.55),
+            "player_primary": _mix_hex(player, "#22d3ee", 0.22),
+            "enemy_primary": _mix_hex(enemy, "#ef4444", 0.18),
+            "enemy_elite": _mix_hex(elite, "#f97316", 0.2),
+            "boost_color": _mix_hex(boost, "#a78bfa", 0.22),
+            "hud_primary": _mix_hex(hud, "#e2e8f0", 0.15),
+            "particle": _mix_hex(particle, "#facc15", 0.45),
+        },
+        {
+            "id": "clarity-first",
+            "theme": "readability",
+            "bg_top": _mix_hex(bg_top, "#0f172a", 0.38),
+            "bg_bottom": _mix_hex(bg_bottom, "#020617", 0.4),
+            "track": _mix_hex(track, "#111827", 0.45),
+            "player_primary": _mix_hex(player, "#7dd3fc", 0.38),
+            "enemy_primary": _mix_hex(enemy, "#fb7185", 0.4),
+            "enemy_elite": _mix_hex(elite, "#f59e0b", 0.35),
+            "boost_color": _mix_hex(boost, "#22d3ee", 0.28),
+            "hud_primary": _mix_hex(hud, "#ffffff", 0.25),
+            "particle": _mix_hex(particle, "#a3e635", 0.3),
+        },
+    ]
+    selected_templates = templates[:variant_count]
+
+    scored: list[dict[str, object]] = []
+    for row in selected_templates:
+        player_track_contrast = abs(_relative_luminance(str(row["player_primary"])) - _relative_luminance(str(row["track"])))
+        enemy_track_contrast = abs(_relative_luminance(str(row["enemy_primary"])) - _relative_luminance(str(row["track"])))
+        hud_bg_contrast = abs(_relative_luminance(str(row["hud_primary"])) - _relative_luminance(str(row["bg_bottom"])))
+        score = (player_track_contrast * 42.0) + (enemy_track_contrast * 28.0) + (hud_bg_contrast * 26.0)
+        if "racing" in core_loop_type or "formula" in core_loop_type:
+            score += player_track_contrast * 8.0
+        if "aero" in motif and "flight" in core_loop_type:
+            score += 3.0
+        if "fantasy" in motif and "roguelike" in core_loop_type:
+            score += 3.0
+        if "comic" in motif and "brawler" in core_loop_type:
+            score += 3.0
+        scored.append({**row, "score": round(score, 4)})
+    return scored
+
+
+def _build_decorative_svg_layers(
+    *,
+    bg_top: str,
+    boost_color: str,
+    enemy_primary: str,
+    hud_primary: str,
+) -> dict[str, str]:
+    return {
+        "hud-frame.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='256' height='96' viewBox='0 0 256 96'>"
+            f"<rect width='256' height='96' rx='18' fill='rgba(15,23,42,0.62)' stroke='{hud_primary}' stroke-opacity='0.32'/>"
+            f"<rect x='8' y='8' width='240' height='80' rx='14' fill='none' stroke='{boost_color}' stroke-opacity='0.24'/>"
+            f"</svg>"
+        ),
+        "track-grid.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180' viewBox='0 0 320 180'>"
+            f"<rect width='320' height='180' fill='{bg_top}'/>"
+            f"<g stroke='{boost_color}' stroke-opacity='0.24' stroke-width='1'>"
+            f"<path d='M0 160 L160 100 L320 160'/>"
+            f"<path d='M0 180 L160 110 L320 180'/>"
+            f"<path d='M80 180 L140 102 M160 180 L160 100 M240 180 L180 102'/>"
+            f"</g>"
+            f"</svg>"
+        ),
+        "impact-flare.svg": (
+            f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+            f"<circle cx='64' cy='64' r='16' fill='{hud_primary}'/>"
+            f"<circle cx='64' cy='64' r='28' fill='{boost_color}' fill-opacity='0.45'/>"
+            f"<circle cx='64' cy='64' r='42' fill='{enemy_primary}' fill-opacity='0.2'/>"
+            f"</svg>"
+        ),
+    }
+
 
 def _resolve_asset_pack(
     *,
@@ -158,13 +341,35 @@ def _build_hybrid_asset_bank(
     slug: str,
     core_loop_type: str,
     asset_pack: dict[str, str],
+    art_direction_contract: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, object]]:
-    player_primary = str(asset_pack.get("player_primary", "#38bdf8"))
+    variants = _build_asset_variant_candidates(
+        core_loop_type=core_loop_type,
+        asset_pack=asset_pack,
+        art_direction_contract=art_direction_contract,
+    )
+    selected_variant = max(variants, key=lambda row: float(row.get("score", 0.0)))
+
+    player_primary = str(selected_variant.get("player_primary", asset_pack.get("player_primary", "#38bdf8")))
     player_secondary = str(asset_pack.get("player_secondary", "#0f172a"))
-    enemy_primary = str(asset_pack.get("enemy_primary", "#ef4444"))
-    enemy_elite = str(asset_pack.get("enemy_elite", "#f97316"))
-    boost_color = str(asset_pack.get("boost_color", "#22d3ee"))
-    hud_primary = str(asset_pack.get("hud_primary", "#e2e8f0"))
+    enemy_primary = str(selected_variant.get("enemy_primary", asset_pack.get("enemy_primary", "#ef4444")))
+    enemy_elite = str(selected_variant.get("enemy_elite", asset_pack.get("enemy_elite", "#f97316")))
+    boost_color = str(selected_variant.get("boost_color", asset_pack.get("boost_color", "#22d3ee")))
+    hud_primary = str(selected_variant.get("hud_primary", asset_pack.get("hud_primary", "#e2e8f0")))
+    selected_bg_top = str(selected_variant.get("bg_top", asset_pack.get("bg_top", "#08122f")))
+    selected_bg_bottom = str(selected_variant.get("bg_bottom", asset_pack.get("bg_bottom", "#050915")))
+    selected_track = str(selected_variant.get("track", asset_pack.get("track", "#111827")))
+    selected_particle = str(selected_variant.get("particle", asset_pack.get("particle", "#22c55e")))
+
+    asset_pack["bg_top"] = selected_bg_top
+    asset_pack["bg_bottom"] = selected_bg_bottom
+    asset_pack["track"] = selected_track
+    asset_pack["player_primary"] = player_primary
+    asset_pack["enemy_primary"] = enemy_primary
+    asset_pack["enemy_elite"] = enemy_elite
+    asset_pack["boost_color"] = boost_color
+    asset_pack["hud_primary"] = hud_primary
+    asset_pack["particle"] = selected_particle
 
     svg_map = {
         "player.svg": (
@@ -284,6 +489,14 @@ def _build_hybrid_asset_bank(
                 f"</svg>"
             ),
         }
+    svg_map.update(
+        _build_decorative_svg_layers(
+            bg_top=selected_bg_top,
+            boost_color=boost_color,
+            enemy_primary=enemy_primary,
+            hud_primary=hud_primary,
+        )
+    )
 
     image_keys = {
         "player": "player.svg",
@@ -293,6 +506,9 @@ def _build_hybrid_asset_bank(
         "ring": "ring.svg",
         "hazard": "hazard.svg",
         "trail": "trail.svg",
+        "hud_frame": "hud-frame.svg",
+        "track_grid": "track-grid.svg",
+        "impact_flare": "impact-flare.svg",
     }
     artifact_files = [
         {
@@ -319,7 +535,31 @@ def _build_hybrid_asset_bank(
             "depth_fog",
             "particle_trails",
             "hud_glow_overlay",
+            "decal_layers",
         ],
+        "asset_pipeline": {
+            "automated": True,
+            "source": "builtin_svg_asset_pipeline",
+            "profile": str((art_direction_contract or {}).get("asset_detail_tier", "enhanced")),
+            "variant_count": len(variants),
+            "selected_variant": str(selected_variant.get("id", "baseline-balanced")),
+            "selected_theme": str(selected_variant.get("theme", "balanced")),
+            "steps": [
+                "derive_contract",
+                "sample_visual_variants",
+                "score_readability_contrast",
+                "select_best_variant",
+                "compile_svg_pack",
+            ],
+            "candidates": [
+                {
+                    "id": str(row.get("id", f"variant-{index + 1}")),
+                    "theme": str(row.get("theme", "balanced")),
+                    "score": float(row.get("score", 0.0)),
+                }
+                for index, row in enumerate(variants)
+            ],
+        },
         "contract": {
             "min_image_assets": 5,
             "min_render_layers": 4,

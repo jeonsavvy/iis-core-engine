@@ -482,6 +482,10 @@ class QualityService:
         policy_provider = ""
         policy_external_generation = None
         procedural_layer_count = 0
+        asset_pipeline_present = False
+        asset_pipeline_automated = False
+        asset_pipeline_variant_count = 0
+        asset_pipeline_selected_variant = ""
         if isinstance(asset_manifest, dict):
             images = asset_manifest.get("images")
             if isinstance(images, dict):
@@ -495,6 +499,12 @@ class QualityService:
             procedural_layers = asset_manifest.get("procedural_layers")
             if isinstance(procedural_layers, list):
                 procedural_layer_count = len([value for value in procedural_layers if isinstance(value, str) and value.strip()])
+            pipeline_meta = asset_manifest.get("asset_pipeline")
+            if isinstance(pipeline_meta, dict):
+                asset_pipeline_present = True
+                asset_pipeline_automated = bool(pipeline_meta.get("automated"))
+                asset_pipeline_variant_count = int(pipeline_meta.get("variant_count", 0) or 0)
+                asset_pipeline_selected_variant = str(pipeline_meta.get("selected_variant", "")).strip()
         contract_min_images = int(art_contract.get("min_image_assets", 5) or 5)
         contract_min_layers = int(art_contract.get("min_render_layers", 4) or 4)
         contract_min_hooks = int(art_contract.get("min_animation_hooks", 3) or 3)
@@ -513,6 +523,10 @@ class QualityService:
             ("policy_mode_procedural_threejs_first", policy_mode == "procedural_threejs_first", 8),
             ("policy_provider_present", bool(policy_provider), 6),
             ("policy_external_generation_disabled", policy_external_generation is False, 6),
+            ("asset_pipeline_present", asset_pipeline_present, 8),
+            ("asset_pipeline_automated", asset_pipeline_automated, 8),
+            ("asset_pipeline_variant_count", asset_pipeline_variant_count >= 2, 8),
+            ("asset_pipeline_selected_variant", bool(asset_pipeline_selected_variant), 4),
             ("art_direction_contract_present", bool(art_contract), 12),
         ]
 
@@ -536,6 +550,12 @@ class QualityService:
             hard_failures.append("asset_policy_mode_mismatch")
         if policy_external_generation is not False:
             hard_failures.append("external_image_generation_not_disabled")
+        if not asset_pipeline_present:
+            hard_failures.append("asset_pipeline_metadata_missing")
+        if not asset_pipeline_automated:
+            hard_failures.append("asset_pipeline_not_automated")
+        if asset_pipeline_variant_count < 1:
+            hard_failures.append("asset_pipeline_variant_count_invalid")
 
         if hard_failures:
             failed_checks.extend(hard_failures)
