@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -33,6 +34,60 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     return "arcade_generic"
 
 
+def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> list[str]:
+    presets = {
+        "lane_dodge_racer": [
+            "Variant A: high-speed drift pressure with frequent boost pickups and tighter lane windows.",
+            "Variant B: tactical pacing with wider lanes, fewer boosts, and heavier punishment on collisions.",
+            "Variant C: rhythm-based overtakes with accelerating wave cadence and score combo emphasis.",
+            "Variant D: endurance run with higher HP but late-stage aggressive traffic spikes.",
+            "Variant E: risk-heavy sprint where boost chaining is powerful but failure is costly.",
+        ],
+        "arena_shooter": [
+            "Variant A: dense bullet pressure with lower HP and fast dodge rhythm.",
+            "Variant B: slower enemy waves with tankier enemies and positioning focus.",
+            "Variant C: combo-oriented clear speed where aggressive play accelerates spawn pacing.",
+            "Variant D: survival-heavy loop with recovery windows and burst threats.",
+            "Variant E: precision loop with narrow safe zones and high-reward shots.",
+        ],
+        "duel_brawler": [
+            "Variant A: close-range pressure with short cooldown attacks and reactive dodges.",
+            "Variant B: spacing-focused duel with slower attacks and punishing counters.",
+            "Variant C: tempo-brawler with wave bursts and combo scoring windows.",
+            "Variant D: high-risk burst mode where attack openings are rare but decisive.",
+            "Variant E: attrition duel with resilient enemies and clutch comeback flow.",
+        ],
+        "arcade_generic": [
+            "Variant A: fast pressure loop with high movement speed and dense hazards.",
+            "Variant B: strategic loop with clearer telegraphs and slower threat escalation.",
+            "Variant C: combo loop with reward multipliers for consecutive clean actions.",
+            "Variant D: survival endurance with stronger late-game pacing spikes.",
+            "Variant E: balanced loop with readability-first but escalating risk windows.",
+        ],
+    }
+    hints = list(presets.get(core_loop_type, presets["arcade_generic"]))
+    if candidate_count <= len(hints):
+        return hints[:candidate_count]
+
+    extra_needed = candidate_count - len(hints)
+    for idx in range(extra_needed):
+        hints.append(f"Variant extra-{idx + 1}: preserve core loop but shift pacing and risk/reward curve.")
+    return hints
+
+
+def _candidate_composite_score(
+    *,
+    quality_score: int,
+    gameplay_score: int,
+    quality_ok: bool,
+    gameplay_ok: bool,
+) -> float:
+    score = (quality_score * 0.4) + (gameplay_score * 0.6)
+    if not quality_ok:
+        score -= 15
+    if not gameplay_ok:
+        score -= 20
+    return round(score, 2)
 
 
 def _build_hybrid_engine_html(
@@ -888,55 +943,153 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     palette = design_spec.palette
     accent_color = str(palette[0]) if palette else "#22C55E"
     core_loop_type = _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)
+    candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
+    variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
+    design_spec_dump = design_spec.model_dump()
 
     append_log(
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
         agent_name=PipelineAgentName.BUILDER,
-        message=f"Vertex generation started (iteration={state['build_iteration']}).",
+        message=f"Production V2 generation started (iteration={state['build_iteration']}).",
         metadata={
             "iteration": state["build_iteration"],
             "core_loop_type": core_loop_type,
+            "candidate_count": candidate_count,
         },
     )
 
-    generated_config = deps.vertex_service.generate_game_config(
-        keyword=state["keyword"],
-        title=title,
-        genre=genre,
-        objective=gdd.objective,
-        design_spec=design_spec.model_dump(),
+    candidate_rows: list[dict[str, Any]] = []
+    for index, variation_hint in enumerate(variation_hints, start=1):
+        generated_config = deps.vertex_service.generate_game_config(
+            keyword=state["keyword"],
+            title=title,
+            genre=genre,
+            objective=gdd.objective,
+            design_spec=design_spec_dump,
+            variation_hint=variation_hint,
+        )
+        candidate_html = _build_hybrid_engine_html(
+            title=title,
+            genre=genre,
+            slug=slug,
+            accent_color=accent_color,
+            viewport_width=design_spec.viewport_width,
+            viewport_height=design_spec.viewport_height,
+            safe_area_padding=design_spec.safe_area_padding,
+            min_font_size_px=design_spec.min_font_size_px,
+            text_overflow_policy=design_spec.text_overflow_policy,
+            core_loop_type=core_loop_type,
+            game_config=generated_config.payload,
+        )
+        quality_probe = deps.quality_service.evaluate_quality_contract(candidate_html, design_spec=design_spec_dump)
+        gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
+            candidate_html,
+            design_spec=design_spec_dump,
+            genre=genre,
+        )
+        composite_score = _candidate_composite_score(
+            quality_score=quality_probe.score,
+            gameplay_score=gameplay_probe.score,
+            quality_ok=quality_probe.ok,
+            gameplay_ok=gameplay_probe.ok,
+        )
+
+        candidate_row = {
+            "index": index,
+            "variation_hint": variation_hint,
+            "artifact_html": candidate_html,
+            "generation_meta": generated_config.meta,
+            "quality_ok": quality_probe.ok,
+            "quality_score": quality_probe.score,
+            "gameplay_ok": gameplay_probe.ok,
+            "gameplay_score": gameplay_probe.score,
+            "composite_score": composite_score,
+        }
+        candidate_rows.append(candidate_row)
+
+        append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            agent_name=PipelineAgentName.BUILDER,
+            message=f"Candidate {index}/{candidate_count} evaluated.",
+            metadata={
+                "iteration": state["build_iteration"],
+                "candidate_index": index,
+                "quality_score": quality_probe.score,
+                "gameplay_score": gameplay_probe.score,
+                "composite_score": composite_score,
+                "generation_source": generated_config.meta.get("generation_source", "stub"),
+                "model": generated_config.meta.get("model"),
+            },
+        )
+
+    best_candidate = max(
+        candidate_rows,
+        key=lambda row: (float(row["composite_score"]), int(row["gameplay_score"]), int(row["quality_score"])),
     )
+    selected_generation_meta = dict(best_candidate.get("generation_meta", {}))
+    selected_html = str(best_candidate["artifact_html"])
 
     append_log(
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
         agent_name=PipelineAgentName.BUILDER,
-        message="Generating unified hybrid engine artifact with LLM JSON data.",
+        message="Final polish pass started for selected candidate.",
         metadata={
             "iteration": state["build_iteration"],
-            "model": generated_config.meta.get("model"),
-            "generation_source": generated_config.meta.get("generation_source", "stub"),
+            "selected_candidate": best_candidate["index"],
+            "selected_composite_score": best_candidate["composite_score"],
         },
     )
 
-    artifact_html = _build_hybrid_engine_html(
+    polish_result = deps.vertex_service.polish_hybrid_artifact(
+        keyword=state["keyword"],
         title=title,
         genre=genre,
-        slug=slug,
-        accent_color=accent_color,
-        viewport_width=design_spec.viewport_width,
-        viewport_height=design_spec.viewport_height,
-        safe_area_padding=design_spec.safe_area_padding,
-        min_font_size_px=design_spec.min_font_size_px,
-        text_overflow_policy=design_spec.text_overflow_policy,
-        core_loop_type=core_loop_type,
-        game_config=generated_config.payload,
+        html_content=selected_html,
     )
-    builder_strategy = "engine_hybrid_data_driven"
-    guardrail_reason: str | None = None
+    polished_html = str(polish_result.payload.get("artifact_html", "")).strip() or selected_html
+    polished_quality = deps.quality_service.evaluate_quality_contract(polished_html, design_spec=design_spec_dump)
+    polished_gameplay = deps.quality_service.evaluate_gameplay_gate(
+        polished_html,
+        design_spec=design_spec_dump,
+        genre=genre,
+    )
+    polished_composite = _candidate_composite_score(
+        quality_score=polished_quality.score,
+        gameplay_score=polished_gameplay.score,
+        quality_ok=polished_quality.ok,
+        gameplay_ok=polished_gameplay.ok,
+    )
+    selected_composite = float(best_candidate["composite_score"])
+    use_polished = polished_composite >= (selected_composite - 2.0)
+    if polished_quality.ok and polished_gameplay.ok:
+        use_polished = True
+    artifact_html = polished_html if use_polished else selected_html
+
+    final_quality_score = polished_quality.score if use_polished else int(best_candidate["quality_score"])
+    final_gameplay_score = polished_gameplay.score if use_polished else int(best_candidate["gameplay_score"])
+    final_composite_score = polished_composite if use_polished else selected_composite
+
+    builder_strategy = "production_v2_candidates_qa_polish"
+    candidate_scoreboard = [
+        {
+            "index": int(row["index"]),
+            "quality_score": int(row["quality_score"]),
+            "gameplay_score": int(row["gameplay_score"]),
+            "composite_score": float(row["composite_score"]),
+            "quality_ok": bool(row["quality_ok"]),
+            "gameplay_ok": bool(row["gameplay_ok"]),
+            "generation_source": row["generation_meta"].get("generation_source", "stub"),
+            "model": row["generation_meta"].get("model"),
+        }
+        for row in candidate_rows
+    ]
+
     artifact_files: list[dict[str, str]] | None = None
     artifact_manifest: dict[str, object] | None = None
 
@@ -969,20 +1122,30 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         stage=PipelineStage.BUILD,
         status=PipelineStatus.SUCCESS,
         agent_name=PipelineAgentName.BUILDER,
-        message=f"Single-file HTML/JS artifact generated (iteration={state['build_iteration']}).",
+        message=f"Production V2 artifact selected and polished (iteration={state['build_iteration']}).",
         metadata={
             "artifact": state["outputs"]["artifact_path"],
             "genre": genre,
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
-            "generation_source": generated_config.meta.get("generation_source", "stub"),
+            "generation_source": selected_generation_meta.get("generation_source", "stub"),
             **{
                 key: value
-                for key, value in generated_config.meta.items()
+                for key, value in selected_generation_meta.items()
                 if key in {"model", "latency_ms", "reason", "vertex_error"}
             },
             "builder_strategy": builder_strategy,
             "genre_engine_selected": core_loop_type,
             "artifact_file_count": len(build_artifact.artifact_files or []),
-            **({"llm_rejected_reason": guardrail_reason} if guardrail_reason else {}),
+            "candidate_count": candidate_count,
+            "selected_candidate_index": int(best_candidate["index"]),
+            "selected_candidate_score": selected_composite,
+            "final_quality_score": final_quality_score,
+            "final_gameplay_score": final_gameplay_score,
+            "final_composite_score": final_composite_score,
+            "polish_applied": use_polished,
+            "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
+            "polish_model": polish_result.meta.get("model"),
+            "polish_reason": polish_result.meta.get("reason"),
+            "candidate_scoreboard": candidate_scoreboard,
         },
     )

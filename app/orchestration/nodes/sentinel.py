@@ -77,6 +77,29 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             },
         )
 
+    gameplay_result = deps.quality_service.evaluate_gameplay_gate(
+        artifact_html,
+        design_spec=design_spec if isinstance(design_spec, dict) else None,
+        genre=str(state["outputs"].get("game_genre", "")),
+    )
+    if not gameplay_result.ok:
+        state["needs_rebuild"] = True
+        return append_log(
+            state,
+            stage=PipelineStage.QA,
+            status=PipelineStatus.RETRY,
+            agent_name=PipelineAgentName.SENTINEL,
+            message="QA failed: gameplay depth score below threshold.",
+            reason="gameplay_depth_below_threshold",
+            metadata={
+                "attempt": state["qa_attempt"],
+                "gameplay_score": gameplay_result.score,
+                "gameplay_threshold": gameplay_result.threshold,
+                "failed_checks": gameplay_result.failed_checks,
+                "checks": gameplay_result.checks,
+            },
+        )
+
     state["needs_rebuild"] = False
     qa_message = "QA passed via Playwright smoke check and quality gate."
     if smoke_result.reason:
@@ -103,6 +126,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "attempt": state["qa_attempt"],
             "quality_score": quality_result.score,
             "quality_threshold": quality_result.threshold,
+            "gameplay_score": gameplay_result.score,
+            "gameplay_threshold": gameplay_result.threshold,
             "checks": quality_result.checks,
+            "gameplay_checks": gameplay_result.checks,
         },
     )

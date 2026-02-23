@@ -4,7 +4,7 @@ from app.core.config import Settings
 from app.orchestration.runner import PipelineRunner
 from app.schemas.pipeline import ExecutionMode, PipelineStage, PipelineStatus, TriggerRequest
 from app.services.pipeline_repository import PipelineRepository
-from app.services.quality_service import QualityGateResult, SmokeCheckResult
+from app.services.quality_service import GameplayGateResult, QualityGateResult, SmokeCheckResult
 
 
 class FakeQualityService:
@@ -13,6 +13,9 @@ class FakeQualityService:
 
     def evaluate_quality_contract(self, _html: str, *, design_spec=None) -> QualityGateResult:
         return QualityGateResult(ok=True, score=90, threshold=75, failed_checks=[], checks={"quality": True})
+
+    def evaluate_gameplay_gate(self, _html: str, *, design_spec=None, genre=None) -> GameplayGateResult:
+        return GameplayGateResult(ok=True, score=85, threshold=55, failed_checks=[], checks={"gameplay": True})
 
 
 class FakeLowQualityService(FakeQualityService):

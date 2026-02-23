@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     playwright_required: bool = False
     qa_smoke_timeout_seconds: float = Field(default=8.0, ge=2.0, le=60.0)
     qa_min_quality_score: int = Field(default=40, ge=0, le=100)
+    qa_min_gameplay_score: int = Field(default=55, ge=0, le=100)
+    builder_candidate_count: int = Field(default=3, ge=1, le=5)
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
 
     pipeline_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30.0)

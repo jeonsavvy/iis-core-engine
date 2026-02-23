@@ -234,6 +234,7 @@ class VertexService:
         genre: str,
         objective: str,
         design_spec: dict[str, Any],
+        variation_hint: str | None = None,
     ) -> VertexGenerationResult:
         if not self._is_enabled():
             return VertexGenerationResult(
@@ -249,6 +250,7 @@ class VertexService:
                 genre=genre,
                 objective=objective,
                 design_spec=design_spec,
+                variation_hint=variation_hint,
             )
             usage = {}
             if self._use_genai_sdk():
@@ -589,6 +591,80 @@ class VertexService:
                 },
             )
 
+    def polish_hybrid_artifact(
+        self,
+        *,
+        keyword: str,
+        title: str,
+        genre: str,
+        html_content: str,
+    ) -> VertexGenerationResult:
+        if not self._is_enabled():
+            return VertexGenerationResult(
+                payload={"artifact_html": html_content},
+                meta={"generation_source": "stub", "reason": "vertex_not_configured"},
+            )
+
+        prompt = (
+            "You are a senior HTML5 game polish engineer.\n"
+            "Improve this single-file browser game for stronger visual quality and game-feel.\n"
+            "Hard constraints:\n"
+            "- Keep one complete HTML document.\n"
+            "- Preserve all existing gameplay rules and controls.\n"
+            "- Preserve leaderboard contract and `window.__iis_game_boot_ok`.\n"
+            "- Keep responsive/safe-area/readability rules.\n"
+            "- Return only the final HTML text (no markdown fences).\n\n"
+            f"Game title: {title}\n"
+            f"Keyword: {keyword}\n"
+            f"Genre: {genre}\n\n"
+            "Focus improvements:\n"
+            "- clearer silhouette/readability\n"
+            "- stronger feedback VFX/juice\n"
+            "- richer background motion/parallax\n"
+            "- cleaner HUD polish\n\n"
+            "Original HTML:\n"
+            f"{html_content}"
+        )
+        started = time.perf_counter()
+        try:
+            usage = {}
+            if self._use_genai_sdk():
+                polished_html, usage = self._genai_text(
+                    model_name=self.settings.gemini_pro_model,
+                    prompt=prompt,
+                    temperature=0.35,
+                )
+            else:
+                model = self._pro_model()
+                from langchain_core.messages import HumanMessage
+
+                result = model.invoke([HumanMessage(content=prompt)])
+                polished_html = _strip_code_fences(_coerce_message_text(result.content))
+
+            if not polished_html.strip():
+                raise ValueError("empty_polish_result")
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return VertexGenerationResult(
+                payload={"artifact_html": polished_html},
+                meta={
+                    "generation_source": "vertex",
+                    "model": self.settings.gemini_pro_model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Vertex artifact polish failed: %s", exc)
+            return VertexGenerationResult(
+                payload={"artifact_html": html_content},
+                meta={
+                    "generation_source": "stub",
+                    "reason": f"vertex_error:{type(exc).__name__}",
+                    "vertex_error": str(exc),
+                },
+            )
+
     @staticmethod
     def _builder_prompt(
         *,
@@ -597,8 +673,15 @@ class VertexService:
         genre: str,
         objective: str,
         design_spec: dict[str, Any],
+        variation_hint: str | None = None,
     ) -> str:
         spec_json = json.dumps(design_spec, ensure_ascii=False)
+        variation_section = ""
+        if variation_hint and variation_hint.strip():
+            variation_section = (
+                f"Variation hint: {variation_hint.strip()}\n"
+                "Apply this variation to pacing/risk/reward so that candidates are meaningfully different.\n"
+            )
         return (
             "You are a master game balancer and level designer for arcade games. "
             "Return JSON only.\n"
@@ -607,6 +690,7 @@ class VertexService:
             f"Genre: {genre}\n"
             f"Objective: {objective}\n"
             f"DesignSpec JSON: {spec_json}\n\n"
+            f"{variation_section}"
             "Based on the game's theme, objective, and pace, provide a fine-tuned configuration JSON "
             "that defines the balance and mechanics of the game. Output fields exactly according to the schema:\n"
             "- player_hp: integer (e.g. 1 to 5, default 3)\n"
