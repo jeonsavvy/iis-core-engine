@@ -90,6 +90,7 @@ class PipelineRepository:
             "manual_outputs": {},
             "manual_qa_attempt": 0,
             "manual_build_iteration": 0,
+            "operator_control": {"pause_requested": False, "cancel_requested": False},
         }
         return self._insert_admin_config(
             requested_by=request.requested_by,
@@ -444,6 +445,7 @@ class PipelineRepository:
         payload.setdefault("manual_outputs", {})
         payload.setdefault("manual_qa_attempt", 0)
         payload.setdefault("manual_build_iteration", 0)
+        payload.setdefault("operator_control", {"pause_requested": False, "cancel_requested": False})
         return PipelineJob(
             pipeline_id=UUID(str(row["id"])),
             keyword=row.get("keyword", ""),

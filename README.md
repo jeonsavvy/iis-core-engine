@@ -17,6 +17,7 @@ Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
 - `GET /api/v1/pipelines/{pipeline_id}`
 - `GET /api/v1/pipelines/{pipeline_id}/logs`
 - `POST /api/v1/pipelines/{pipeline_id}/approvals`
+- `POST /api/v1/pipelines/{pipeline_id}/controls`
 - `POST /api/v1/telegram/webhook`
 - `GET /healthz`
 

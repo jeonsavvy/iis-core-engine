@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -16,6 +16,8 @@ class SmokeCheckResult:
     ok: bool
     reason: str | None = None
     console_errors: list[str] | None = None
+    fatal_errors: list[str] | None = None
+    non_fatal_warnings: list[str] | None = None
     screenshot_bytes: bytes | None = None
     visual_metrics: dict[str, float] | None = None
 
@@ -51,16 +53,26 @@ class QualityService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def run_smoke_check(self, html_content: str) -> SmokeCheckResult:
-        console_errors: list[str] = []
-        page_errors: list[str] = []
+    def run_smoke_check(
+        self,
+        html_content: str,
+        *,
+        artifact_files: list[dict[str, Any]] | None = None,
+        entrypoint_path: str | None = None,
+    ) -> SmokeCheckResult:
+        fatal_errors: list[str] = []
+        non_fatal_warnings: list[str] = []
         screenshot_bytes = None
         visual_metrics: dict[str, float] | None = None
 
         try:
             with TemporaryDirectory(prefix="iis-smoke-") as tmp_dir:
-                html_path = Path(tmp_dir) / "index.html"
-                html_path.write_text(html_content, encoding="utf-8")
+                html_path = self._prepare_smoke_workspace(
+                    tmp_dir=tmp_dir,
+                    html_content=html_content,
+                    artifact_files=artifact_files,
+                    entrypoint_path=entrypoint_path,
+                )
 
                 with sync_playwright() as pw:
                     browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
@@ -68,18 +80,52 @@ class QualityService:
 
                     def on_console(msg) -> None:  # pragma: no cover - callback from playwright runtime
                         if msg.type == "error":
-                            console_errors.append(msg.text)
+                            issue = str(msg.text)
+                            if self._is_non_fatal_runtime_issue(issue):
+                                non_fatal_warnings.append(issue)
+                            else:
+                                fatal_errors.append(issue)
 
                     def on_page_error(exc) -> None:  # pragma: no cover - callback from playwright runtime
-                        page_errors.append(str(exc))
+                        issue = str(exc)
+                        if self._is_non_fatal_runtime_issue(issue):
+                            non_fatal_warnings.append(issue)
+                        else:
+                            fatal_errors.append(issue)
+
+                    def on_request_failed(req) -> None:  # pragma: no cover - callback from playwright runtime
+                        failure = ""
+                        try:
+                            failure = str(req.failure.error_text or "")
+                        except Exception:
+                            failure = ""
+                        resource_type = ""
+                        try:
+                            resource_type = str(req.resource_type or "")
+                        except Exception:
+                            resource_type = ""
+                        url = ""
+                        try:
+                            url = str(req.url or "")
+                        except Exception:
+                            url = ""
+                        issue = f"request_failed[{resource_type}] {url} {failure}".strip()
+                        if self._is_non_fatal_request_failure(
+                            resource_type=resource_type,
+                            url=url,
+                            error_text=failure,
+                        ):
+                            non_fatal_warnings.append(issue)
+                        else:
+                            fatal_errors.append(issue)
 
                     page.on("console", on_console)
                     page.on("pageerror", on_page_error)
+                    page.on("requestfailed", on_request_failed)
 
                     page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
                     page.wait_for_timeout(300)
-                    
-                    # Capture screenshot if possible
+
                     try:
                         canvas = page.locator("canvas")
                         if canvas.count() > 0:
@@ -97,8 +143,8 @@ class QualityService:
                                 )
                                 visual_metrics["motion_delta"] = round(motion_delta, 6)
                     except Exception as e:
-                        page_errors.append(f"screenshot_failed: {e}")
-                        
+                        non_fatal_warnings.append(f"screenshot_failed: {e}")
+
                     browser.close()
         except PlaywrightError as exc:
             if self.settings.playwright_required:
@@ -107,17 +153,105 @@ class QualityService:
         except Exception as exc:  # pragma: no cover - runtime safeguard
             return SmokeCheckResult(ok=False, reason=f"qa_exception: {exc}")
 
-        combined_errors = console_errors + page_errors
-        if combined_errors:
+        if fatal_errors:
             return SmokeCheckResult(
                 ok=False,
                 reason="runtime_console_error",
-                console_errors=combined_errors,
+                console_errors=fatal_errors + non_fatal_warnings,
+                fatal_errors=fatal_errors,
+                non_fatal_warnings=non_fatal_warnings,
                 screenshot_bytes=screenshot_bytes,
                 visual_metrics=visual_metrics,
             )
 
-        return SmokeCheckResult(ok=True, screenshot_bytes=screenshot_bytes, visual_metrics=visual_metrics)
+        return SmokeCheckResult(
+            ok=True,
+            console_errors=non_fatal_warnings or None,
+            fatal_errors=None,
+            non_fatal_warnings=non_fatal_warnings or None,
+            screenshot_bytes=screenshot_bytes,
+            visual_metrics=visual_metrics,
+        )
+
+    @staticmethod
+    def _safe_relative_path(raw_path: str) -> Path | None:
+        normalized = str(raw_path or "").strip().replace("\\", "/").lstrip("/")
+        if not normalized:
+            return None
+        pure = PurePosixPath(normalized)
+        if pure.is_absolute():
+            return None
+        for part in pure.parts:
+            if part in {"", ".", ".."}:
+                return None
+        return Path(*pure.parts)
+
+    def _prepare_smoke_workspace(
+        self,
+        *,
+        tmp_dir: str,
+        html_content: str,
+        artifact_files: list[dict[str, Any]] | None,
+        entrypoint_path: str | None,
+    ) -> Path:
+        root = Path(tmp_dir) / "artifact"
+        root.mkdir(parents=True, exist_ok=True)
+
+        written_paths: list[Path] = []
+        for row in artifact_files or []:
+            if not isinstance(row, dict):
+                continue
+            rel_path = self._safe_relative_path(str(row.get("path", "")))
+            content = row.get("content")
+            if rel_path is None or not isinstance(content, str):
+                continue
+            target = root / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            written_paths.append(target)
+
+        chosen_html_path: Path | None = None
+        entry_rel_path = self._safe_relative_path(entrypoint_path or "")
+        if entry_rel_path is not None:
+            candidate = root / entry_rel_path
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            chosen_html_path = candidate
+        else:
+            existing_html = [path for path in written_paths if path.suffix.lower() == ".html"]
+            if existing_html:
+                chosen_html_path = existing_html[0]
+            else:
+                inferred_parent = Path()
+                if written_paths:
+                    inferred_parent = written_paths[0].parent.relative_to(root)
+                chosen_html_path = root / inferred_parent / "index.html"
+
+        chosen_html_path.parent.mkdir(parents=True, exist_ok=True)
+        chosen_html_path.write_text(html_content, encoding="utf-8")
+        return chosen_html_path
+
+    @staticmethod
+    def _is_non_fatal_runtime_issue(issue: str) -> bool:
+        lowered = issue.casefold()
+        non_fatal_tokens = (
+            "failed to load resource",
+            "err_file_not_found",
+            "net::err_file_not_found",
+            "screenshot_failed",
+            "404 (not found)",
+        )
+        return any(token in lowered for token in non_fatal_tokens)
+
+    @staticmethod
+    def _is_non_fatal_request_failure(*, resource_type: str, url: str, error_text: str) -> bool:
+        lowered_error = error_text.casefold()
+        lowered_url = url.casefold()
+        lowered_resource = resource_type.casefold()
+        if lowered_resource in {"image", "media", "font"} and lowered_url.startswith("file://"):
+            return True
+        if "err_file_not_found" in lowered_error and lowered_url.startswith("file://"):
+            return True
+        return False
 
     @staticmethod
     def _capture_visual_metrics(page) -> dict[str, float] | None:

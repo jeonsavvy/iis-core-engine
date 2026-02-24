@@ -1,13 +1,22 @@
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
+    gated_state = apply_operator_control_gate(
+        state,
+        deps,
+        stage=PipelineStage.PUBLISH,
+        agent_name=PipelineAgentName.PUBLISHER,
+    )
+    if gated_state is not None:
+        return gated_state
+
     try:
         artifact = BuildArtifactPayload.model_validate(
             state["outputs"].get("build_artifact")

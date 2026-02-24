@@ -41,6 +41,13 @@ class PipelineStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class PipelineControlAction(str, Enum):
+    PAUSE = "pause"
+    RESUME = "resume"
+    CANCEL = "cancel"
+    RETRY = "retry"
+
+
 class PipelineAgentName(str, Enum):
     TRIGGER = "Trigger"
     ARCHITECT = "Architect"
@@ -89,6 +96,19 @@ class StageApprovalResponse(BaseModel):
     execution_mode: ExecutionMode
     status: PipelineStatus
     waiting_for_stage: PipelineStage | None = None
+
+
+class PipelineControlRequest(BaseModel):
+    action: PipelineControlAction
+
+
+class PipelineControlResponse(BaseModel):
+    pipeline_id: UUID
+    action: PipelineControlAction
+    execution_mode: ExecutionMode
+    status: PipelineStatus
+    waiting_for_stage: PipelineStage | None = None
+    error_reason: str | None = None
 
 
 class PipelineLogRecord(BaseModel):

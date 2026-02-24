@@ -37,6 +37,7 @@ class PipelineRunner:
         self.repository = repository
         self.settings = settings
         deps = NodeDependencies(
+            repository=repository,
             telegram_service=telegram_service or TelegramService(settings),
             quality_service=quality_service or QualityService(settings),
             publisher_service=publisher_service or PublisherService(settings),
@@ -61,9 +62,28 @@ class PipelineRunner:
 
         self._flush_pending_logs(final_state)
         usage_summary = self._build_usage_summary(final_state)
+        metadata_update: dict[str, object] = {
+            "usage_summary": usage_summary,
+            "operator_control": {"pause_requested": False, "cancel_requested": False},
+        }
+        waiting_for_stage = self._waiting_stage_from_reason(final_state.get("reason"))
+        if final_state["status"] == PipelineStatus.SKIPPED and waiting_for_stage is not None:
+            metadata_update.update(
+                {
+                    "execution_mode": ExecutionMode.MANUAL.value,
+                    "manual_cursor": self._cursor_for_pause_stage(waiting_for_stage),
+                    "manual_outputs": final_state["outputs"],
+                    "manual_qa_attempt": final_state["qa_attempt"],
+                    "manual_build_iteration": final_state["build_iteration"],
+                    "waiting_for_stage": waiting_for_stage.value,
+                }
+            )
+        elif final_state.get("reason") == "cancelled_by_operator":
+            metadata_update["waiting_for_stage"] = None
+
         self.repository.update_pipeline_metadata(
             job.pipeline_id,
-            metadata_update={"usage_summary": usage_summary},
+            metadata_update=metadata_update,
             status=final_state["status"],
             error_reason=final_state.get("reason"),
         )
@@ -107,7 +127,13 @@ class PipelineRunner:
 
                 while True:
                     state = builder.run(state, self.deps)
+                    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+                        cursor = "done" if state["status"] == PipelineStatus.ERROR else "build_qa"
+                        break
                     state = sentinel.run(state, self.deps)
+                    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+                        cursor = "done" if state["status"] == PipelineStatus.ERROR else "build_qa"
+                        break
 
                     if not state["needs_rebuild"]:
                         cursor = "publish"
@@ -138,6 +164,10 @@ class PipelineRunner:
             self.repository.mark_pipeline_status(job.pipeline_id, PipelineStatus.ERROR, str(exc))
             return
 
+        if state["status"] == PipelineStatus.SKIPPED and self._waiting_stage_from_reason(state.get("reason")) is not None:
+            self._finalize_manual_pause(job, state, cursor=cursor)
+            return
+
         self._flush_pending_logs(state)
         usage_summary = self._build_usage_summary(state)
         self.repository.update_pipeline_metadata(
@@ -149,6 +179,7 @@ class PipelineRunner:
                 "manual_build_iteration": state["build_iteration"],
                 "waiting_for_stage": None,
                 "usage_summary": usage_summary,
+                "operator_control": {"pause_requested": False, "cancel_requested": False},
             },
             status=state["status"],
             error_reason=state.get("reason"),
@@ -187,6 +218,7 @@ class PipelineRunner:
                 "manual_qa_attempt": state["qa_attempt"],
                 "manual_build_iteration": state["build_iteration"],
                 "waiting_for_stage": waiting_for_stage.value if waiting_for_stage else None,
+                "operator_control": {"pause_requested": False, "cancel_requested": False},
             },
             status=PipelineStatus.SKIPPED,
             error_reason=state.get("reason"),
@@ -213,6 +245,19 @@ class PipelineRunner:
             PipelineStage.ECHO: PipelineAgentName.ECHO,
         }
         return mapping.get(stage, PipelineAgentName.TRIGGER)
+
+    @staticmethod
+    def _cursor_for_pause_stage(stage: PipelineStage) -> str:
+        mapping = {
+            PipelineStage.TRIGGER: "trigger",
+            PipelineStage.PLAN: "plan",
+            PipelineStage.STYLE: "style",
+            PipelineStage.BUILD: "build_qa",
+            PipelineStage.QA: "build_qa",
+            PipelineStage.PUBLISH: "publish",
+            PipelineStage.ECHO: "echo",
+        }
+        return mapping.get(stage, "trigger")
 
     @staticmethod
     def _manual_outputs(job: PipelineJob) -> dict[str, object]:

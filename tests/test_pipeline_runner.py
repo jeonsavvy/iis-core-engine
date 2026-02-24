@@ -8,7 +8,7 @@ from app.services.quality_service import ArtifactContractResult, GameplayGateRes
 
 
 class FakeQualityService:
-    def run_smoke_check(self, _html: str) -> SmokeCheckResult:
+    def run_smoke_check(self, _html: str, **_kwargs) -> SmokeCheckResult:
         return SmokeCheckResult(
             ok=True,
             visual_metrics={

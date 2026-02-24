@@ -1,10 +1,19 @@
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
+    gated_state = apply_operator_control_gate(
+        state,
+        deps,
+        stage=PipelineStage.QA,
+        agent_name=PipelineAgentName.SENTINEL,
+    )
+    if gated_state is not None:
+        return gated_state
+
     state["qa_attempt"] += 1
 
     # deterministic forced failures for controlled retry testing
@@ -29,7 +38,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         message="Playwright smoke check started.",
         metadata={"attempt": state["qa_attempt"]},
     )
-    smoke_result = deps.quality_service.run_smoke_check(artifact_html)
+    artifact_files = state["outputs"].get("artifact_files")
+    entrypoint_path = state["outputs"].get("entrypoint_path")
+    artifact_path = state["outputs"].get("artifact_path")
+    smoke_result = deps.quality_service.run_smoke_check(
+        artifact_html,
+        artifact_files=artifact_files if isinstance(artifact_files, list) else None,
+        entrypoint_path=entrypoint_path if isinstance(entrypoint_path, str) else (artifact_path if isinstance(artifact_path, str) else None),
+    )
 
     if not smoke_result.ok:
         state["needs_rebuild"] = True
@@ -43,6 +59,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             metadata={
                 "attempt": state["qa_attempt"],
                 "console_errors": smoke_result.console_errors or [],
+                "fatal_errors": smoke_result.fatal_errors or [],
+                "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
             },
         )
 
@@ -153,6 +171,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     qa_message = "QA passed via Playwright smoke check and quality/gameplay gates."
     if smoke_result.reason:
         qa_message = f"QA passed with fallback: {smoke_result.reason}"
+    warning_count = len(smoke_result.non_fatal_warnings or [])
+    if warning_count > 0:
+        qa_message += f" ({warning_count} runtime warning{'s' if warning_count > 1 else ''})"
 
     screenshot_url = None
     if smoke_result.screenshot_bytes:
@@ -186,5 +207,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "visual_checks": visual_result.checks,
             "artifact_checks": artifact_result.checks,
             "visual_metrics": smoke_result.visual_metrics or {},
+            "fatal_errors": smoke_result.fatal_errors or [],
+            "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
         },
     )

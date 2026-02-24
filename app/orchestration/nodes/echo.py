@@ -1,5 +1,5 @@
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
@@ -12,6 +12,15 @@ def _latest_stage_log_metadata(state: PipelineState, stage: PipelineStage) -> di
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
+    gated_state = apply_operator_control_gate(
+        state,
+        deps,
+        stage=PipelineStage.ECHO,
+        agent_name=PipelineAgentName.ECHO,
+    )
+    if gated_state is not None:
+        return gated_state
+
     slug = state["outputs"].get("game_slug", "unknown-game")
     game_name = state["outputs"].get("game_name", slug)
     genre = state["outputs"].get("game_genre", "arcade")

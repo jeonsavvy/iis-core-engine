@@ -16,13 +16,22 @@ from app.orchestration.nodes.builder_parts.mode import (
     _is_safe_slug,
     _slugify,
 )
-from app.orchestration.nodes.common import append_log
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
+    gated_state = apply_operator_control_gate(
+        state,
+        deps,
+        stage=PipelineStage.BUILD,
+        agent_name=PipelineAgentName.BUILDER,
+    )
+    if gated_state is not None:
+        return gated_state
+
     state["build_iteration"] += 1
 
     try:
@@ -337,13 +346,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     ]
     runtime_guard_result: dict[str, object] = {"chosen": None, "reason": None, "probes": []}
     for label, candidate_html in runtime_guard_candidates:
-        smoke_probe = deps.quality_service.run_smoke_check(candidate_html)
+        smoke_probe = deps.quality_service.run_smoke_check(
+            candidate_html,
+            artifact_files=asset_bank_files,
+            entrypoint_path=f"games/{slug}/index.html",
+        )
         runtime_guard_result["probes"].append(
             {
                 "label": label,
                 "ok": bool(smoke_probe.ok),
                 "reason": smoke_probe.reason,
                 "console_errors": smoke_probe.console_errors or [],
+                "fatal_errors": smoke_probe.fatal_errors or [],
+                "non_fatal_warnings": smoke_probe.non_fatal_warnings or [],
             }
         )
         if smoke_probe.ok:
@@ -443,6 +458,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["genre_engine"] = core_loop_type
     state["outputs"]["asset_pack"] = asset_pack["name"]
     state["outputs"]["artifact_path"] = build_artifact.artifact_path
+    state["outputs"]["entrypoint_path"] = build_artifact.entrypoint_path
     state["outputs"]["artifact_html"] = build_artifact.artifact_html
     state["outputs"]["artifact_files"] = [row.model_dump() for row in build_artifact.artifact_files or []]
     state["outputs"]["artifact_manifest"] = build_artifact.artifact_manifest or {}

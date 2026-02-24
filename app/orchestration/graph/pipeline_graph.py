@@ -8,7 +8,33 @@ from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineStatus
 
 
+def _route_after_trigger(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
+    return "Architect"
+
+
+def _route_after_plan(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
+    return "Stylist"
+
+
+def _route_after_style(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
+    return "Builder"
+
+
+def _route_after_build(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
+    return "Sentinel"
+
+
 def _route_after_qa(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
     if state["needs_rebuild"]:
         if state["qa_attempt"] >= state["max_qa_loops"]:
             return "QaFailed"
@@ -17,7 +43,7 @@ def _route_after_qa(state: PipelineState) -> str:
 
 
 def _route_after_publish(state: PipelineState) -> str:
-    if state["status"] == PipelineStatus.ERROR:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
     return "Echo"
 
@@ -35,10 +61,38 @@ def build_pipeline_graph(deps: NodeDependencies):
     graph.add_node("Echo", lambda state: echo.run(state, deps))
 
     graph.set_entry_point("Trigger")
-    graph.add_edge("Trigger", "Architect")
-    graph.add_edge("Architect", "Stylist")
-    graph.add_edge("Stylist", "Builder")
-    graph.add_edge("Builder", "Sentinel")
+    graph.add_conditional_edges(
+        "Trigger",
+        _route_after_trigger,
+        {
+            "Architect": "Architect",
+            "End": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "Architect",
+        _route_after_plan,
+        {
+            "Stylist": "Stylist",
+            "End": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "Stylist",
+        _route_after_style,
+        {
+            "Builder": "Builder",
+            "End": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "Builder",
+        _route_after_build,
+        {
+            "Sentinel": "Sentinel",
+            "End": END,
+        },
+    )
     graph.add_conditional_edges(
         "Sentinel",
         _route_after_qa,
@@ -46,6 +100,7 @@ def build_pipeline_graph(deps: NodeDependencies):
             "Builder": "Builder",
             "QaFailed": "QaFailed",
             "Publisher": "Publisher",
+            "End": END,
         },
     )
     graph.add_edge("QaFailed", END)
