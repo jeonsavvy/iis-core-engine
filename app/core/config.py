@@ -63,6 +63,7 @@ class Settings(BaseSettings):
 
     pipeline_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
     pipeline_stale_after_seconds: int = Field(default=900, ge=60, le=86400)
+    pipeline_worker_concurrency: int = Field(default=1, ge=1, le=8)
     trigger_min_keyword_length: int = Field(default=1, ge=1, le=32)
     trigger_forbidden_keywords: str = ""
     http_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)

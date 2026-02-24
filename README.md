@@ -77,6 +77,7 @@ cp .env.example .env
 
 - `SUPABASE_SERVICE_ROLE_KEY`는 **Repo1 서버 런타임 전용**
 - 외부 호출은 timeout/retry 기본값 사용 (`HTTP_TIMEOUT_SECONDS`, `HTTP_MAX_RETRIES`)
+- 워커 병렬도는 `PIPELINE_WORKER_CONCURRENCY`로 조절 (기본 1, 예: 4로 설정 시 최대 4개 파이프라인 동시 처리)
 - Telegram 실행은 chat whitelist 필수
 - X 포스팅은 일일 쿼터 + 실패 시 당일 중단 정책 적용
 - Archive 쓰기는 allowlist 경로만 허용
