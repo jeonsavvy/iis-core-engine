@@ -43,6 +43,11 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
         return {"status": "posted"}
 
     deps = SimpleNamespace(
+        repository=SimpleNamespace(
+            get_pipeline=lambda _pipeline_id: SimpleNamespace(
+                metadata={"operator_control": {"pause_requested": False, "cancel_requested": False}}
+            )
+        ),
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
                 payload={"marketing_copy": "테스트 홍보 문구"},
@@ -80,6 +85,11 @@ def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
         return {"status": "posted"}
 
     deps = SimpleNamespace(
+        repository=SimpleNamespace(
+            get_pipeline=lambda _pipeline_id: SimpleNamespace(
+                metadata={"operator_control": {"pause_requested": False, "cancel_requested": False}}
+            )
+        ),
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
                 payload={"marketing_copy": "테스트 홍보 문구"},

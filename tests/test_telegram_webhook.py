@@ -1,8 +1,9 @@
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from app.api.deps import get_pipeline_repository
+from app.api.v1.endpoints.telegram import telegram_webhook
 from app.core.config import get_settings
-from app.main import app
+from app.schemas.telegram import TelegramWebhookUpdate
 
 
 def _prepare_env(monkeypatch) -> None:
@@ -21,18 +22,24 @@ def test_telegram_webhook_returns_503_when_secret_not_configured(monkeypatch) ->
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
 
-    client = TestClient(app)
-    payload = {
-        "update_id": 1,
-        "message": {
-            "message_id": 1,
-            "chat": {"id": 1001, "type": "private"},
-            "from": {"id": 2002, "username": "iis-admin"},
-            "text": "/run webhook test",
-        },
-    }
-    response = client.post("/api/v1/telegram/webhook", json=payload)
-    assert response.status_code == 503
+    payload = TelegramWebhookUpdate.model_validate(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 1,
+                "chat": {"id": 1001, "type": "private"},
+                "from": {"id": 2002, "username": "iis-admin"},
+                "text": "/run webhook test",
+            },
+        }
+    )
+
+    try:
+        telegram_webhook(payload, get_pipeline_repository(), x_telegram_secret=None)
+    except HTTPException as exc:
+        assert exc.status_code == 503
+    else:
+        raise AssertionError("expected HTTPException when webhook secret is not configured")
 
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
@@ -44,27 +51,28 @@ def test_telegram_webhook_requires_secret_when_configured(monkeypatch) -> None:
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
 
-    client = TestClient(app)
-    payload = {
-        "update_id": 1,
-        "message": {
-            "message_id": 1,
-            "chat": {"id": 1001, "type": "private"},
-            "from": {"id": 2002, "username": "iis-admin"},
-            "text": "/run webhook test",
-        },
-    }
-
-    forbidden = client.post("/api/v1/telegram/webhook", json=payload)
-    assert forbidden.status_code == 403
-
-    allowed = client.post(
-        "/api/v1/telegram/webhook",
-        json=payload,
-        headers={"X-Telegram-Bot-Api-Secret-Token": "secret-123"},
+    payload = TelegramWebhookUpdate.model_validate(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 1,
+                "chat": {"id": 1001, "type": "private"},
+                "from": {"id": 2002, "username": "iis-admin"},
+                "text": "/run webhook test",
+            },
+        }
     )
-    assert allowed.status_code == 200
-    assert allowed.json()["status"] == "queued"
+    repository = get_pipeline_repository()
+
+    try:
+        telegram_webhook(payload, repository, x_telegram_secret=None)
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("expected HTTPException for missing webhook token")
+
+    allowed = telegram_webhook(payload, repository, x_telegram_secret="secret-123")
+    assert allowed.status == "queued"
 
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()

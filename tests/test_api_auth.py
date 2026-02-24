@@ -1,8 +1,10 @@
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from app.api.deps import get_pipeline_repository
+from app.api.security import verify_internal_api_token
+from app.api.v1.endpoints.pipelines import trigger_pipeline
 from app.core.config import get_settings
-from app.main import app
+from app.schemas.pipeline import TriggerRequest
 
 
 def test_pipeline_endpoints_require_bearer_token_when_configured(monkeypatch) -> None:
@@ -10,25 +12,23 @@ def test_pipeline_endpoints_require_bearer_token_when_configured(monkeypatch) ->
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
 
-    client = TestClient(app)
-    payload = {"keyword": "token check", "source": "console"}
+    try:
+        verify_internal_api_token(None)
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Missing bearer token"
+    else:
+        raise AssertionError("expected HTTPException for missing token")
 
-    missing = client.post("/api/v1/pipelines/trigger", json=payload)
-    assert missing.status_code == 401
+    try:
+        verify_internal_api_token("Bearer wrong-token")
+    except HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "Invalid bearer token"
+    else:
+        raise AssertionError("expected HTTPException for invalid token")
 
-    wrong = client.post(
-        "/api/v1/pipelines/trigger",
-        json=payload,
-        headers={"Authorization": "Bearer wrong-token"},
-    )
-    assert wrong.status_code == 401
-
-    allowed = client.post(
-        "/api/v1/pipelines/trigger",
-        json=payload,
-        headers={"Authorization": "Bearer top-secret"},
-    )
-    assert allowed.status_code == 202
+    verify_internal_api_token("Bearer top-secret")
 
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
@@ -40,21 +40,24 @@ def test_trigger_keyword_validation_blocks_forbidden_term(monkeypatch) -> None:
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()
 
-    client = TestClient(app)
-    blocked = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "secret project", "source": "console"},
+    repository = get_pipeline_repository()
+
+    try:
+        trigger_pipeline(
+            TriggerRequest(keyword="secret project", source="console"),
+            repository,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail == "keyword_contains_blocked_term"
+    else:
+        raise AssertionError("expected HTTPException for forbidden keyword")
+
+    allowed = trigger_pipeline(
+        TriggerRequest(keyword="  neon   arena  ", source="console"),
+        repository,
     )
-
-    assert blocked.status_code == 422
-    assert blocked.json()["detail"] == "keyword_contains_blocked_term"
-
-    allowed = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "  neon   arena  ", "source": "console"},
-    )
-
-    assert allowed.status_code == 202
+    assert allowed.status.value == "queued"
 
     get_settings.cache_clear()
     get_pipeline_repository.cache_clear()

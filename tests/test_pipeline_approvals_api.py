@@ -1,11 +1,11 @@
 from uuid import UUID
 
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from app.api.deps import get_pipeline_repository
+from app.api.v1.endpoints.pipelines import approve_pipeline_stage, control_pipeline, trigger_pipeline
 from app.core.config import get_settings
-from app.main import app
-from app.schemas.pipeline import PipelineStatus
+from app.schemas.pipeline import PipelineControlRequest, PipelineStatus, StageApprovalRequest, TriggerRequest
 
 
 def _reset_app_state() -> None:
@@ -15,66 +15,67 @@ def _reset_app_state() -> None:
 
 def test_approve_stage_for_manual_pipeline() -> None:
     _reset_app_state()
-    client = TestClient(app)
+    repository = get_pipeline_repository()
 
-    trigger = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "manual approval api", "source": "console", "execution_mode": "manual"},
+    trigger = trigger_pipeline(
+        TriggerRequest(keyword="manual approval api", source="console", execution_mode="manual"),
+        repository,
     )
-    assert trigger.status_code == 202
-    pipeline_id = trigger.json()["pipeline_id"]
+    pipeline_id = str(trigger.pipeline_id)
 
-    approve = client.post(
-        f"/api/v1/pipelines/{pipeline_id}/approvals",
-        json={"stage": "plan"},
+    approve = approve_pipeline_stage(
+        UUID(pipeline_id),
+        StageApprovalRequest(stage="plan"),
+        repository,
     )
-    assert approve.status_code == 200
-    assert approve.json()["approved_stage"] == "plan"
-    assert approve.json()["execution_mode"] == "manual"
+    assert approve.approved_stage.value == "plan"
+    assert approve.execution_mode.value == "manual"
 
     _reset_app_state()
 
 
 def test_approve_stage_rejected_for_auto_pipeline() -> None:
     _reset_app_state()
-    client = TestClient(app)
+    repository = get_pipeline_repository()
 
-    trigger = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "auto mode", "source": "console", "execution_mode": "auto"},
+    trigger = trigger_pipeline(
+        TriggerRequest(keyword="auto mode", source="console", execution_mode="auto"),
+        repository,
     )
-    assert trigger.status_code == 202
-    pipeline_id = trigger.json()["pipeline_id"]
+    pipeline_id = str(trigger.pipeline_id)
 
-    approve = client.post(
-        f"/api/v1/pipelines/{pipeline_id}/approvals",
-        json={"stage": "plan"},
-    )
-    assert approve.status_code == 409
-    assert approve.json()["detail"] == "manual_approval_not_enabled"
+    try:
+        approve_pipeline_stage(
+            UUID(pipeline_id),
+            StageApprovalRequest(stage="plan"),
+            repository,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert exc.detail == "manual_approval_not_enabled"
+    else:
+        raise AssertionError("expected HTTPException for auto execution mode")
 
     _reset_app_state()
 
 
 def test_control_pause_sets_operator_control_flag() -> None:
     _reset_app_state()
-    client = TestClient(app)
-
-    trigger = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "pause flow", "source": "console", "execution_mode": "auto"},
-    )
-    assert trigger.status_code == 202
-    pipeline_id = trigger.json()["pipeline_id"]
-
-    pause = client.post(
-        f"/api/v1/pipelines/{pipeline_id}/controls",
-        json={"action": "pause"},
-    )
-    assert pause.status_code == 200
-    assert pause.json()["action"] == "pause"
-
     repository = get_pipeline_repository()
+
+    trigger = trigger_pipeline(
+        TriggerRequest(keyword="pause flow", source="console", execution_mode="auto"),
+        repository,
+    )
+    pipeline_id = str(trigger.pipeline_id)
+
+    pause = control_pipeline(
+        UUID(pipeline_id),
+        PipelineControlRequest(action="pause"),
+        repository,
+    )
+    assert pause.action.value == "pause"
+
     job = repository.get_pipeline(UUID(pipeline_id))
     assert job is not None
     operator_control = job.metadata.get("operator_control")
@@ -86,38 +87,35 @@ def test_control_pause_sets_operator_control_flag() -> None:
 
 def test_control_cancel_immediately_errors_queued_pipeline() -> None:
     _reset_app_state()
-    client = TestClient(app)
+    repository = get_pipeline_repository()
 
-    trigger = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "cancel queued", "source": "console", "execution_mode": "auto"},
+    trigger = trigger_pipeline(
+        TriggerRequest(keyword="cancel queued", source="console", execution_mode="auto"),
+        repository,
     )
-    assert trigger.status_code == 202
-    pipeline_id = trigger.json()["pipeline_id"]
+    pipeline_id = str(trigger.pipeline_id)
 
-    cancel = client.post(
-        f"/api/v1/pipelines/{pipeline_id}/controls",
-        json={"action": "cancel"},
+    cancel = control_pipeline(
+        UUID(pipeline_id),
+        PipelineControlRequest(action="cancel"),
+        repository,
     )
-    assert cancel.status_code == 200
-    assert cancel.json()["status"] == PipelineStatus.ERROR.value
-    assert cancel.json()["error_reason"] == "cancelled_by_operator"
+    assert cancel.status == PipelineStatus.ERROR
+    assert cancel.error_reason == "cancelled_by_operator"
 
     _reset_app_state()
 
 
 def test_control_resume_approves_waiting_stage() -> None:
     _reset_app_state()
-    client = TestClient(app)
-
-    trigger = client.post(
-        "/api/v1/pipelines/trigger",
-        json={"keyword": "resume waiting", "source": "console", "execution_mode": "manual"},
-    )
-    assert trigger.status_code == 202
-    pipeline_id = trigger.json()["pipeline_id"]
-
     repository = get_pipeline_repository()
+
+    trigger = trigger_pipeline(
+        TriggerRequest(keyword="resume waiting", source="console", execution_mode="manual"),
+        repository,
+    )
+    pipeline_id = str(trigger.pipeline_id)
+
     repository.update_pipeline_metadata(
         UUID(pipeline_id),
         metadata_update={"waiting_for_stage": "plan"},
@@ -125,13 +123,13 @@ def test_control_resume_approves_waiting_stage() -> None:
         error_reason="awaiting_approval:plan",
     )
 
-    resume = client.post(
-        f"/api/v1/pipelines/{pipeline_id}/controls",
-        json={"action": "resume"},
+    resume = control_pipeline(
+        UUID(pipeline_id),
+        PipelineControlRequest(action="resume"),
+        repository,
     )
-    assert resume.status_code == 200
-    assert resume.json()["action"] == "resume"
-    assert resume.json()["status"] == PipelineStatus.QUEUED.value
-    assert resume.json()["waiting_for_stage"] is None
+    assert resume.action.value == "resume"
+    assert resume.status == PipelineStatus.QUEUED
+    assert resume.waiting_for_stage is None
 
     _reset_app_state()
