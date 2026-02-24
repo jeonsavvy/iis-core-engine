@@ -82,6 +82,35 @@ cp .env.example .env
 - Archive 쓰기는 allowlist 경로만 허용
 - QA는 Playwright 스모크체크 + 품질 게이트(`QA_MIN_QUALITY_SCORE`) 적용
 
+## GitHub Actions 자동 배포 (Backend)
+
+`main` 브랜치에 push되면 아래 순서로 자동 실행됩니다.
+
+1. `pytest -q` 검증
+2. SSH 원격 배포 실행
+3. 서비스 재시작 + `/healthz` 확인
+4. 헬스체크 실패 시 직전 커밋으로 자동 롤백
+
+워크플로우 파일:
+- `.github/workflows/deploy-backend.yml`
+
+원격 배포 스크립트:
+- `scripts/deploy_remote.sh`
+
+필수 GitHub Secrets:
+- `BACKEND_DEPLOY_HOST` (예: `1.2.3.4`)
+- `BACKEND_DEPLOY_USER` (예: `iis`)
+- `BACKEND_DEPLOY_SSH_KEY` (PEM private key 원문)
+
+선택 GitHub Secrets:
+- `BACKEND_DEPLOY_PORT` (기본 `22`)
+- `BACKEND_DEPLOY_PATH` (기본 `/opt/iis-core-engine`)
+
+서버 사전 조건:
+- 저장소가 `BACKEND_DEPLOY_PATH` 경로에 clone되어 있을 것
+- `sudo systemctl restart iis-core-api.service iis-core-worker.service` 권한이 배포 사용자에 허용되어 있을 것
+- `.env`, systemd unit 설치가 완료되어 있을 것
+
 ## ARM(Oracle/AWS Graviton) 참고
 
 ```bash
