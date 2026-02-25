@@ -70,6 +70,16 @@ class PipelineRepository:
         return cls(client=None, settings=settings)
 
     def create_pipeline(self, request: TriggerRequest) -> PipelineJob:
+        idempotency_key = (request.idempotency_key or "").strip() or None
+        if idempotency_key:
+            existing = self._find_pipeline_by_idempotency_key(
+                idempotency_key=idempotency_key,
+                requested_by=request.requested_by,
+                source=request.source,
+            )
+            if existing is not None:
+                return existing
+
         normalized_keyword, safe_slug = validate_keyword(
             request.keyword,
             forbidden_terms=self.settings.trigger_forbidden_keyword_set(),
@@ -77,12 +87,15 @@ class PipelineRepository:
             max_length=200,
         )
         pipeline_version = request.pipeline_version.strip() or self.settings.pipeline_default_version
+        request_id = str(uuid4())
         payload = {
             **request.metadata,
             "qa_fail_until": request.qa_fail_until,
             "safe_slug": safe_slug,
             "execution_mode": request.execution_mode.value,
             "pipeline_version": pipeline_version,
+            "request_id": request_id,
+            "idempotency_key": idempotency_key,
             "approved_stages": [],
             "manual_approval_stages": [stage.value for stage in MANUAL_APPROVAL_STAGES],
             "waiting_for_stage": None,
@@ -100,6 +113,52 @@ class PipelineRepository:
             status=PipelineStatus.QUEUED,
             error_reason=None,
         )
+
+    def _find_pipeline_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+        requested_by: UUID | None,
+        source: TriggerSource,
+    ) -> PipelineJob | None:
+        requested_by_value = str(requested_by) if requested_by else None
+
+        if self.client:
+            result = (
+                self.client.table("admin_config")
+                .select("*")
+                .eq("trigger_source", source.value)
+                .order("created_at", desc=True)
+                .limit(200)
+                .execute()
+            )
+            for row in result.data or []:
+                payload = row.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("idempotency_key") != idempotency_key:
+                    continue
+                row_requested_by = str(row["requested_by"]) if row.get("requested_by") else None
+                if row_requested_by != requested_by_value:
+                    continue
+                return self._job_from_row(row)
+            return None
+
+        with self._lock:
+            sorted_rows = sorted(self._memory_jobs.values(), key=lambda row: row.get("created_at", ""), reverse=True)
+            for row in sorted_rows:
+                if row.get("trigger_source") != source.value:
+                    continue
+                payload = row.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("idempotency_key") != idempotency_key:
+                    continue
+                row_requested_by = str(row["requested_by"]) if row.get("requested_by") else None
+                if row_requested_by != requested_by_value:
+                    continue
+                return self._job_from_row(row)
+            return None
 
     def create_audit_entry(
         self,
@@ -438,6 +497,8 @@ class PipelineRepository:
         payload = payload_raw if isinstance(payload_raw, dict) else {}
         payload.setdefault("execution_mode", ExecutionMode.AUTO.value)
         payload.setdefault("pipeline_version", self.settings.pipeline_default_version)
+        payload.setdefault("request_id", str(row.get("id")))
+        payload.setdefault("idempotency_key", None)
         payload.setdefault("approved_stages", [])
         payload.setdefault("manual_approval_stages", [stage.value for stage in MANUAL_APPROVAL_STAGES])
         payload.setdefault("waiting_for_stage", None)

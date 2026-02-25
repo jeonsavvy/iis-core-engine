@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.api.deps import get_pipeline_repository
 from app.api.security import verify_internal_api_token
@@ -29,12 +29,27 @@ router = APIRouter(
 def trigger_pipeline(
     payload: TriggerRequest,
     repository: PipelineRepository = Depends(get_pipeline_repository),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TriggerResponse:
+    header_idempotency_key = idempotency_key.strip() if isinstance(idempotency_key, str) else None
+    normalized_idempotency_key = (header_idempotency_key or payload.idempotency_key or "").strip() or None
+    if normalized_idempotency_key and not (8 <= len(normalized_idempotency_key) <= 128):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="idempotency_key_invalid_length")
+
+    request_payload = payload
+    if normalized_idempotency_key != payload.idempotency_key:
+        request_payload = payload.model_copy(update={"idempotency_key": normalized_idempotency_key})
+
     try:
-        job = repository.create_pipeline(payload)
+        job = repository.create_pipeline(request_payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-    return TriggerResponse(pipeline_id=job.pipeline_id, status=job.status)
+    request_id = job.metadata.get("request_id")
+    return TriggerResponse(
+        pipeline_id=job.pipeline_id,
+        status=job.status,
+        request_id=request_id if isinstance(request_id, str) and request_id else None,
+    )
 
 
 @router.get("/{pipeline_id}", response_model=PipelineSummary)

@@ -64,6 +64,7 @@ class TriggerRequest(BaseModel):
     source: TriggerSource = TriggerSource.CONSOLE
     execution_mode: ExecutionMode = ExecutionMode.AUTO
     pipeline_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     qa_fail_until: int = Field(default=0, ge=0, le=3)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -71,6 +72,7 @@ class TriggerRequest(BaseModel):
 class TriggerResponse(BaseModel):
     pipeline_id: UUID
     status: PipelineStatus
+    request_id: str | None = None
 
 
 class PipelineSummary(BaseModel):

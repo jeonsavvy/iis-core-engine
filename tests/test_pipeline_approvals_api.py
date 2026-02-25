@@ -133,3 +133,25 @@ def test_control_resume_approves_waiting_stage() -> None:
     assert resume.waiting_for_stage is None
 
     _reset_app_state()
+
+
+def test_trigger_pipeline_idempotency_key_reuses_pipeline() -> None:
+    _reset_app_state()
+    repository = get_pipeline_repository()
+
+    first = trigger_pipeline(
+        TriggerRequest(keyword="idempotent trigger", source="console"),
+        repository,
+        "idem-trigger-0001",
+    )
+    second = trigger_pipeline(
+        TriggerRequest(keyword="idempotent trigger", source="console"),
+        repository,
+        "idem-trigger-0001",
+    )
+
+    assert first.pipeline_id == second.pipeline_id
+    assert first.request_id is not None
+    assert first.request_id == second.request_id
+
+    _reset_app_state()

@@ -45,3 +45,15 @@ def test_approve_stage_sets_pipeline_back_to_queued() -> None:
     assert approved.status == PipelineStatus.QUEUED
     assert approved.error_reason is None
     assert "plan" in approved.metadata["approved_stages"]
+
+
+def test_create_pipeline_reuses_job_for_same_idempotency_key() -> None:
+    repository = PipelineRepository(settings=Settings())
+    request = TriggerRequest(keyword="neon arena", idempotency_key="idem-key-0001")
+
+    first = repository.create_pipeline(request)
+    second = repository.create_pipeline(request)
+
+    assert first.pipeline_id == second.pipeline_id
+    assert first.metadata.get("idempotency_key") == "idem-key-0001"
+    assert first.metadata.get("request_id") == second.metadata.get("request_id")
