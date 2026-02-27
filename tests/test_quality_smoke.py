@@ -1,0 +1,47 @@
+from pathlib import Path
+
+from app.services.quality_smoke import (
+    is_non_fatal_request_failure,
+    is_non_fatal_runtime_issue,
+    prepare_smoke_workspace,
+)
+
+
+def test_prepare_smoke_workspace_prefers_entrypoint_path(tmp_path: Path) -> None:
+    html = "<html><body>entry</body></html>"
+    entry_path = prepare_smoke_workspace(
+        tmp_dir=str(tmp_path),
+        html_content=html,
+        artifact_files=[{"path": "assets/readme.txt", "content": "ok"}],
+        entrypoint_path="play/index.html",
+    )
+
+    assert entry_path.as_posix().endswith("/artifact/play/index.html")
+    assert entry_path.read_text(encoding="utf-8") == html
+
+
+def test_prepare_smoke_workspace_falls_back_to_index_when_entrypoint_invalid(tmp_path: Path) -> None:
+    html = "<html><body>fallback</body></html>"
+    entry_path = prepare_smoke_workspace(
+        tmp_dir=str(tmp_path),
+        html_content=html,
+        artifact_files=[{"path": "../escape.html", "content": "bad"}],
+        entrypoint_path="../invalid.html",
+    )
+
+    assert entry_path.as_posix().endswith("/artifact/index.html")
+    assert entry_path.read_text(encoding="utf-8") == html
+
+
+def test_non_fatal_issue_classifiers() -> None:
+    assert is_non_fatal_runtime_issue("Failed to load resource: net::ERR_FILE_NOT_FOUND")
+    assert is_non_fatal_request_failure(
+        resource_type="image",
+        url="file:///tmp/asset.png",
+        error_text="net::ERR_FILE_NOT_FOUND",
+    )
+    assert not is_non_fatal_request_failure(
+        resource_type="script",
+        url="https://example.com/app.js",
+        error_text="timed out",
+    )

@@ -13,7 +13,7 @@ from app.services.quality_service import QualityService
 
 def _build_sample_html(mode: str) -> str:
     asset_pack = _resolve_asset_pack(core_loop_type=mode, palette=["#22c55e", "#10162c", "#60a5fa", "#f43f5e"])
-    return _build_hybrid_engine_html(
+    html = _build_hybrid_engine_html(
         title="Sample",
         genre="arcade",
         slug="sample-game",
@@ -37,6 +37,7 @@ def _build_sample_html(mode: str) -> str:
         },
         asset_pack=asset_pack,
     )
+    return str(html)
 
 
 def test_infer_topdown_roguelike_mode_from_keyword() -> None:

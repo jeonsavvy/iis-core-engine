@@ -37,5 +37,4 @@ def delete_game(
     if status_value == "partial_error":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result)
 
-    return DeleteGameResponse.model_validate(result)
-
+    return DeleteGameResponse(**result)

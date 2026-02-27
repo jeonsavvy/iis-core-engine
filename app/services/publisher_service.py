@@ -94,9 +94,8 @@ class PublisherService:
                 "reason": f"storage_upload_failed: {exc}",
             }
 
-        try:
-            public_url = bucket.get_public_url(entry_storage_path)
-        except Exception:
+        public_url = self._resolve_public_url(bucket, entry_storage_path)
+        if not public_url:
             public_url = f"{self.settings.public_games_base_url.rstrip('/')}/{entry_storage_path}"
 
         metadata_row = {
@@ -130,7 +129,7 @@ class PublisherService:
     def upload_screenshot(self, *, slug: str, screenshot_bytes: bytes) -> str | None:
         if not self.client:
             return None
-        
+
         bucket = self.client.storage.from_(self.settings.supabase_storage_bucket)
         storage_path = f"{slug}/screenshot.png"
         file_options = {
@@ -145,27 +144,27 @@ class PublisherService:
                 bucket.upload(
                     storage_path,
                     screenshot_bytes,
-                    file_options={"content-type": "image/png", "cache-control": "60", "upsert": "true"}
+                    file_options={"content-type": "image/png", "cache-control": "60", "upsert": "true"},
                 )
             except Exception:
                 bucket.update(storage_path, screenshot_bytes, file_options=file_options)
-            return bucket.get_public_url(storage_path)
+            return self._resolve_public_url(bucket, storage_path)
         except Exception:
             return None
 
     def update_game_marketing(self, *, slug: str, ai_review: str | None = None, screenshot_url: str | None = None) -> bool:
         if not self.client:
             return False
-            
-        update_dist = {}
+
+        update_dist: dict[str, Any] = {}
         if ai_review is not None:
             update_dist["ai_review"] = ai_review
         if screenshot_url is not None:
             update_dist["screenshot_url"] = screenshot_url
-            
+
         if not update_dist:
             return True
-            
+
         max_retries = max(1, int(self.settings.http_max_retries))
         for attempt in range(1, max_retries + 1):
             try:
@@ -296,3 +295,15 @@ class PublisherService:
         if lower.endswith(".json"):
             return "application/json; charset=utf-8"
         return "text/plain; charset=utf-8"
+
+    @staticmethod
+    def _resolve_public_url(bucket: Any, storage_path: str) -> str | None:
+        try:
+            raw_public_url = bucket.get_public_url(storage_path)
+        except Exception:
+            return None
+
+        if not isinstance(raw_public_url, str):
+            return None
+        normalized = raw_public_url.strip()
+        return normalized or None

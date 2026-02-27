@@ -5,12 +5,33 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+ARCHIVE_ALLOWED_EXTENSIONS: set[str] = {
+    ".html",
+    ".css",
+    ".js",
+    ".json",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".avif",
+    ".svg",
+    ".gif",
+    ".mp3",
+    ".ogg",
+    ".wav",
+    ".woff2",
+}
+ARCHIVE_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 
 class GitHubArchiveService:
@@ -41,13 +62,7 @@ class GitHubArchiveService:
         # 1. Update manifest
         manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
         os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-        except Exception:
-            manifest = {"schema_version": 1, "games": []}
-
-        manifest = self._normalize_manifest(manifest)
+        manifest = self._load_manifest(manifest_path)
         games = manifest.get("games", [])
         if not isinstance(games, list):
             games = []
@@ -70,9 +85,7 @@ class GitHubArchiveService:
         manifest["games"] = games
         manifest["generated_at"] = now
 
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+        self._write_manifest(manifest_path, manifest)
 
         # 2. Write game files
         game_dir = os.path.join(self.repo_path, "games", game_slug)
@@ -84,20 +97,35 @@ class GitHubArchiveService:
         if artifact_files:
             for af in artifact_files:
                 p = af.get("path", "").strip()
-                if not p.startswith(f"games/{game_slug}/"):
+                rel_path = self._safe_archive_relative_path(game_slug=game_slug, candidate_path=p)
+                if rel_path is None:
+                    logger.warning("Skipping unsafe archive artifact path: %s", p)
                     continue
                 content = af.get("content", "")
-                rel_path = p[len(f"games/{game_slug}/") :]
+                encoded = content.encode("utf-8", errors="ignore")
+                if len(encoded) > ARCHIVE_MAX_FILE_BYTES:
+                    logger.warning("Skipping oversized archive artifact (%s bytes): %s", len(encoded), p)
+                    continue
                 full_p = os.path.join(game_dir, rel_path)
+                normalized_game_dir = os.path.abspath(game_dir)
+                normalized_target = os.path.abspath(full_p)
+                if os.path.commonpath([normalized_game_dir, normalized_target]) != normalized_game_dir:
+                    logger.warning("Skipping archive artifact that escapes game directory: %s", p)
+                    continue
                 os.makedirs(os.path.dirname(full_p), exist_ok=True)
                 with open(full_p, "w", encoding="utf-8") as f:
                     f.write(content)
+
+        guard_error = self._run_archive_guard()
+        if guard_error:
+            self._rollback_archive_changes(game_slug=game_slug)
+            return {"status": "error", "reason": guard_error}
 
         # 3. git add, commit, push
         try:
             subprocess.run(["git", "add", "--all"], cwd=self.repo_path, check=True)
             commit_msg = f"feat: archive {game_slug}"
-            
+
             st = subprocess.run(
                 ["git", "status", "--porcelain"], cwd=self.repo_path, capture_output=True, text=True
             )
@@ -119,29 +147,25 @@ class GitHubArchiveService:
             }
 
         manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-        except Exception:
-            manifest = {"schema_version": 1, "games": []}
-
-        manifest = self._normalize_manifest(manifest)
+        manifest = self._load_manifest(manifest_path)
         games = manifest.get("games", [])
         if not isinstance(games, list):
             games = []
 
-        original_count = len(games)
         games = [g for g in games if isinstance(g, dict) and g.get("slug") != game_slug]
         manifest["games"] = games
         manifest["generated_at"] = datetime.now(timezone.utc).isoformat()
 
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+        self._write_manifest(manifest_path, manifest)
 
         game_dir = os.path.join(self.repo_path, "games", game_slug)
         if os.path.exists(game_dir):
             shutil.rmtree(game_dir)
+
+        guard_error = self._run_archive_guard()
+        if guard_error:
+            self._rollback_archive_changes(game_slug=game_slug)
+            return {"status": "error", "reason": guard_error}
 
         try:
             # We use git add --all to stage the deleted files robustly
@@ -161,6 +185,40 @@ class GitHubArchiveService:
             logger.error(f"Git delete/push failed: {exc}")
             return {"status": "error", "reason": f"git_operation_failed: {exc}"}
 
+    def _run_archive_guard(self) -> str | None:
+        script_path = os.path.join(self.repo_path, "scripts", "archive_guard.py")
+        if not os.path.isfile(script_path):
+            return None
+
+        try:
+            proc = subprocess.run(
+                [sys.executable, "scripts/archive_guard.py", "all"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            logger.info("Archive guard passed: %s", (proc.stdout or "").strip())
+            return None
+        except subprocess.CalledProcessError as exc:
+            output = (exc.stderr or exc.stdout or "").strip() or str(exc)
+            logger.error("Archive guard failed: %s", output)
+            return f"archive_guard_failed: {output}"
+
+    def _rollback_archive_changes(self, *, game_slug: str) -> None:
+        manifest_path = "manifest/games.json"
+        game_dir = f"games/{game_slug}"
+
+        def _run_git(args: list[str]) -> None:
+            try:
+                subprocess.run(args, cwd=self.repo_path, check=False, capture_output=True, text=True)
+            except Exception:
+                return
+
+        _run_git(["git", "restore", "--worktree", "--staged", "--", manifest_path, game_dir])
+        _run_git(["git", "checkout", "--", manifest_path, game_dir])
+        _run_git(["git", "clean", "-fd", "--", game_dir])
+
     @staticmethod
     def _normalize_manifest(raw_manifest: Any) -> dict[str, Any]:
         if isinstance(raw_manifest, dict):
@@ -170,7 +228,7 @@ class GitHubArchiveService:
                 games = []
             try:
                 normalized_schema_version = int(schema_version)
-            except Exception:
+            except (TypeError, ValueError):
                 normalized_schema_version = 1
             return {
                 **raw_manifest,
@@ -183,3 +241,43 @@ class GitHubArchiveService:
             return {"schema_version": 1, "games": games}
 
         return {"schema_version": 1, "games": []}
+
+    def _load_manifest(self, manifest_path: str) -> dict[str, Any]:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as file:
+                raw_manifest = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            raw_manifest = {"schema_version": 1, "games": []}
+        return self._normalize_manifest(raw_manifest)
+
+    @staticmethod
+    def _write_manifest(manifest_path: str, manifest: dict[str, Any]) -> None:
+        with open(manifest_path, "w", encoding="utf-8") as file:
+            json.dump(manifest, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+
+    @staticmethod
+    def _safe_archive_relative_path(*, game_slug: str, candidate_path: str) -> str | None:
+        normalized = str(candidate_path or "").strip().replace("\\", "/")
+        base_prefix = f"games/{game_slug}/"
+        if not normalized.startswith(base_prefix):
+            return None
+
+        raw_rel = normalized[len(base_prefix) :].lstrip("/")
+        if not raw_rel or "//" in raw_rel:
+            return None
+
+        pure = PurePosixPath(raw_rel)
+        if pure.is_absolute():
+            return None
+        for part in pure.parts:
+            if part in {"", ".", ".."}:
+                return None
+            if part.startswith("."):
+                return None
+
+        extension = pure.suffix.casefold()
+        if extension not in ARCHIVE_ALLOWED_EXTENSIONS:
+            return None
+
+        return str(pure)

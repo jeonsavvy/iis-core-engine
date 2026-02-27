@@ -35,6 +35,17 @@ def test_pipeline_endpoints_require_bearer_token_when_configured(monkeypatch) ->
     get_pipeline_repository.cache_clear()
 
 
+def test_pipeline_endpoints_treat_whitespace_token_as_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "   ")
+    get_settings.cache_clear()
+    get_pipeline_repository.cache_clear()
+
+    verify_internal_api_token(None)
+
+    get_settings.cache_clear()
+    get_pipeline_repository.cache_clear()
+
+
 def test_trigger_keyword_validation_blocks_forbidden_term(monkeypatch) -> None:
     monkeypatch.setenv("TRIGGER_FORBIDDEN_KEYWORDS", "secret,admin")
     monkeypatch.delenv("INTERNAL_API_TOKEN", raising=False)
@@ -75,6 +86,21 @@ def test_production_requires_internal_api_token(monkeypatch) -> None:
         assert "INTERNAL_API_TOKEN" in str(exc)
     else:
         raise AssertionError("expected RuntimeError when INTERNAL_API_TOKEN is missing in production")
+
+    get_settings.cache_clear()
+
+
+def test_production_rejects_whitespace_internal_api_token(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "   ")
+    get_settings.cache_clear()
+
+    try:
+        ensure_internal_api_token_on_production()
+    except RuntimeError as exc:
+        assert "INTERNAL_API_TOKEN" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError when INTERNAL_API_TOKEN is blank in production")
 
     get_settings.cache_clear()
 

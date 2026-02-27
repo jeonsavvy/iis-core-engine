@@ -155,3 +155,65 @@ def test_trigger_pipeline_idempotency_key_reuses_pipeline() -> None:
     assert first.request_id == second.request_id
 
     _reset_app_state()
+
+
+def test_trigger_pipeline_rejects_invalid_idempotency_key_length() -> None:
+    _reset_app_state()
+    repository = get_pipeline_repository()
+
+    try:
+        trigger_pipeline(
+            TriggerRequest(keyword="idempotency too short", source="console"),
+            repository,
+            "short",
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail == "idempotency_key_invalid_length"
+    else:
+        raise AssertionError("expected HTTPException for invalid idempotency key length")
+
+    _reset_app_state()
+
+
+def test_trigger_pipeline_rejects_too_long_idempotency_key() -> None:
+    _reset_app_state()
+    repository = get_pipeline_repository()
+
+    try:
+        trigger_pipeline(
+            TriggerRequest(keyword="idempotency too long", source="console"),
+            repository,
+            "x" * 129,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail == "idempotency_key_invalid_length"
+    else:
+        raise AssertionError("expected HTTPException for invalid idempotency key length")
+
+    _reset_app_state()
+
+
+def test_trigger_pipeline_header_idempotency_key_overrides_payload_key() -> None:
+    _reset_app_state()
+    repository = get_pipeline_repository()
+
+    first = trigger_pipeline(
+        TriggerRequest(keyword="header key wins", source="console", idempotency_key="payload-key-0001"),
+        repository,
+        "header-key-0001",
+    )
+    second = trigger_pipeline(
+        TriggerRequest(keyword="header key wins", source="console", idempotency_key="payload-key-0002"),
+        repository,
+        "header-key-0001",
+    )
+
+    assert first.pipeline_id == second.pipeline_id
+    assert first.request_id == second.request_id
+    stored = repository.get_pipeline(first.pipeline_id)
+    assert stored is not None
+    assert stored.metadata.get("idempotency_key") == "header-key-0001"
+
+    _reset_app_state()

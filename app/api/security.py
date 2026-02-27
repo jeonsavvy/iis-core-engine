@@ -10,7 +10,7 @@ def verify_internal_api_token(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> None:
     settings = get_settings()
-    expected_token = settings.internal_api_token
+    expected_token = (settings.internal_api_token or "").strip()
 
     if not expected_token:
         return

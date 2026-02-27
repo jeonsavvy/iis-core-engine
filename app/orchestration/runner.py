@@ -365,8 +365,12 @@ class PipelineRunner:
 
     @staticmethod
     def _coerce_non_negative_int(value: object) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if not isinstance(value, (int, float, str)):
+            return 0
         try:
-            parsed = int(value)  # type: ignore[arg-type]
-        except Exception:
+            parsed = int(value)
+        except (TypeError, ValueError):
             return 0
         return parsed if parsed > 0 else 0

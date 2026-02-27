@@ -1,0 +1,35 @@
+name: backend-ci
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app tests
+
+      - name: Typecheck
+        run: mypy
+
+      - name: Syntax check (compileall)
+        run: python -m compileall -q app tests
+
+      - name: Run test suite
+        run: PYTHONPATH=. pytest -q -s

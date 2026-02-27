@@ -28,7 +28,7 @@ def _method_allows_retry(method: str, headers: dict[str, str] | None) -> bool:
 
 def _is_retryable_http_error(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code >= 500
+        return bool(exc.response.status_code == 429 or exc.response.status_code >= 500)
 
     return isinstance(
         exc,
@@ -51,7 +51,8 @@ def request_with_retry(
     headers: dict[str, str] | None = None,
     json: dict[str, Any] | None = None,
 ) -> httpx.Response:
-    attempt_limit = max_retries if _method_allows_retry(method, headers) else 1
+    normalized_max_retries = max(1, int(max_retries))
+    attempt_limit = normalized_max_retries if _method_allows_retry(method, headers) else 1
 
     @retry(
         reraise=True,
@@ -62,7 +63,7 @@ def request_with_retry(
     def _do_request() -> httpx.Response:
         with httpx.Client(timeout=timeout_seconds) as client:
             response = client.request(method=method, url=url, headers=headers, json=json)
-            if response.status_code >= 500:
+            if response.status_code == 429 or response.status_code >= 500:
                 raise httpx.HTTPStatusError(
                     f"{method} {url} failed with server error {response.status_code}",
                     request=response.request,

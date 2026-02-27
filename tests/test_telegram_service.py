@@ -20,16 +20,14 @@ class StubTelegramService(TelegramService):
 
 
 def make_update(text: str, *, chat_id: int = 1001, user_id: int = 2002) -> TelegramWebhookUpdate:
-    return TelegramWebhookUpdate.model_validate(
-        {
-            "update_id": 1,
-            "message": {
-                "message_id": 1,
-                "chat": {"id": chat_id, "type": "private"},
-                "from": {"id": user_id, "username": "iis-admin"},
-                "text": text,
-            },
-        }
+    return TelegramWebhookUpdate(
+        update_id=1,
+        message={
+            "message_id": 1,
+            "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": user_id, "username": "iis-admin"},
+            "text": text,
+        },
     )
 
 

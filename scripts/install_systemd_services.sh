@@ -3,7 +3,13 @@ set -euo pipefail
 
 APP_DIR="${1:-/opt/iis-core-engine}"
 RUN_USER="${2:-iis}"
-VENV_BIN="${3:-$APP_DIR/.venv/bin}"
+if [[ -n "${3:-}" ]]; then
+  VENV_BIN="$3"
+elif [[ -x "${APP_DIR}/.venv311/bin/python" ]]; then
+  VENV_BIN="${APP_DIR}/.venv311/bin"
+else
+  VENV_BIN="${APP_DIR}/.venv/bin"
+fi
 SYSTEMD_DIR="/etc/systemd/system"
 
 render_and_install() {

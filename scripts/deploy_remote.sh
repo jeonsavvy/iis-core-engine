@@ -3,11 +3,55 @@ set -euo pipefail
 
 APP_DIR="${1:-/opt/iis-core-engine}"
 BRANCH="${2:-main}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-VENV_DIR="${VENV_DIR:-${APP_DIR}/.venv}"
 API_SERVICE="${API_SERVICE:-iis-core-api.service}"
 WORKER_SERVICE="${WORKER_SERVICE:-iis-core-worker.service}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8000/healthz}"
+
+resolve_python_bin() {
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    if command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+      command -v "${PYTHON_BIN}"
+      return
+    fi
+    echo "PYTHON_BIN does not exist on PATH: ${PYTHON_BIN}" >&2
+    exit 1
+  fi
+
+  if command -v python3.11 >/dev/null 2>&1; then
+    command -v python3.11
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return
+  fi
+
+  echo "python runtime is required (python3.11 preferred)." >&2
+  exit 1
+}
+
+resolve_venv_dir() {
+  if [[ -n "${VENV_DIR:-}" ]]; then
+    echo "${VENV_DIR}"
+    return
+  fi
+  if [[ -x "${APP_DIR}/.venv311/bin/python" ]]; then
+    echo "${APP_DIR}/.venv311"
+    return
+  fi
+  if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+    echo "${APP_DIR}/.venv"
+    return
+  fi
+  echo "${APP_DIR}/.venv311"
+}
+
+PY_BIN="$(resolve_python_bin)"
+VENV_DIR="$(resolve_venv_dir)"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required"
@@ -42,11 +86,12 @@ else
 fi
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+  "${PY_BIN}" -m venv "${VENV_DIR}"
 fi
 
 "${VENV_DIR}/bin/pip" install --upgrade pip
 "${VENV_DIR}/bin/pip" install -r requirements.txt
+"${VENV_DIR}/bin/python" --version
 
 sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
 

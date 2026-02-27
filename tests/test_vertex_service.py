@@ -60,3 +60,51 @@ def test_builder_prompt_mentions_formula_guidance() -> None:
     assert "formula/f1/circuit racing" in lowered
     assert "braking windows" in lowered
     assert "multi-minute runs" in lowered
+
+
+def test_generate_marketing_copy_uses_stub_when_vertex_not_configured(monkeypatch) -> None:
+    service = VertexService(
+        Settings(
+            vertex_project_id="",
+            telegram_bot_token="",
+        )
+    )
+
+    def _should_not_call_model():
+        raise AssertionError("flash model should not be called when vertex is disabled")
+
+    monkeypatch.setattr(service, "_flash_model", _should_not_call_model)
+
+    result = service.generate_marketing_copy(
+        keyword="네온 러너",
+        slug="neon-runner",
+        genre="arcade",
+        game_name="Neon Runner",
+    )
+
+    assert result.meta.get("reason") == "vertex_not_configured"
+    assert isinstance(result.payload.get("marketing_copy"), str)
+
+
+def test_generate_ai_review_uses_stub_when_vertex_not_configured(monkeypatch) -> None:
+    service = VertexService(
+        Settings(
+            vertex_project_id="",
+            telegram_bot_token="",
+        )
+    )
+
+    def _should_not_call_model():
+        raise AssertionError("flash model should not be called when vertex is disabled")
+
+    monkeypatch.setattr(service, "_flash_model", _should_not_call_model)
+
+    result = service.generate_ai_review(
+        keyword="formula drift",
+        game_name="Formula Drift",
+        genre="arcade",
+        objective="survive and overtake",
+    )
+
+    assert result.meta.get("reason") == "vertex_not_configured"
+    assert isinstance(result.payload.get("ai_review"), str)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 from app.core.config import Settings
 from app.orchestration.runner import PipelineRunner
 from app.schemas.pipeline import ExecutionMode, PipelineStage, PipelineStatus, TriggerRequest
@@ -113,20 +115,20 @@ def _make_runner(repository: PipelineRepository) -> PipelineRunner:
     return PipelineRunner(
         repository=repository,
         settings=settings,
-        quality_service=FakeQualityService(),
-        publisher_service=FakePublisherService(),
-        github_archive_service=FakeGitHubArchiveService(),
+        quality_service=cast(Any, FakeQualityService()),
+        publisher_service=cast(Any, FakePublisherService()),
+        github_archive_service=cast(Any, FakeGitHubArchiveService()),
     )
 
 
-def _make_runner_with_quality(repository: PipelineRepository, quality_service) -> PipelineRunner:
+def _make_runner_with_quality(repository: PipelineRepository, quality_service: Any) -> PipelineRunner:
     settings = Settings(telegram_bot_token="")
     return PipelineRunner(
         repository=repository,
         settings=settings,
-        quality_service=quality_service,
-        publisher_service=FakePublisherService(),
-        github_archive_service=FakeGitHubArchiveService(),
+        quality_service=cast(Any, quality_service),
+        publisher_service=cast(Any, FakePublisherService()),
+        github_archive_service=cast(Any, FakeGitHubArchiveService()),
     )
 
 
