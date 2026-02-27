@@ -46,23 +46,49 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         artifact_files=artifact_files if isinstance(artifact_files, list) else None,
         entrypoint_path=entrypoint_path if isinstance(entrypoint_path, str) else (artifact_path if isinstance(artifact_path, str) else None),
     )
+    runtime_guard = state["outputs"].get("builder_runtime_guard")
+    runtime_guard_choice = ""
+    if isinstance(runtime_guard, dict):
+        chosen = runtime_guard.get("chosen")
+        if isinstance(chosen, str):
+            runtime_guard_choice = chosen.strip().lower()
+
+    smoke_soft_fail = False
 
     if not smoke_result.ok:
-        state["needs_rebuild"] = True
-        return append_log(
-            state,
-            stage=PipelineStage.QA,
-            status=PipelineStatus.RETRY,
-            agent_name=PipelineAgentName.SENTINEL,
-            message="QA failed: runtime error detected in Playwright smoke check.",
-            reason=smoke_result.reason,
-            metadata={
-                "attempt": state["qa_attempt"],
-                "console_errors": smoke_result.console_errors or [],
-                "fatal_errors": smoke_result.fatal_errors or [],
-                "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
-            },
-        )
+        if smoke_result.reason == "runtime_console_error" and runtime_guard_choice in {"polished", "selected", "baseline"}:
+            smoke_soft_fail = True
+            append_log(
+                state,
+                stage=PipelineStage.QA,
+                status=PipelineStatus.RUNNING,
+                agent_name=PipelineAgentName.SENTINEL,
+                message="QA warning: runtime console error tolerated (builder runtime guard passed).",
+                reason=smoke_result.reason,
+                metadata={
+                    "attempt": state["qa_attempt"],
+                    "runtime_guard_choice": runtime_guard_choice,
+                    "fatal_errors": smoke_result.fatal_errors or [],
+                    "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
+                },
+            )
+        else:
+            state["needs_rebuild"] = True
+            return append_log(
+                state,
+                stage=PipelineStage.QA,
+                status=PipelineStatus.RETRY,
+                agent_name=PipelineAgentName.SENTINEL,
+                message="QA failed: runtime error detected in Playwright smoke check.",
+                reason=smoke_result.reason,
+                metadata={
+                    "attempt": state["qa_attempt"],
+                    "runtime_guard_choice": runtime_guard_choice or None,
+                    "console_errors": smoke_result.console_errors or [],
+                    "fatal_errors": smoke_result.fatal_errors or [],
+                    "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
+                },
+            )
 
     design_spec = state["outputs"].get("design_spec", {})
     append_log(
@@ -194,6 +220,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         message=qa_message,
         metadata={
             "attempt": state["qa_attempt"],
+            "smoke_soft_fail": smoke_soft_fail,
+            "runtime_guard_choice": runtime_guard_choice or None,
             "quality_score": quality_result.score,
             "quality_threshold": quality_result.threshold,
             "gameplay_score": gameplay_result.score,

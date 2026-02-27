@@ -176,3 +176,38 @@ def test_build_production_artifact_forces_baseline_when_smoke_fails(monkeypatch)
     runtime_guard = result.metadata["runtime_guard"]
     assert isinstance(runtime_guard, dict)
     assert runtime_guard.get("chosen") == "baseline_force"
+
+
+def test_build_production_artifact_enforces_single_candidate_even_when_configured_higher(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    deps = SimpleNamespace(
+        vertex_service=_FakeVertexService(builder_candidate_count=4, polished_suffix="POLISHED"),
+        quality_service=_FakeQualityService(smoke_ok=True),
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["configured_candidate_count"] == 4
+    assert result.metadata["candidate_count"] == 1

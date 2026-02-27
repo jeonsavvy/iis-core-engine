@@ -69,6 +69,10 @@ def is_non_fatal_runtime_issue(issue: str) -> bool:
         "net::err_file_not_found",
         "screenshot_failed",
         "404 (not found)",
+        "audiocontext was not allowed to start",
+        "the play() request was interrupted",
+        "notallowederror",
+        "resizeobserver loop limit exceeded",
     )
     return any(token in lowered for token in non_fatal_tokens)
 

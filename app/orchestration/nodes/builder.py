@@ -177,6 +177,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["artifact_html"] = build_artifact.artifact_html
     state["outputs"]["artifact_files"] = [row.model_dump() for row in build_artifact.artifact_files or []]
     state["outputs"]["artifact_manifest"] = build_artifact.artifact_manifest or {}
+    runtime_guard = production_result.metadata.get("runtime_guard")
+    if isinstance(runtime_guard, dict):
+        state["outputs"]["builder_runtime_guard"] = runtime_guard
 
     selected_generation_meta = production_result.selected_generation_meta
     return append_log(

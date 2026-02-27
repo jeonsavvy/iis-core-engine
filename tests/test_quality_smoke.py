@@ -35,6 +35,8 @@ def test_prepare_smoke_workspace_falls_back_to_index_when_entrypoint_invalid(tmp
 
 def test_non_fatal_issue_classifiers() -> None:
     assert is_non_fatal_runtime_issue("Failed to load resource: net::ERR_FILE_NOT_FOUND")
+    assert is_non_fatal_runtime_issue("The AudioContext was not allowed to start.")
+    assert is_non_fatal_runtime_issue("NotAllowedError: play() failed because the user didn't interact with the document first.")
     assert is_non_fatal_request_failure(
         resource_type="image",
         url="file:///tmp/asset.png",

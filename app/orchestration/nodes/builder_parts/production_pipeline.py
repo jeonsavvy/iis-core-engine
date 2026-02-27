@@ -35,7 +35,8 @@ def build_production_artifact(
     asset_bank_files: list[dict[str, str]],
     runtime_asset_manifest: dict[str, Any],
 ) -> ProductionBuildResult:
-    candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
+    configured_candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
+    candidate_count = 1
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
     design_spec_dump = design_spec.model_dump()
 
@@ -49,6 +50,7 @@ def build_production_artifact(
             "iteration": state["build_iteration"],
             "core_loop_type": core_loop_type,
             "asset_pack": asset_pack["name"],
+            "configured_candidate_count": configured_candidate_count,
             "candidate_count": candidate_count,
         },
     )
@@ -350,6 +352,7 @@ def build_production_artifact(
         "genre_engine_selected": core_loop_type,
         "asset_pack": asset_pack["name"],
         "artifact_file_count": len(build_artifact.artifact_files or []),
+        "configured_candidate_count": configured_candidate_count,
         "candidate_count": candidate_count,
         "codegen_enabled": bool(deps.vertex_service.settings.builder_codegen_enabled),
         "codegen_passes_per_candidate": int(deps.vertex_service.settings.builder_codegen_passes),

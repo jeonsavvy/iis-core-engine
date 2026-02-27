@@ -98,6 +98,8 @@ cp .env.example .env
 - X 포스팅은 일일 쿼터 + 실패 시 당일 중단 정책 적용
 - Archive 쓰기는 allowlist 확장자/경로 정책을 적용하고 경로 우회(`..`) 및 과대 파일을 차단
 - QA는 Playwright 스모크체크 + 품질 게이트(`QA_MIN_QUALITY_SCORE`) 적용
+- Builder는 현재 단일 후보(1개) 생성 모드로 동작하며, 후보 다중 생성 루프는 비활성화
+- Sentinel 단계는 Builder runtime guard가 통과한 경우 `runtime_console_error`를 경고로 완화하고 품질 게이트를 계속 평가
 - 로그 보존/삭제 운영 기준은 `../ops/log-retention-policy.md` 정책 문서 준수
 - Supabase 보존 함수/집계 뷰 SQL은 `supabase/log_retention.sql` 참고
 
