@@ -25,7 +25,7 @@ def _install_archive_guard_script(repo_path: Path) -> None:
 def _install_subprocess_stub(monkeypatch, *, changed: bool = True) -> list[list[str]]:
     calls: list[list[str]] = []
 
-    def _fake_run(cmd, cwd=None, check=False, capture_output=False, text=False):  # noqa: ANN001
+    def _fake_run(cmd, cwd=None, check=False, capture_output=False, text=False, timeout=None):  # noqa: ANN001, ARG001
         normalized = [str(item) for item in cmd]
         calls.append(normalized)
         if normalized[:3] == ["git", "status", "--porcelain"]:
@@ -256,7 +256,7 @@ def test_commit_archive_game_aborts_when_archive_guard_fails(tmp_path, monkeypat
     (repo_path / "manifest" / "games.json").write_text(json.dumps({"schema_version": 1, "games": []}), encoding="utf-8")
     calls: list[list[str]] = []
 
-    def _fake_run(cmd, cwd=None, check=False, capture_output=False, text=False):  # noqa: ANN001
+    def _fake_run(cmd, cwd=None, check=False, capture_output=False, text=False, timeout=None):  # noqa: ANN001, ARG001
         normalized = [str(item) for item in cmd]
         calls.append(normalized)
         if normalized[1:3] == ["scripts/archive_guard.py", "all"]:

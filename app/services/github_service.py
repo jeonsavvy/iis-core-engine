@@ -32,6 +32,7 @@ ARCHIVE_ALLOWED_EXTENSIONS: set[str] = {
     ".woff2",
 }
 ARCHIVE_MAX_FILE_BYTES = 5 * 1024 * 1024
+ARCHIVE_GIT_TIMEOUT_SECONDS = 20
 
 
 class GitHubArchiveService:
@@ -58,6 +59,10 @@ class GitHubArchiveService:
                 "status": "skipped",
                 "reason": "Local archive repo not found at iis-games-archive",
             }
+
+        sync_error = self._sync_archive_repo()
+        if sync_error:
+            return {"status": "error", "reason": sync_error}
 
         # 1. Update manifest
         manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
@@ -146,6 +151,10 @@ class GitHubArchiveService:
                 "reason": "Local archive repo not found at iis-games-archive",
             }
 
+        sync_error = self._sync_archive_repo()
+        if sync_error:
+            return {"status": "error", "reason": sync_error}
+
         manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
         manifest = self._load_manifest(manifest_path)
         games = manifest.get("games", [])
@@ -184,6 +193,49 @@ class GitHubArchiveService:
         except subprocess.CalledProcessError as exc:
             logger.error(f"Git delete/push failed: {exc}")
             return {"status": "error", "reason": f"git_operation_failed: {exc}"}
+
+    def _sync_archive_repo(self) -> str | None:
+        try:
+            subprocess.run(
+                ["git", "fetch", "--prune", "origin", "main"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
+            )
+            subprocess.run(
+                ["git", "checkout", "main"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
+            )
+            subprocess.run(
+                ["git", "reset", "--hard", "origin/main"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
+            )
+            subprocess.run(
+                ["git", "clean", "-fd"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
+            )
+            return None
+        except subprocess.TimeoutExpired as exc:
+            logger.error("Archive sync timeout: %s", exc)
+            return "archive_sync_failed: timeout"
+        except subprocess.CalledProcessError as exc:
+            output = (exc.stderr or exc.stdout or "").strip() or str(exc)
+            logger.error("Archive sync failed: %s", output)
+            return f"archive_sync_failed: {output}"
 
     def _run_archive_guard(self) -> str | None:
         script_path = os.path.join(self.repo_path, "scripts", "archive_guard.py")
