@@ -142,12 +142,16 @@ def test_sentinel_retries_runtime_console_error_without_builder_guard_context() 
     assert any(log.status == PipelineStatus.RETRY for log in result["logs"])
 
 
-def test_sentinel_soft_fails_visual_gate_and_continues_pipeline() -> None:
+def test_sentinel_visual_gate_requests_one_rebuild_then_soft_fails() -> None:
     state = _base_state()
     deps = _deps_with_quality(_QualityServiceVisualSoftFail())
 
-    result = sentinel.run(state, deps)
+    first = sentinel.run(state, deps)
+    assert first["needs_rebuild"] is True
+    assert any(log.reason == "visual_quality_below_threshold" and log.status == PipelineStatus.RETRY for log in first["logs"])
 
-    assert result["needs_rebuild"] is False
-    assert any(log.reason == "visual_quality_below_threshold" for log in result["logs"])
-    assert any(log.status == PipelineStatus.SUCCESS for log in result["logs"])
+    first["needs_rebuild"] = False
+    second = sentinel.run(first, deps)
+    assert second["needs_rebuild"] is False
+    assert any(log.reason == "visual_quality_below_threshold" for log in second["logs"])
+    assert any(log.status == PipelineStatus.SUCCESS for log in second["logs"])

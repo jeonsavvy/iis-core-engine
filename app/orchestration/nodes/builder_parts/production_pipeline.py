@@ -39,6 +39,19 @@ def build_production_artifact(
     candidate_count = 1
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
     design_spec_dump = design_spec.model_dump()
+    qa_visual_feedback = state["outputs"].get("qa_visual_feedback")
+    visual_feedback_hint = ""
+    visual_feedback_failed_checks: list[str] = []
+    if isinstance(qa_visual_feedback, dict):
+        failed_checks = qa_visual_feedback.get("failed_checks")
+        if isinstance(failed_checks, list):
+            visual_feedback_failed_checks = [str(item).strip() for item in failed_checks if str(item).strip()]
+        if visual_feedback_failed_checks:
+            visual_feedback_hint = (
+                "Prior QA visual issues: "
+                + ", ".join(visual_feedback_failed_checks[:6])
+                + ". Improve contrast, color diversity, edge definition, and readable motion cues."
+            )
 
     append_log(
         state,
@@ -52,18 +65,25 @@ def build_production_artifact(
             "asset_pack": asset_pack["name"],
             "configured_candidate_count": configured_candidate_count,
             "candidate_count": candidate_count,
+            "visual_feedback_hint_applied": bool(visual_feedback_hint),
+            "visual_feedback_failed_checks": visual_feedback_failed_checks,
         },
     )
 
     candidate_rows: list[dict[str, Any]] = []
     for index, variation_hint in enumerate(variation_hints, start=1):
+        effective_variation_hint = (
+            f"{variation_hint} | {visual_feedback_hint}"
+            if visual_feedback_hint
+            else variation_hint
+        )
         generated_config = deps.vertex_service.generate_game_config(
             keyword=state["keyword"],
             title=title,
             genre=genre,
             objective=gdd.objective,
             design_spec=design_spec_dump,
-            variation_hint=variation_hint,
+            variation_hint=effective_variation_hint,
         )
         base_candidate_html = _build_hybrid_engine_html(
             title=title,
@@ -89,7 +109,7 @@ def build_production_artifact(
                 genre=genre,
                 objective=gdd.objective,
                 core_loop_type=core_loop_type,
-                variation_hint=variation_hint,
+                variation_hint=effective_variation_hint,
                 design_spec=design_spec_dump,
                 asset_pack=asset_pack,
                 html_content=candidate_html,
@@ -151,6 +171,7 @@ def build_production_artifact(
         candidate_row = {
             "index": index,
             "variation_hint": variation_hint,
+            "effective_variation_hint": effective_variation_hint,
             "artifact_html": candidate_html,
             "baseline_artifact_html": base_candidate_html,
             "generation_meta": generated_config.meta,
@@ -180,6 +201,7 @@ def build_production_artifact(
                 "model": generated_config.meta.get("model"),
                 "asset_pack": asset_pack["name"],
                 "codegen_passes": codegen_meta_rows,
+                "effective_variation_hint": effective_variation_hint,
             },
         )
 
@@ -240,7 +262,7 @@ def build_production_artifact(
         ("selected", selected_html),
         ("baseline", selected_baseline_html),
     ]
-    runtime_guard_result: dict[str, object] = {"chosen": None, "reason": None, "probes": []}
+    runtime_guard_result: dict[str, Any] = {"chosen": None, "reason": None, "probes": []}
     for label, candidate_html in runtime_guard_candidates:
         smoke_probe = deps.quality_service.run_smoke_check(
             candidate_html,

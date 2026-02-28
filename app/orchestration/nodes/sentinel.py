@@ -151,7 +151,38 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre_engine=str(state["outputs"].get("genre_engine", "")),
     )
     visual_gate_soft_fail = False
+    visual_retry_budget = 1
+    visual_retry_count = int(state["outputs"].get("visual_retry_count", 0) or 0)
     if not visual_result.ok:
+        state["outputs"]["qa_visual_feedback"] = {
+            "score": visual_result.score,
+            "threshold": visual_result.threshold,
+            "failed_checks": visual_result.failed_checks,
+            "checks": visual_result.checks,
+            "visual_metrics": smoke_result.visual_metrics or {},
+        }
+        if visual_retry_count < visual_retry_budget:
+            state["outputs"]["visual_retry_count"] = visual_retry_count + 1
+            state["needs_rebuild"] = True
+            return append_log(
+                state,
+                stage=PipelineStage.QA,
+                status=PipelineStatus.RETRY,
+                agent_name=PipelineAgentName.SENTINEL,
+                message="QA 재작업: 시각 품질 보완 요청을 빌드 단계로 전달합니다.",
+                reason="visual_quality_below_threshold",
+                metadata={
+                    "attempt": state["qa_attempt"],
+                    "visual_score": visual_result.score,
+                    "visual_threshold": visual_result.threshold,
+                    "failed_checks": visual_result.failed_checks,
+                    "checks": visual_result.checks,
+                    "visual_metrics": smoke_result.visual_metrics or {},
+                    "visual_retry_count": visual_retry_count + 1,
+                    "visual_retry_budget": visual_retry_budget,
+                },
+            )
+
         visual_gate_soft_fail = True
         append_log(
             state,
@@ -167,8 +198,13 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "failed_checks": visual_result.failed_checks,
                 "checks": visual_result.checks,
                 "visual_metrics": smoke_result.visual_metrics or {},
+                "visual_retry_count": visual_retry_count,
+                "visual_retry_budget": visual_retry_budget,
             },
         )
+    else:
+        state["outputs"]["visual_retry_count"] = 0
+        state["outputs"].pop("qa_visual_feedback", None)
 
     artifact_result = deps.quality_service.evaluate_artifact_contract(
         state["outputs"].get("artifact_manifest") if isinstance(state["outputs"].get("artifact_manifest"), dict) else None,

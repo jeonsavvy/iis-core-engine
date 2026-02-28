@@ -38,6 +38,7 @@ class _FakeVertexService:
     polished_suffix: str = "POLISHED"
 
     def __post_init__(self) -> None:
+        self.generate_variation_hints: list[str] = []
         self.settings = SimpleNamespace(
             builder_candidate_count=self.builder_candidate_count,
             builder_codegen_passes=self.builder_codegen_passes,
@@ -45,6 +46,7 @@ class _FakeVertexService:
         )
 
     def generate_game_config(self, **_kwargs):
+        self.generate_variation_hints.append(str(_kwargs.get("variation_hint", "")))
         return SimpleNamespace(payload={"difficulty": "normal"}, meta={"generation_source": "stub"})
 
     def generate_codegen_candidate_artifact(self, *, html_content: str, **_kwargs):
@@ -211,3 +213,46 @@ def test_build_production_artifact_enforces_single_candidate_even_when_configure
 
     assert result.metadata["configured_candidate_count"] == 4
     assert result.metadata["candidate_count"] == 1
+
+
+def test_build_production_artifact_applies_visual_feedback_hint(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    deps = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_FakeQualityService(smoke_ok=True),
+    )
+    state = _make_state()
+    state["outputs"]["qa_visual_feedback"] = {
+        "failed_checks": ["contrast", "color_diversity"],
+    }
+    result = build_production_artifact(
+        state=state,
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["candidate_count"] == 1
+    assert vertex.generate_variation_hints
+    assert "Prior QA visual issues" in vertex.generate_variation_hints[0]
+    assert "contrast" in vertex.generate_variation_hints[0]
+    assert "color_diversity" in vertex.generate_variation_hints[0]
