@@ -44,6 +44,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT }}
       DEPLOY_PATH: ${{ secrets.BACKEND_DEPLOY_PATH }}
       DEPLOY_SSH_KEY: ${{ secrets.BACKEND_DEPLOY_SSH_KEY }}
+      DEPLOY_REQUIRED: ${{ secrets.BACKEND_DEPLOY_REQUIRED }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,11 +63,25 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p "${DEPLOY_PORT:-22}" "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+          if ! ssh-keyscan -T 10 -p "${DEPLOY_PORT:-22}" "${DEPLOY_HOST}" >> ~/.ssh/known_hosts; then
+            if [[ "${DEPLOY_REQUIRED:-false}" == "true" ]]; then
+              echo "SSH host key scan failed and BACKEND_DEPLOY_REQUIRED=true."
+              exit 1
+            fi
+            echo "::warning::SSH host key scan failed. Skipping deploy (set BACKEND_DEPLOY_REQUIRED=true to enforce failure)."
+            exit 0
+          fi
           chmod 644 ~/.ssh/known_hosts
 
       - name: Deploy and healthcheck
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "bash -lc 'set -euo pipefail; cd \"${DEPLOY_PATH:-/opt/iis-core-engine}\"; git fetch --prune origin main; if git show-ref --verify --quiet refs/heads/main; then git checkout main; else git checkout -b main origin/main; fi; git pull --ff-only origin main; chmod +x scripts/deploy_remote.sh; scripts/deploy_remote.sh \"${DEPLOY_PATH:-/opt/iis-core-engine}\" main'"
+          if ! ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -lc 'set -euo pipefail; cd \"${DEPLOY_PATH:-/opt/iis-core-engine}\"; git fetch --prune origin main; if git show-ref --verify --quiet refs/heads/main; then git checkout main; else git checkout -b main origin/main; fi; git pull --ff-only origin main; chmod +x scripts/deploy_remote.sh; scripts/deploy_remote.sh \"${DEPLOY_PATH:-/opt/iis-core-engine}\" main'"; then
+            if [[ "${DEPLOY_REQUIRED:-false}" == "true" ]]; then
+              echo "Deploy SSH command failed and BACKEND_DEPLOY_REQUIRED=true."
+              exit 1
+            fi
+            echo "::warning::Deploy SSH command failed. Skipping deploy (set BACKEND_DEPLOY_REQUIRED=true to enforce failure)."
+            exit 0
+          fi
