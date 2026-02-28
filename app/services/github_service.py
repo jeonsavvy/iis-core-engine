@@ -121,6 +121,11 @@ class GitHubArchiveService:
                 with open(full_p, "w", encoding="utf-8") as f:
                     f.write(content)
 
+        stage_error = self._stage_archive_changes()
+        if stage_error:
+            self._rollback_archive_changes(game_slug=game_slug)
+            return {"status": "error", "reason": stage_error}
+
         guard_error = self._run_archive_guard()
         if guard_error:
             self._rollback_archive_changes(game_slug=game_slug)
@@ -128,7 +133,6 @@ class GitHubArchiveService:
 
         # 3. git add, commit, push
         try:
-            subprocess.run(["git", "add", "--all"], cwd=self.repo_path, check=True)
             commit_msg = f"feat: archive {game_slug}"
 
             st = subprocess.run(
@@ -171,14 +175,17 @@ class GitHubArchiveService:
         if os.path.exists(game_dir):
             shutil.rmtree(game_dir)
 
+        stage_error = self._stage_archive_changes()
+        if stage_error:
+            self._rollback_archive_changes(game_slug=game_slug)
+            return {"status": "error", "reason": stage_error}
+
         guard_error = self._run_archive_guard()
         if guard_error:
             self._rollback_archive_changes(game_slug=game_slug)
             return {"status": "error", "reason": guard_error}
 
         try:
-            # We use git add --all to stage the deleted files robustly
-            subprocess.run(["git", "add", "--all"], cwd=self.repo_path, check=True)
             commit_msg = f"chore: delete archive {game_slug}"
 
             st = subprocess.run(
@@ -193,6 +200,25 @@ class GitHubArchiveService:
         except subprocess.CalledProcessError as exc:
             logger.error(f"Git delete/push failed: {exc}")
             return {"status": "error", "reason": f"git_operation_failed: {exc}"}
+
+    def _stage_archive_changes(self) -> str | None:
+        try:
+            subprocess.run(
+                ["git", "add", "--all"],
+                cwd=self.repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
+            )
+            return None
+        except subprocess.TimeoutExpired as exc:
+            logger.error("Archive stage timeout: %s", exc)
+            return "archive_stage_failed: timeout"
+        except subprocess.CalledProcessError as exc:
+            output = (exc.stderr or exc.stdout or "").strip() or str(exc)
+            logger.error("Archive stage failed: %s", output)
+            return f"archive_stage_failed: {output}"
 
     def _sync_archive_repo(self) -> str | None:
         try:

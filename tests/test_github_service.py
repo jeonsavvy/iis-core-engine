@@ -247,7 +247,13 @@ def test_commit_archive_game_runs_archive_guard_when_script_exists(tmp_path, mon
     )
 
     assert result["status"] == "committed"
-    assert any(cmd[:3] == ["python3", "scripts/archive_guard.py", "all"] or cmd[1:3] == ["scripts/archive_guard.py", "all"] for cmd in calls)
+    guard_index = next(
+        idx
+        for idx, cmd in enumerate(calls)
+        if cmd[:3] == ["python3", "scripts/archive_guard.py", "all"] or cmd[1:3] == ["scripts/archive_guard.py", "all"]
+    )
+    add_index = next(idx for idx, cmd in enumerate(calls) if cmd[:3] == ["git", "add", "--all"])
+    assert add_index < guard_index
 
 
 def test_commit_archive_game_aborts_when_archive_guard_fails(tmp_path, monkeypatch) -> None:
