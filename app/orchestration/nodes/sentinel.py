@@ -150,14 +150,15 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         smoke_result.visual_metrics,
         genre_engine=str(state["outputs"].get("genre_engine", "")),
     )
+    visual_gate_soft_fail = False
     if not visual_result.ok:
-        state["needs_rebuild"] = True
-        return append_log(
+        visual_gate_soft_fail = True
+        append_log(
             state,
             stage=PipelineStage.QA,
-            status=PipelineStatus.RETRY,
+            status=PipelineStatus.RUNNING,
             agent_name=PipelineAgentName.SENTINEL,
-            message="QA failed: visual quality gate below threshold.",
+            message="QA warning: visual quality score below threshold (soft-fail).",
             reason="visual_quality_below_threshold",
             metadata={
                 "attempt": state["qa_attempt"],
@@ -200,6 +201,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     warning_count = len(smoke_result.non_fatal_warnings or [])
     if warning_count > 0:
         qa_message += f" ({warning_count} runtime warning{'s' if warning_count > 1 else ''})"
+    if visual_gate_soft_fail:
+        qa_message += " (visual gate soft-fail)"
 
     screenshot_url = None
     if smoke_result.screenshot_bytes:
@@ -228,6 +231,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "gameplay_threshold": gameplay_result.threshold,
             "visual_score": visual_result.score,
             "visual_threshold": visual_result.threshold,
+            "visual_gate_soft_fail": visual_gate_soft_fail,
+            "visual_failed_checks": visual_result.failed_checks,
             "artifact_score": artifact_result.score,
             "artifact_threshold": artifact_result.threshold,
             "checks": quality_result.checks,

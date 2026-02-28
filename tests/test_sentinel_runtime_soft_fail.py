@@ -49,6 +49,40 @@ class _PublisherStub:
         return None
 
 
+class _QualityServiceVisualSoftFail:
+    def run_smoke_check(self, *_args, **_kwargs):
+        return SmokeCheckResult(
+            ok=True,
+            visual_metrics={
+                "canvas_width": 1280.0,
+                "canvas_height": 720.0,
+                "luminance_std": 10.0,
+                "non_dark_ratio": 0.05,
+                "color_bucket_count": 8.0,
+                "edge_energy": 0.01,
+                "motion_delta": 0.0002,
+            },
+        )
+
+    def evaluate_quality_contract(self, *_args, **_kwargs):
+        return QualityGateResult(ok=True, score=82, threshold=40, failed_checks=[], checks={"quality": True})
+
+    def evaluate_gameplay_gate(self, *_args, **_kwargs):
+        return GameplayGateResult(ok=True, score=80, threshold=55, failed_checks=[], checks={"gameplay": True})
+
+    def evaluate_visual_gate(self, *_args, **_kwargs):
+        return QualityGateResult(
+            ok=False,
+            score=24,
+            threshold=45,
+            failed_checks=["visual_palette_too_flat", "visual_shape_definition_too_low"],
+            checks={"visual_palette_too_flat": False, "visual_shape_definition_too_low": False},
+        )
+
+    def evaluate_artifact_contract(self, *_args, **_kwargs):
+        return ArtifactContractResult(ok=True, score=80, threshold=70, failed_checks=[], checks={"artifact": True})
+
+
 def _base_state() -> dict:
     return {
         "pipeline_id": uuid4(),
@@ -106,3 +140,14 @@ def test_sentinel_retries_runtime_console_error_without_builder_guard_context() 
 
     assert result["needs_rebuild"] is True
     assert any(log.status == PipelineStatus.RETRY for log in result["logs"])
+
+
+def test_sentinel_soft_fails_visual_gate_and_continues_pipeline() -> None:
+    state = _base_state()
+    deps = _deps_with_quality(_QualityServiceVisualSoftFail())
+
+    result = sentinel.run(state, deps)
+
+    assert result["needs_rebuild"] is False
+    assert any(log.reason == "visual_quality_below_threshold" for log in result["logs"])
+    assert any(log.status == PipelineStatus.SUCCESS for log in result["logs"])
