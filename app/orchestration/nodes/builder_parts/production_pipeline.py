@@ -99,6 +99,18 @@ def _build_rebuild_feedback_hint(state: PipelineState) -> tuple[str, list[str]]:
     return generic, tokens
 
 
+def _resolve_codegen_pass_budget(
+    *,
+    configured_passes: int,
+    has_feedback_hint: bool,
+    build_iteration: int,
+) -> int:
+    base_passes = max(0, int(configured_passes))
+    if has_feedback_hint or build_iteration > 1:
+        return max(base_passes, 2)
+    return base_passes
+
+
 def build_production_artifact(
     *,
     state: PipelineState,
@@ -141,6 +153,18 @@ def build_production_artifact(
     combined_feedback_hint = " ".join(
         chunk for chunk in (rebuild_feedback_hint, visual_feedback_hint, normalized_memory_hint) if chunk
     ).strip()
+    previous_artifact_html = str(state["outputs"].get("artifact_html", "")).strip()
+    reuse_previous_artifact_seed = bool(
+        previous_artifact_html
+        and combined_feedback_hint
+        and int(state.get("build_iteration", 0)) > 1
+    )
+    configured_codegen_passes = int(deps.vertex_service.settings.builder_codegen_passes)
+    codegen_pass_budget = _resolve_codegen_pass_budget(
+        configured_passes=configured_codegen_passes,
+        has_feedback_hint=bool(combined_feedback_hint),
+        build_iteration=int(state.get("build_iteration", 0)),
+    )
 
     append_log(
         state,
@@ -160,6 +184,9 @@ def build_production_artifact(
             "visual_feedback_failed_checks": visual_feedback_failed_checks,
             "memory_hint_applied": bool(normalized_memory_hint),
             "memory_feedback_tokens": memory_feedback_tokens,
+            "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
+            "configured_codegen_passes": configured_codegen_passes,
+            "effective_codegen_pass_budget": codegen_pass_budget,
         },
     )
 
@@ -193,9 +220,18 @@ def build_production_artifact(
             asset_pack=asset_pack,
             asset_manifest=runtime_asset_manifest,
         )
-        candidate_html = base_candidate_html
+        candidate_html = previous_artifact_html if reuse_previous_artifact_seed else base_candidate_html
         codegen_meta_rows: list[dict[str, Any]] = []
-        for pass_index in range(max(0, int(deps.vertex_service.settings.builder_codegen_passes))):
+        if reuse_previous_artifact_seed:
+            codegen_meta_rows.append(
+                {
+                    "pass": 0,
+                    "generation_source": "previous_artifact_seed",
+                    "model": None,
+                    "reason": "feedback_refinement_seed",
+                }
+            )
+        for pass_index in range(codegen_pass_budget):
             codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
                 keyword=state["keyword"],
                 title=title,
@@ -481,7 +517,9 @@ def build_production_artifact(
         "configured_candidate_count": configured_candidate_count,
         "candidate_count": candidate_count,
         "codegen_enabled": bool(deps.vertex_service.settings.builder_codegen_enabled),
-        "codegen_passes_per_candidate": int(deps.vertex_service.settings.builder_codegen_passes),
+        "codegen_passes_per_candidate": configured_codegen_passes,
+        "effective_codegen_passes_per_candidate": codegen_pass_budget,
+        "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
         "selected_candidate_index": int(best_candidate["index"]),
         "selected_candidate_score": selected_composite,
         "final_quality_score": final_quality_score,

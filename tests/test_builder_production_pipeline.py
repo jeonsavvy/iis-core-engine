@@ -39,6 +39,7 @@ class _FakeVertexService:
 
     def __post_init__(self) -> None:
         self.generate_variation_hints: list[str] = []
+        self.codegen_inputs: list[str] = []
         self.settings = SimpleNamespace(
             builder_candidate_count=self.builder_candidate_count,
             builder_codegen_passes=self.builder_codegen_passes,
@@ -50,6 +51,7 @@ class _FakeVertexService:
         return SimpleNamespace(payload={"difficulty": "normal"}, meta={"generation_source": "stub"})
 
     def generate_codegen_candidate_artifact(self, *, html_content: str, **_kwargs):
+        self.codegen_inputs.append(html_content)
         return SimpleNamespace(
             payload={"artifact_html": f"{html_content}\n<!-- CODEGEN -->"},
             meta={"generation_source": "vertex", "model": "gemini-test"},
@@ -304,6 +306,59 @@ def test_build_production_artifact_applies_rebuild_feedback_hint(monkeypatch) ->
     assert vertex.generate_variation_hints
     assert "Prior QA runtime failure detected" in vertex.generate_variation_hints[0]
     assert "immediate_game_over_overlay" in vertex.generate_variation_hints[0]
+    assert result.metadata["effective_codegen_passes_per_candidate"] == 2
+
+
+def test_build_production_artifact_reuses_previous_artifact_when_refining(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_FakeQualityService(smoke_ok=True),
+    )
+    state = _make_state()
+    state["build_iteration"] = 2
+    state["outputs"]["artifact_html"] = "<html><body>PREVIOUS_ARTIFACT_SEED</body></html>"
+    state["outputs"]["qa_rebuild_feedback"] = {
+        "gate": "gameplay",
+        "reason": "gameplay_depth_below_threshold",
+        "fatal_errors": [],
+        "failed_checks": ["missing_realtime_loop"],
+        "non_fatal_warnings": [],
+    }
+
+    result = build_production_artifact(
+        state=state,
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["reuse_previous_artifact_seed"] is True
+    assert result.metadata["effective_codegen_passes_per_candidate"] == 2
+    assert vertex.codegen_inputs
+    assert "PREVIOUS_ARTIFACT_SEED" in vertex.codegen_inputs[0]
+    scoreboard = result.metadata["candidate_scoreboard"]
+    assert isinstance(scoreboard, list)
+    assert scoreboard and scoreboard[0]["codegen_passes"][0]["reason"] == "feedback_refinement_seed"
 
 
 def test_build_production_artifact_applies_asset_memory_hint(monkeypatch) -> None:
