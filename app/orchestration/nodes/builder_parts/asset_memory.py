@@ -203,6 +203,56 @@ def _build_context_from_registry_entries(
     )
 
 
+def _merge_improvement_queue_signals(
+    context: AssetMemoryContext,
+    improvement_rows: list[dict[str, object]],
+) -> AssetMemoryContext:
+    if not improvement_rows:
+        return context
+
+    reason_counter: Counter[str] = Counter()
+    token_counter: Counter[str] = Counter()
+    for row in improvement_rows:
+        reason = str(row.get("reason", "")).strip()
+        if reason:
+            reason_counter[reason] += 1
+        for token in _to_str_list(row.get("tokens")):
+            token_counter[token] += 1
+
+    top_reasons = [key for key, _ in reason_counter.most_common(4)]
+    top_tokens = [key for key, _ in token_counter.most_common(8)]
+    if not top_reasons and not top_tokens:
+        return context
+
+    hint = context.hint
+    queue_hint_parts: list[str] = []
+    if top_reasons:
+        queue_hint_parts.append(f"Reflect queued QA improvements: {', '.join(top_reasons)}.")
+    if top_tokens:
+        queue_hint_parts.append(f"Focus queued fix tokens: {', '.join(top_tokens)}.")
+    if queue_hint_parts:
+        hint = f"{hint} {' '.join(queue_hint_parts)}".strip()
+
+    retrieval_profile = dict(context.retrieval_profile)
+    retrieval_profile["improvement_queue_reason_top"] = top_reasons
+    retrieval_profile["improvement_queue_token_top"] = top_tokens
+    retrieval_profile["improvement_queue_count"] = len(improvement_rows)
+
+    registry_snapshot = dict(context.registry_snapshot)
+    registry_snapshot["improvement_queue_reason_top"] = top_reasons
+    registry_snapshot["improvement_queue_token_top"] = top_tokens
+    registry_snapshot["improvement_queue_count"] = len(improvement_rows)
+
+    recurring_failures = list(dict.fromkeys([*context.recurring_failures, *top_reasons, *top_tokens]))
+
+    return AssetMemoryContext(
+        hint=hint,
+        recurring_failures=recurring_failures,
+        retrieval_profile=retrieval_profile,
+        registry_snapshot=registry_snapshot,
+    )
+
+
 def collect_asset_memory_context(
     *,
     state: PipelineState,
@@ -211,6 +261,11 @@ def collect_asset_memory_context(
     limit: int = 240,
 ) -> AssetMemoryContext:
     list_registry = getattr(deps.repository, "list_asset_registry", None)
+    list_improvements = getattr(deps.repository, "list_qa_improvement_entries", None)
+    improvement_rows: list[dict[str, object]] = []
+    if callable(list_improvements):
+        rows = list_improvements(core_loop_type=core_loop_type, limit=min(limit, 180))
+        improvement_rows = [row for row in rows if isinstance(row, dict)]
     if callable(list_registry):
         rows = list_registry(core_loop_type=core_loop_type, limit=min(limit, 120))
         typed_rows = [row for row in rows if isinstance(row, dict)]
@@ -220,7 +275,7 @@ def collect_asset_memory_context(
             keyword=state.get("keyword", ""),
         )
         if registry_context is not None:
-            return registry_context
+            return _merge_improvement_queue_signals(registry_context, improvement_rows)
 
     logs = deps.repository.list_recent_logs(limit=limit)
     if not logs:
@@ -261,7 +316,7 @@ def collect_asset_memory_context(
             if variant_theme:
                 theme_scores[variant_theme].append(_to_float(metadata.get("final_composite_score"), 0.0))
 
-        if log.stage == PipelineStage.QA and log.status in {PipelineStatus.RETRY, PipelineStatus.ERROR}:
+        if log.stage == PipelineStage.QA_RUNTIME and log.status in {PipelineStatus.RETRY, PipelineStatus.ERROR}:
             qa_failure_samples += 1
             reason = str(log.reason or metadata.get("reason") or "").strip()
             if reason:
@@ -320,12 +375,13 @@ def collect_asset_memory_context(
         "failure_tokens": [{"token": key, "count": count} for key, count in failure_token_counter.items()],
     }
 
-    return AssetMemoryContext(
+    context = AssetMemoryContext(
         hint=hint,
         recurring_failures=[*top_reasons, *top_tokens],
         retrieval_profile=retrieval_profile,
         registry_snapshot=registry_snapshot,
     )
+    return _merge_improvement_queue_signals(context, improvement_rows)
 
 
 def empty_asset_memory_context() -> AssetMemoryContext:

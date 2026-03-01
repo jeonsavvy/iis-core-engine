@@ -1,5 +1,5 @@
 -- IIS MVP schema for Supabase SQL Editor
--- Includes: profiles(auth linkage), users compatibility view, admin_config, leaderboard, pipeline_logs, games_metadata, asset_registry
+-- Includes: profiles(auth linkage), users compatibility view, admin_config, leaderboard, pipeline_logs, games_metadata, asset_registry, qa_improvement_queue
 
 create extension if not exists pgcrypto;
 
@@ -13,7 +13,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'pipeline_stage') then
-    create type public.pipeline_stage as enum ('trigger', 'plan', 'style', 'build', 'qa', 'publish', 'echo', 'done');
+    create type public.pipeline_stage as enum ('analyze', 'plan', 'design', 'build', 'qa_runtime', 'qa_quality', 'release', 'report', 'done');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'pipeline_status') then
@@ -21,7 +21,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'pipeline_agent_name') then
-    create type public.pipeline_agent_name as enum ('Trigger', 'Architect', 'Stylist', 'Builder', 'Sentinel', 'Publisher', 'Echo');
+    create type public.pipeline_agent_name as enum ('analyzer', 'planner', 'designer', 'developer', 'qa_runtime', 'qa_quality', 'releaser', 'reporter');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'game_status') then
@@ -223,6 +223,26 @@ on public.asset_registry (core_loop_type, created_at desc);
 create index if not exists idx_asset_registry_engine_pack
 on public.asset_registry (core_loop_type, asset_pack, created_at desc);
 
+create table if not exists public.qa_improvement_queue (
+  id uuid primary key default gen_random_uuid(),
+  pipeline_id uuid not null references public.admin_config(id) on delete cascade,
+  game_slug text not null,
+  core_loop_type text not null,
+  keyword text not null default '',
+  stage public.pipeline_stage not null,
+  reason text not null,
+  severity text not null default 'low',
+  tokens text[] not null default '{}'::text[],
+  metrics jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_qa_improvement_core_created
+on public.qa_improvement_queue (core_loop_type, created_at desc);
+
+create index if not exists idx_qa_improvement_slug_created
+on public.qa_improvement_queue (game_slug, created_at desc);
+
 -- =========================
 -- Leaderboard
 -- =========================
@@ -270,8 +290,9 @@ grant select on public.profiles to authenticated;
 grant select, insert on public.admin_config to authenticated;
 grant select on public.pipeline_logs to authenticated;
 grant select on public.asset_registry to authenticated;
+grant select on public.qa_improvement_queue to authenticated;
 
-grant all privileges on public.profiles, public.admin_config, public.pipeline_logs, public.asset_registry, public.games_metadata, public.leaderboard to service_role;
+grant all privileges on public.profiles, public.admin_config, public.pipeline_logs, public.asset_registry, public.qa_improvement_queue, public.games_metadata, public.leaderboard to service_role;
 grant usage, select on sequence public.pipeline_logs_id_seq to service_role;
 grant usage, select on sequence public.leaderboard_id_seq to anon, authenticated, service_role;
 
@@ -283,6 +304,7 @@ alter table public.admin_config enable row level security;
 alter table public.leaderboard enable row level security;
 alter table public.pipeline_logs enable row level security;
 alter table public.asset_registry enable row level security;
+alter table public.qa_improvement_queue enable row level security;
 alter table public.games_metadata enable row level security;
 
 drop policy if exists profiles_select_own_or_admin on public.profiles;
@@ -377,6 +399,21 @@ to service_role
 using (true)
 with check (true);
 
+drop policy if exists qa_improvement_queue_select_reviewer_or_admin on public.qa_improvement_queue;
+create policy qa_improvement_queue_select_reviewer_or_admin
+on public.qa_improvement_queue
+for select
+to authenticated
+using (public.is_reviewer_or_admin());
+
+drop policy if exists qa_improvement_queue_service_role_all on public.qa_improvement_queue;
+create policy qa_improvement_queue_service_role_all
+on public.qa_improvement_queue
+for all
+to service_role
+using (true)
+with check (true);
+
 drop policy if exists leaderboard_select_public on public.leaderboard;
 create policy leaderboard_select_public
 on public.leaderboard
@@ -444,6 +481,14 @@ with check (true);
 do $$
 begin
   alter publication supabase_realtime add table public.pipeline_logs;
+exception
+  when duplicate_object then null;
+end
+$$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.qa_improvement_queue;
 exception
   when duplicate_object then null;
 end

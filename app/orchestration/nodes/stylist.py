@@ -51,8 +51,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
         deps,
-        stage=PipelineStage.STYLE,
-        agent_name=PipelineAgentName.STYLIST,
+        stage=PipelineStage.DESIGN,
+        agent_name=PipelineAgentName.DESIGNER,
     )
     if gated_state is not None:
         return gated_state
@@ -86,9 +86,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["art_direction_contract"] = art_direction_contract
     return append_log(
         state,
-        stage=PipelineStage.STYLE,
+        stage=PipelineStage.DESIGN,
         status=PipelineStatus.SUCCESS,
-        agent_name=PipelineAgentName.STYLIST,
+        agent_name=PipelineAgentName.DESIGNER,
         message="Design spec + art direction contract generated.",
         metadata={
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",

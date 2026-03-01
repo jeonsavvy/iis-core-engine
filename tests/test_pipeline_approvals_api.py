@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from app.api.deps import get_pipeline_repository
 from app.api.v1.endpoints.pipelines import approve_pipeline_stage, control_pipeline, trigger_pipeline
 from app.core.config import get_settings
-from app.schemas.pipeline import PipelineControlRequest, PipelineStatus, StageApprovalRequest, TriggerRequest
+from app.schemas.pipeline import PipelineControlRequest, PipelineStatus, TriggerRequest
 
 
 def _reset_app_state() -> None:
@@ -13,48 +13,21 @@ def _reset_app_state() -> None:
     get_pipeline_repository.cache_clear()
 
 
-def test_approve_stage_for_manual_pipeline() -> None:
+def test_approve_endpoint_returns_410_gone() -> None:
     _reset_app_state()
     repository = get_pipeline_repository()
-
     trigger = trigger_pipeline(
-        TriggerRequest(keyword="manual approval api", source="console", execution_mode="manual"),
+        TriggerRequest(keyword="approval removed", source="console", execution_mode="auto"),
         repository,
     )
-    pipeline_id = str(trigger.pipeline_id)
-
-    approve = approve_pipeline_stage(
-        UUID(pipeline_id),
-        StageApprovalRequest(stage="plan"),
-        repository,
-    )
-    assert approve.approved_stage.value == "plan"
-    assert approve.execution_mode.value == "manual"
-
-    _reset_app_state()
-
-
-def test_approve_stage_rejected_for_auto_pipeline() -> None:
-    _reset_app_state()
-    repository = get_pipeline_repository()
-
-    trigger = trigger_pipeline(
-        TriggerRequest(keyword="auto mode", source="console", execution_mode="auto"),
-        repository,
-    )
-    pipeline_id = str(trigger.pipeline_id)
 
     try:
-        approve_pipeline_stage(
-            UUID(pipeline_id),
-            StageApprovalRequest(stage="plan"),
-            repository,
-        )
+        approve_pipeline_stage(trigger.pipeline_id)
     except HTTPException as exc:
-        assert exc.status_code == 409
-        assert exc.detail == "manual_approval_not_enabled"
+        assert exc.status_code == 410
+        assert exc.detail == "approval_api_removed"
     else:
-        raise AssertionError("expected HTTPException for auto execution mode")
+        raise AssertionError("expected HTTPException for removed approval endpoint")
 
     _reset_app_state()
 
@@ -106,21 +79,21 @@ def test_control_cancel_immediately_errors_queued_pipeline() -> None:
     _reset_app_state()
 
 
-def test_control_resume_approves_waiting_stage() -> None:
+def test_control_resume_requeues_skipped_pipeline() -> None:
     _reset_app_state()
     repository = get_pipeline_repository()
 
     trigger = trigger_pipeline(
-        TriggerRequest(keyword="resume waiting", source="console", execution_mode="manual"),
+        TriggerRequest(keyword="resume skipped", source="console", execution_mode="auto"),
         repository,
     )
     pipeline_id = str(trigger.pipeline_id)
 
     repository.update_pipeline_metadata(
         UUID(pipeline_id),
-        metadata_update={"waiting_for_stage": "plan"},
+        metadata_update={"operator_control": {"pause_requested": False, "cancel_requested": False}},
         status=PipelineStatus.SKIPPED,
-        error_reason="awaiting_approval:plan",
+        error_reason="paused_by_operator",
     )
 
     resume = control_pipeline(
@@ -130,7 +103,6 @@ def test_control_resume_approves_waiting_stage() -> None:
     )
     assert resume.action.value == "resume"
     assert resume.status == PipelineStatus.QUEUED
-    assert resume.waiting_for_stage is None
 
     _reset_app_state()
 
@@ -215,5 +187,25 @@ def test_trigger_pipeline_header_idempotency_key_overrides_payload_key() -> None
     stored = repository.get_pipeline(first.pipeline_id)
     assert stored is not None
     assert stored.metadata.get("idempotency_key") == "header-key-0001"
+
+    _reset_app_state()
+
+
+def test_control_returns_structured_404_code_for_unknown_pipeline() -> None:
+    _reset_app_state()
+    repository = get_pipeline_repository()
+
+    try:
+        control_pipeline(
+            UUID("00000000-0000-0000-0000-000000000001"),
+            PipelineControlRequest(action="pause"),
+            repository,
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 404
+        assert isinstance(exc.detail, dict)
+        assert exc.detail.get("code") == "pipeline_not_found"
+    else:
+        raise AssertionError("expected HTTPException for unknown pipeline")
 
     _reset_app_state()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Any, cast
+from types import SimpleNamespace
 
 from app.core.config import Settings
 from app.orchestration.runner import PipelineRunner
-from app.schemas.pipeline import ExecutionMode, PipelineStage, PipelineStatus, TriggerRequest
+from app.schemas.pipeline import PipelineStage, PipelineStatus, TriggerRequest
 from app.services.pipeline_repository import PipelineRepository
 from app.services.quality_service import ArtifactContractResult, GameplayGateResult, QualityGateResult, SmokeCheckResult
 
@@ -44,6 +45,9 @@ class FakeQualityService:
 
 
 class FakeLowQualityService(FakeQualityService):
+    def __init__(self, *, hard_gate: bool = False) -> None:
+        self.settings = SimpleNamespace(qa_hard_gate=hard_gate)
+
     def evaluate_quality_contract(self, _html: str, *, design_spec=None, **_kwargs) -> QualityGateResult:
         return QualityGateResult(
             ok=False,
@@ -148,12 +152,13 @@ def test_pipeline_runner_success_flow_contains_style_and_publish() -> None:
 
     logs = repository.list_logs(job.pipeline_id)
     stages = [log.stage.value for log in logs]
-    assert "style" in stages
-    assert "publish" in stages
+    assert "design" in stages
+    assert "release" in stages
+    assert "report" in stages
     assert "done" in stages
     usage_summary = final_job.metadata.get("usage_summary")
     assert isinstance(usage_summary, dict)
-    assert usage_summary.get("schema_version") == 1
+    assert usage_summary.get("schema_version") == 2
     assert usage_summary.get("game_slug")
 
 
@@ -173,74 +178,42 @@ def test_pipeline_runner_marks_error_after_three_qa_retries() -> None:
     assert final_job.error_reason == "QA failed after 3 attempts"
 
     logs = repository.list_logs(job.pipeline_id)
-    qa_retry_logs = [log for log in logs if log.stage.value == "qa" and log.status.value == "retry"]
+    qa_retry_logs = [log for log in logs if log.stage.value == "qa_runtime" and log.status.value == "retry"]
     assert len(qa_retry_logs) == 3
-    assert any(log.status.value == "error" and log.stage.value == "qa" for log in logs)
+    assert any(log.status.value == "error" and log.stage.value == "qa_runtime" for log in logs)
 
 
-def test_pipeline_runner_quality_gate_can_fail_pipeline() -> None:
+def test_pipeline_runner_quality_gate_soft_fails_but_pipeline_succeeds() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="quality check", qa_fail_until=0))
     queued_job = repository.claim_next_queued_pipeline()
 
     assert queued_job is not None
 
-    runner = _make_runner_with_quality(repository, FakeLowQualityService())
+    runner = _make_runner_with_quality(repository, FakeLowQualityService(hard_gate=False))
+    runner.run(queued_job)
+
+    final_job = repository.get_pipeline(job.pipeline_id)
+    assert final_job is not None
+    assert final_job.status == PipelineStatus.SUCCESS
+
+    logs = repository.list_logs(job.pipeline_id)
+    qa_quality_logs = [log for log in logs if log.stage == PipelineStage.QA_QUALITY]
+    assert qa_quality_logs
+    assert any(log.reason == "soft_fail" for log in qa_quality_logs)
+
+
+def test_pipeline_runner_quality_gate_blocks_when_hard_gate_enabled() -> None:
+    repository = PipelineRepository()
+    job = repository.create_pipeline(TriggerRequest(keyword="quality hard gate", qa_fail_until=0))
+    queued_job = repository.claim_next_queued_pipeline()
+
+    assert queued_job is not None
+
+    runner = _make_runner_with_quality(repository, FakeLowQualityService(hard_gate=True))
     runner.run(queued_job)
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
     assert final_job.status == PipelineStatus.ERROR
-    assert final_job.error_reason == "QA failed after 3 attempts"
-
-    logs = repository.list_logs(job.pipeline_id)
-    quality_failures = [
-        log
-        for log in logs
-        if log.stage == PipelineStage.QA and log.reason == "quality_score_below_threshold"
-    ]
-    assert len(quality_failures) == 3
-
-
-def test_manual_mode_pauses_and_resumes_with_stage_approval() -> None:
-    repository = PipelineRepository()
-    job = repository.create_pipeline(
-        TriggerRequest(
-            keyword="manual mode",
-            execution_mode=ExecutionMode.MANUAL,
-        )
-    )
-
-    first_claim = repository.claim_next_queued_pipeline()
-    assert first_claim is not None
-
-    runner = _make_runner(repository)
-    runner.run(first_claim)
-
-    paused = repository.get_pipeline(job.pipeline_id)
-    assert paused is not None
-    assert paused.status == PipelineStatus.SKIPPED
-    assert paused.error_reason == "awaiting_approval:plan"
-    assert paused.metadata["waiting_for_stage"] == "plan"
-
-    repository.approve_stage(job.pipeline_id, PipelineStage.PLAN)
-    second_claim = repository.claim_next_queued_pipeline()
-    assert second_claim is not None
-
-    runner.run(second_claim)
-
-    paused_again = repository.get_pipeline(job.pipeline_id)
-    assert paused_again is not None
-    assert paused_again.status == PipelineStatus.SKIPPED
-    assert paused_again.error_reason == "awaiting_approval:style"
-
-    repository.approve_stage(job.pipeline_id, PipelineStage.STYLE)
-    third_claim = repository.claim_next_queued_pipeline()
-    assert third_claim is not None
-
-    runner.run(third_claim)
-
-    paused_build = repository.get_pipeline(job.pipeline_id)
-    assert paused_build is not None
-    assert paused_build.status == PipelineStatus.SKIPPED
-    assert paused_build.error_reason == "awaiting_approval:build"
+    assert final_job.error_reason == "qa_hard_gate_blocked"

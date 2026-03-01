@@ -10,7 +10,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state,
         deps,
         stage=PipelineStage.PLAN,
-        agent_name=PipelineAgentName.ARCHITECT,
+        agent_name=PipelineAgentName.PLANNER,
     )
     if gated_state is not None:
         return gated_state
@@ -57,7 +57,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state,
         stage=PipelineStage.PLAN,
         status=PipelineStatus.SUCCESS,
-        agent_name=PipelineAgentName.ARCHITECT,
+        agent_name=PipelineAgentName.PLANNER,
         message="Planner+Researcher generated GDD and reference summary.",
         metadata=meta,
     )

@@ -8,8 +8,8 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
         _deps,
-        stage=PipelineStage.TRIGGER,
-        agent_name=PipelineAgentName.TRIGGER,
+        stage=PipelineStage.ANALYZE,
+        agent_name=PipelineAgentName.ANALYZER,
         allow_pause=False,
     )
     if gated_state is not None:
@@ -19,9 +19,9 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     pipeline_version = str(state["outputs"].get("pipeline_version", "forgeflow-v1"))
     return append_log(
         state,
-        stage=PipelineStage.TRIGGER,
+        stage=PipelineStage.ANALYZE,
         status=PipelineStatus.SUCCESS,
-        agent_name=PipelineAgentName.TRIGGER,
+        agent_name=PipelineAgentName.ANALYZER,
         message=f"Director accepted trigger keyword: {state['keyword']}",
         metadata={"pipeline_version": pipeline_version},
     )

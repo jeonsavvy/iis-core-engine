@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
 from app.orchestration.nodes.echo import run
@@ -70,13 +71,13 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
         publisher_service=SimpleNamespace(update_game_marketing=lambda **_: True),
     )
 
-    next_state = run(state, deps)
+    next_state = run(cast(Any, state), cast(Any, deps))
     assert next_state["status"] == PipelineStatus.SUCCESS
     assert "/play/11111111-1111-1111-1111-111111111111" in captured["message"]
     assert registry_rows
     assert registry_rows[0]["game_slug"] == "game-portal-link"
 
-    echo_log = next(log for log in next_state["logs"] if log.stage.value == "echo")
+    echo_log = next(log for log in next_state["logs"] if log.stage.value == "report")
     assert echo_log.metadata["resolved_public_url"].endswith("/play/11111111-1111-1111-1111-111111111111")
 
 
@@ -116,7 +117,7 @@ def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
         publisher_service=SimpleNamespace(update_game_marketing=lambda **_: True),
     )
 
-    next_state = run(state, deps)
+    next_state = run(cast(Any, state), cast(Any, deps))
     assert next_state["status"] == PipelineStatus.SUCCESS
     assert "https://storage.example.com/games/game-portal-link/index.html" in captured["message"]
     assert registry_rows

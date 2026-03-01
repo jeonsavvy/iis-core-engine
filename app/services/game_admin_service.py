@@ -50,6 +50,7 @@ class GameAdminService:
             "archive": None,
             "db": None,
         }
+        warnings: list[dict[str, str]] = []
 
         if delete_storage:
             storage_result = self.publisher_service.delete_game_assets(slug=slug)
@@ -71,15 +72,14 @@ class GameAdminService:
             archive_result = self.github_archive_service.delete_archive_game(game_slug=slug)
             details["archive"] = archive_result
             if archive_result.get("status") == "error":
-                return {
-                    "status": "partial_error",
-                    "reason": "archive_delete_failed",
-                    "game_id": str(game_id),
-                    "slug": slug,
-                    "deleted": deleted,
-                    "details": details,
-                }
-            deleted["archive"] = archive_result.get("status") == "deleted"
+                warnings.append(
+                    {
+                        "code": "archive_delete_failed",
+                        "detail": str(archive_result.get("reason") or "archive_delete_failed"),
+                    }
+                )
+            else:
+                deleted["archive"] = archive_result.get("status") == "deleted"
         else:
             details["archive"] = {"status": "skipped", "reason": "delete_archive=false"}
 
@@ -104,5 +104,5 @@ class GameAdminService:
             "slug": slug,
             "deleted": deleted,
             "details": details,
+            "warnings": warnings,
         }
-

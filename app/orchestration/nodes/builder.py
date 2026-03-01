@@ -34,7 +34,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state,
         deps,
         stage=PipelineStage.BUILD,
-        agent_name=PipelineAgentName.BUILDER,
+        agent_name=PipelineAgentName.DEVELOPER,
     )
     if gated_state is not None:
         return gated_state
@@ -86,7 +86,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             state,
             stage=PipelineStage.BUILD,
             status=PipelineStatus.ERROR,
-            agent_name=PipelineAgentName.BUILDER,
+            agent_name=PipelineAgentName.DEVELOPER,
             message="빌드 중단: 현재 파이프라인 범위를 초과한 요청입니다.",
             reason=unsupported_scope_reason,
             metadata={
@@ -122,7 +122,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
-        agent_name=PipelineAgentName.BUILDER,
+        agent_name=PipelineAgentName.DEVELOPER,
         message="Asset memory retriever composed prior successes/failures.",
         metadata={
             "core_loop_type": core_loop_type,
@@ -214,7 +214,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.SUCCESS,
-        agent_name=PipelineAgentName.BUILDER,
+        agent_name=PipelineAgentName.DEVELOPER,
         message=f"Production V2 artifact selected and polished (iteration={state['build_iteration']}).",
         metadata={
             "artifact": state["outputs"]["artifact_path"],

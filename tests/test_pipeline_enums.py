@@ -2,8 +2,8 @@ from app.schemas.pipeline import PipelineAgentName, PipelineControlAction, Pipel
 
 
 def test_stylist_and_style_values_present() -> None:
-    assert PipelineAgentName.STYLIST.value == "Stylist"
-    assert PipelineStage.STYLE.value == "style"
+    assert PipelineAgentName.DESIGNER.value == "designer"
+    assert PipelineStage.DESIGN.value == "design"
 
 
 def test_pipeline_control_actions_present() -> None:

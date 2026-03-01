@@ -33,8 +33,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
         deps,
-        stage=PipelineStage.ECHO,
-        agent_name=PipelineAgentName.ECHO,
+        stage=PipelineStage.REPORT,
+        agent_name=PipelineAgentName.REPORTER,
     )
     if gated_state is not None:
         return gated_state
@@ -52,17 +52,18 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             objective = raw_objective.strip()
     
     build_metadata = _latest_stage_log_metadata(state, PipelineStage.BUILD)
-    qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA)
-    qa_log = _latest_stage_log(state, PipelineStage.QA)
+    runtime_qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA_RUNTIME)
+    quality_qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA_QUALITY)
+    qa_quality_log = _latest_stage_log(state, PipelineStage.QA_QUALITY)
     grounded_evidence = {
         "slug": slug,
         "genre_engine": genre_engine,
         "candidate_count": build_metadata.get("candidate_count"),
-        "final_quality_score": build_metadata.get("final_quality_score") or qa_metadata.get("quality_score"),
-        "final_gameplay_score": build_metadata.get("final_gameplay_score") or qa_metadata.get("gameplay_score"),
+        "final_quality_score": build_metadata.get("final_quality_score") or quality_qa_metadata.get("quality_score"),
+        "final_gameplay_score": build_metadata.get("final_gameplay_score") or quality_qa_metadata.get("gameplay_score"),
         "artifact_file_count": build_metadata.get("artifact_file_count"),
         "asset_pack": build_metadata.get("asset_pack") or state["outputs"].get("asset_pack"),
-        "qa_message": qa_metadata.get("message") if isinstance(qa_metadata.get("message"), str) else None,
+        "qa_message": quality_qa_metadata.get("message") if isinstance(quality_qa_metadata.get("message"), str) else None,
     }
 
     marketing_result = deps.vertex_service.generate_marketing_copy(
@@ -126,9 +127,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     state = append_log(
         state,
-        stage=PipelineStage.ECHO,
+        stage=PipelineStage.REPORT,
         status=status,
-        agent_name=PipelineAgentName.ECHO,
+        agent_name=PipelineAgentName.REPORTER,
         message=f"Telegram broadcast result: {result.get('status', 'unknown')}",
         metadata={
             "generation_source": marketing_result.meta.get("generation_source"),
@@ -152,12 +153,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     upsert_registry = getattr(deps.repository, "upsert_asset_registry_entry", None)
     if callable(upsert_registry):
         failure_reasons: list[str] = []
-        if qa_log and isinstance(qa_log.reason, str) and qa_log.reason.strip():
-            failure_reasons.append(qa_log.reason.strip())
-        if isinstance(qa_metadata.get("visual_failed_checks"), list):
-            failure_reasons.extend(_string_list(qa_metadata.get("visual_failed_checks")))
+        if qa_quality_log and isinstance(qa_quality_log.reason, str) and qa_quality_log.reason.strip():
+            failure_reasons.append(qa_quality_log.reason.strip())
+        failure_reasons.extend(_string_list(quality_qa_metadata.get("failed_checks")))
 
-        failure_tokens = _string_list(qa_metadata.get("fatal_errors")) + _string_list(qa_metadata.get("non_fatal_warnings"))
+        failure_tokens = _string_list(runtime_qa_metadata.get("fatal_errors")) + _string_list(runtime_qa_metadata.get("non_fatal_warnings"))
 
         try:
             upsert_registry(
@@ -171,10 +171,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "variant_id": str(build_metadata.get("asset_pipeline_selected_variant") or ""),
                     "variant_theme": str(build_metadata.get("asset_pipeline_selected_theme") or ""),
                     "final_composite_score": build_metadata.get("final_composite_score"),
-                    "final_quality_score": build_metadata.get("final_quality_score") or qa_metadata.get("quality_score"),
-                    "final_gameplay_score": build_metadata.get("final_gameplay_score") or qa_metadata.get("gameplay_score"),
-                    "qa_status": qa_log.status.value if qa_log else "",
-                    "qa_reason": qa_log.reason if qa_log else None,
+                    "final_quality_score": build_metadata.get("final_quality_score") or quality_qa_metadata.get("quality_score"),
+                    "final_gameplay_score": build_metadata.get("final_gameplay_score") or quality_qa_metadata.get("gameplay_score"),
+                    "qa_status": qa_quality_log.status.value if qa_quality_log else "",
+                    "qa_reason": qa_quality_log.reason if qa_quality_log else None,
                     "failure_reasons": failure_reasons,
                     "failure_tokens": failure_tokens,
                     "artifact_manifest": state["outputs"].get("artifact_manifest")
@@ -190,13 +190,29 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         except Exception:
             state["outputs"]["asset_registry_synced"] = False
 
+    append_improvements = getattr(deps.repository, "append_qa_improvement_entries", None)
+    improvement_items = state["outputs"].get("qa_improvement_items")
+    if callable(append_improvements) and isinstance(improvement_items, list):
+        typed_items = [item for item in improvement_items if isinstance(item, dict)]
+        try:
+            append_improvements(
+                pipeline_id=str(state["pipeline_id"]),
+                game_slug=str(slug),
+                core_loop_type=genre_engine,
+                keyword=str(keyword),
+                entries=typed_items,
+            )
+            state["outputs"]["qa_improvement_synced"] = True
+        except Exception:
+            state["outputs"]["qa_improvement_synced"] = False
+
     if state["status"] != PipelineStatus.ERROR:
         state["status"] = PipelineStatus.SUCCESS
         append_log(
             state,
             stage=PipelineStage.DONE,
             status=PipelineStatus.SUCCESS,
-            agent_name=PipelineAgentName.ECHO,
+            agent_name=PipelineAgentName.REPORTER,
             message="Pipeline finished.",
         )
     return state

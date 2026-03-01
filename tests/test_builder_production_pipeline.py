@@ -12,7 +12,7 @@ from app.schemas.pipeline import PipelineStatus
 from app.services.quality_types import GameplayGateResult, QualityGateResult, SmokeCheckResult
 
 
-def _make_state() -> dict[str, Any]:
+def _make_state() -> Any:
     return {
         "pipeline_id": uuid4(),
         "keyword": "neon racer",
@@ -103,7 +103,7 @@ def _patch_runtime_builders(monkeypatch) -> None:
 def test_build_production_artifact_prefers_polished_candidate_when_smoke_passes(monkeypatch) -> None:
     _patch_runtime_builders(monkeypatch)
 
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=_FakeVertexService(polished_suffix="POLISHED"),
         quality_service=_FakeQualityService(smoke_ok=True),
     )
@@ -145,7 +145,7 @@ def test_build_production_artifact_prefers_polished_candidate_when_smoke_passes(
 def test_build_production_artifact_forces_baseline_when_smoke_fails(monkeypatch) -> None:
     _patch_runtime_builders(monkeypatch)
 
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=_FakeVertexService(polished_suffix="POLISHED"),
         quality_service=_FakeQualityService(smoke_ok=False),
     )
@@ -183,7 +183,7 @@ def test_build_production_artifact_forces_baseline_when_smoke_fails(monkeypatch)
 def test_build_production_artifact_enforces_single_candidate_even_when_configured_higher(monkeypatch) -> None:
     _patch_runtime_builders(monkeypatch)
 
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=_FakeVertexService(builder_candidate_count=4, polished_suffix="POLISHED"),
         quality_service=_FakeQualityService(smoke_ok=True),
     )
@@ -219,7 +219,7 @@ def test_build_production_artifact_applies_visual_feedback_hint(monkeypatch) -> 
     _patch_runtime_builders(monkeypatch)
 
     vertex = _FakeVertexService(polished_suffix="POLISHED")
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=vertex,
         quality_service=_FakeQualityService(smoke_ok=True),
     )
@@ -262,7 +262,7 @@ def test_build_production_artifact_applies_rebuild_feedback_hint(monkeypatch) ->
     _patch_runtime_builders(monkeypatch)
 
     vertex = _FakeVertexService(polished_suffix="POLISHED")
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=vertex,
         quality_service=_FakeQualityService(smoke_ok=True),
     )
@@ -310,7 +310,7 @@ def test_build_production_artifact_applies_asset_memory_hint(monkeypatch) -> Non
     _patch_runtime_builders(monkeypatch)
 
     vertex = _FakeVertexService(polished_suffix="POLISHED")
-    deps = SimpleNamespace(
+    deps: Any = SimpleNamespace(
         vertex_service=vertex,
         quality_service=_FakeQualityService(smoke_ok=True),
     )

@@ -146,7 +146,7 @@ def build_production_artifact(
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
-        agent_name=PipelineAgentName.BUILDER,
+        agent_name=PipelineAgentName.DEVELOPER,
         message=f"Production V2 generation started (iteration={state['build_iteration']}).",
         metadata={
             "iteration": state["build_iteration"],
@@ -282,7 +282,7 @@ def build_production_artifact(
             state,
             stage=PipelineStage.BUILD,
             status=PipelineStatus.RUNNING,
-            agent_name=PipelineAgentName.BUILDER,
+            agent_name=PipelineAgentName.DEVELOPER,
             message=f"Candidate {index}/{candidate_count} evaluated.",
             metadata={
                 "iteration": state["build_iteration"],
@@ -310,7 +310,7 @@ def build_production_artifact(
         state,
         stage=PipelineStage.BUILD,
         status=PipelineStatus.RUNNING,
-        agent_name=PipelineAgentName.BUILDER,
+        agent_name=PipelineAgentName.DEVELOPER,
         message="Final polish pass started for selected candidate.",
         metadata={
             "iteration": state["build_iteration"],

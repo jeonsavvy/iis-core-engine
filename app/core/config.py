@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     qa_min_gameplay_score: int = Field(default=55, ge=0, le=100)
     qa_min_visual_score: int = Field(default=45, ge=0, le=100)
     qa_min_artifact_contract_score: int = Field(default=70, ge=0, le=100)
+    qa_hard_gate: bool = False
     builder_candidate_count: int = Field(default=1, ge=1, le=5)
     builder_codegen_enabled: bool = True
     builder_codegen_passes: int = Field(default=1, ge=0, le=2)

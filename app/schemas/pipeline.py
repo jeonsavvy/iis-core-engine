@@ -13,7 +13,6 @@ class TriggerSource(str, Enum):
 
 class ExecutionMode(str, Enum):
     AUTO = "auto"
-    MANUAL = "manual"
 
 
 class AppRole(str, Enum):
@@ -22,13 +21,14 @@ class AppRole(str, Enum):
 
 
 class PipelineStage(str, Enum):
-    TRIGGER = "trigger"
+    ANALYZE = "analyze"
     PLAN = "plan"
-    STYLE = "style"
+    DESIGN = "design"
     BUILD = "build"
-    QA = "qa"
-    PUBLISH = "publish"
-    ECHO = "echo"
+    QA_RUNTIME = "qa_runtime"
+    QA_QUALITY = "qa_quality"
+    RELEASE = "release"
+    REPORT = "report"
     DONE = "done"
 
 
@@ -49,13 +49,14 @@ class PipelineControlAction(str, Enum):
 
 
 class PipelineAgentName(str, Enum):
-    TRIGGER = "Trigger"
-    ARCHITECT = "Architect"
-    STYLIST = "Stylist"
-    BUILDER = "Builder"
-    SENTINEL = "Sentinel"
-    PUBLISHER = "Publisher"
-    ECHO = "Echo"
+    ANALYZER = "analyzer"
+    PLANNER = "planner"
+    DESIGNER = "designer"
+    DEVELOPER = "developer"
+    QA_RUNTIME = "qa_runtime"
+    QA_QUALITY = "qa_quality"
+    RELEASER = "releaser"
+    REPORTER = "reporter"
 
 
 class TriggerRequest(BaseModel):
@@ -81,7 +82,6 @@ class PipelineSummary(BaseModel):
     source: TriggerSource
     status: PipelineStatus
     execution_mode: ExecutionMode = ExecutionMode.AUTO
-    waiting_for_stage: PipelineStage | None = None
     pipeline_version: str = "forgeflow-v1"
     error_reason: str | None = None
     created_at: datetime
@@ -97,7 +97,6 @@ class StageApprovalResponse(BaseModel):
     approved_stage: PipelineStage
     execution_mode: ExecutionMode
     status: PipelineStatus
-    waiting_for_stage: PipelineStage | None = None
 
 
 class PipelineControlRequest(BaseModel):
@@ -109,7 +108,6 @@ class PipelineControlResponse(BaseModel):
     action: PipelineControlAction
     execution_mode: ExecutionMode
     status: PipelineStatus
-    waiting_for_stage: PipelineStage | None = None
     error_reason: str | None = None
 
 

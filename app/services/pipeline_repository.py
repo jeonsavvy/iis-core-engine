@@ -4,31 +4,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Any
+from typing import Any, Iterable
 from uuid import UUID, uuid4
 
 from supabase import Client, create_client
 
 from app.core.config import Settings
-from app.schemas.pipeline import (
-    ExecutionMode,
-    PipelineAgentName,
-    PipelineLogRecord,
-    PipelineStage,
-    PipelineStatus,
-    TriggerRequest,
-    TriggerSource,
-)
+from app.schemas.pipeline import ExecutionMode, PipelineAgentName, PipelineLogRecord, PipelineStage, PipelineStatus, TriggerRequest, TriggerSource
 from app.services.trigger_guard import validate_keyword
-
-MANUAL_APPROVAL_STAGES: tuple[PipelineStage, ...] = (
-    PipelineStage.PLAN,
-    PipelineStage.STYLE,
-    PipelineStage.BUILD,
-    PipelineStage.QA,
-    PipelineStage.PUBLISH,
-    PipelineStage.ECHO,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +40,7 @@ class PipelineRepository:
         self._memory_jobs: dict[str, dict[str, Any]] = {}
         self._memory_logs: dict[str, list[dict[str, Any]]] = {}
         self._memory_asset_registry: dict[str, dict[str, Any]] = {}
+        self._memory_qa_improvements: list[dict[str, Any]] = []
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PipelineRepository":
@@ -93,17 +77,10 @@ class PipelineRepository:
             **request.metadata,
             "qa_fail_until": request.qa_fail_until,
             "safe_slug": safe_slug,
-            "execution_mode": request.execution_mode.value,
+            "execution_mode": ExecutionMode.AUTO.value,
             "pipeline_version": pipeline_version,
             "request_id": request_id,
             "idempotency_key": idempotency_key,
-            "approved_stages": [],
-            "manual_approval_stages": [stage.value for stage in MANUAL_APPROVAL_STAGES],
-            "waiting_for_stage": None,
-            "manual_cursor": "trigger",
-            "manual_outputs": {},
-            "manual_qa_attempt": 0,
-            "manual_build_iteration": 0,
             "operator_control": {"pause_requested": False, "cancel_requested": False},
         }
         return self._insert_admin_config(
@@ -287,6 +264,20 @@ class PipelineRepository:
                 return None
             return self._job_from_row(row)
 
+    def has_pipeline_history(self, pipeline_id: UUID) -> bool:
+        pipeline_id_text = str(pipeline_id)
+        if self.client:
+            admin_rows = self.client.table("admin_config").select("id").eq("id", pipeline_id_text).limit(1).execute()
+            if admin_rows.data:
+                return True
+            log_rows = self.client.table("pipeline_logs").select("id").eq("pipeline_id", pipeline_id_text).limit(1).execute()
+            return bool(log_rows.data)
+
+        with self._lock:
+            if pipeline_id_text in self._memory_jobs:
+                return True
+            return any(str(row.get("pipeline_id", "")).strip() == pipeline_id_text for rows in self._memory_logs.values() for row in rows)
+
     def list_logs(self, pipeline_id: UUID, limit: int = 200) -> list[PipelineLogRecord]:
         if self.client:
             result = (
@@ -361,6 +352,87 @@ class PipelineRepository:
             rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
             return rows[:limit]
 
+    def append_qa_improvement_entries(
+        self,
+        *,
+        pipeline_id: str,
+        game_slug: str,
+        core_loop_type: str,
+        keyword: str,
+        entries: list[dict[str, object]],
+    ) -> None:
+        rows: list[dict[str, Any]] = []
+
+        def _normalize_tokens(value: object) -> list[str]:
+            if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
+                return []
+            normalized_tokens: list[str] = []
+            for token in value:
+                text = str(token).strip()
+                if text:
+                    normalized_tokens.append(text)
+            return normalized_tokens
+
+        for entry in entries:
+            reason = str(entry.get("reason", "")).strip()
+            if not reason:
+                continue
+            row = {
+                "pipeline_id": pipeline_id,
+                "game_slug": game_slug,
+                "core_loop_type": core_loop_type,
+                "keyword": keyword,
+                "stage": str(entry.get("stage", "")).strip(),
+                "reason": reason,
+                "severity": str(entry.get("severity", "low")).strip() or "low",
+                "tokens": _normalize_tokens(entry.get("tokens")),
+                "metrics": entry.get("metrics") if isinstance(entry.get("metrics"), dict) else {},
+            }
+            rows.append(row)
+
+        if not rows:
+            return
+
+        if self.client:
+            try:
+                self.client.table("qa_improvement_queue").insert(rows).execute()
+            except Exception as exc:
+                logger.warning("Failed to append qa_improvement_queue rows (continuing): %s", exc)
+            return
+
+        with self._lock:
+            now = datetime.now(timezone.utc).isoformat()
+            for row in rows:
+                row["created_at"] = now
+                self._memory_qa_improvements.append(row)
+            self._memory_qa_improvements = self._memory_qa_improvements[-600:]
+
+    def list_qa_improvement_entries(self, *, core_loop_type: str, limit: int = 120) -> list[dict[str, Any]]:
+        normalized = core_loop_type.strip()
+        if not normalized:
+            return []
+
+        if self.client:
+            try:
+                result = (
+                    self.client.table("qa_improvement_queue")
+                    .select("*")
+                    .eq("core_loop_type", normalized)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+                rows = result.data or []
+                return [row for row in rows if isinstance(row, dict)]
+            except Exception as exc:
+                logger.warning("Failed to read qa_improvement_queue (continuing): %s", exc)
+                return []
+
+        with self._lock:
+            rows = [dict(row) for row in self._memory_qa_improvements if str(row.get("core_loop_type", "")).strip() == normalized]
+            rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
+            return rows[:limit]
+
     def claim_next_queued_pipeline(self) -> PipelineJob | None:
         if self.client:
             queued = (
@@ -402,54 +474,17 @@ class PipelineRepository:
             return self._job_from_row(row)
 
     def get_execution_mode(self, job: PipelineJob) -> ExecutionMode:
-        raw = str(job.metadata.get("execution_mode", ExecutionMode.AUTO.value))
-        try:
-            return ExecutionMode(raw)
-        except ValueError:
-            return ExecutionMode.AUTO
+        return ExecutionMode.AUTO
 
     def get_pipeline_version(self, job: PipelineJob) -> str:
         value = str(job.metadata.get("pipeline_version", "")).strip()
         return value or self.settings.pipeline_default_version
 
     def get_waiting_for_stage(self, job: PipelineJob) -> PipelineStage | None:
-        raw_stage = job.metadata.get("waiting_for_stage")
-        if not isinstance(raw_stage, str) or not raw_stage:
-            return None
-        try:
-            return PipelineStage(raw_stage)
-        except ValueError:
-            return None
+        return None
 
     def approve_stage(self, pipeline_id: UUID, stage: PipelineStage) -> PipelineJob | None:
-        job = self.get_pipeline(pipeline_id)
-        if job is None:
-            return None
-
-        if self.get_execution_mode(job) != ExecutionMode.MANUAL:
-            raise ValueError("manual_approval_not_enabled")
-
-        approvable = set(self._parse_stage_values(job.metadata.get("manual_approval_stages")))
-        if stage.value not in approvable:
-            raise ValueError("stage_not_approvable")
-
-        approved = set(self._parse_stage_values(job.metadata.get("approved_stages")))
-        approved.add(stage.value)
-
-        metadata_update: dict[str, Any] = {
-            "approved_stages": sorted(approved),
-        }
-        waiting_for_stage = self.get_waiting_for_stage(job)
-        if waiting_for_stage == stage:
-            metadata_update["waiting_for_stage"] = None
-
-        updated_status = PipelineStatus.QUEUED if waiting_for_stage == stage else job.status
-        return self.update_pipeline_metadata(
-            pipeline_id,
-            metadata_update=metadata_update,
-            status=updated_status,
-            error_reason=None if waiting_for_stage == stage else job.error_reason,
-        )
+        raise ValueError("approval_api_removed")
 
     def update_pipeline_metadata(
         self,
@@ -506,8 +541,7 @@ class PipelineRepository:
         return parsed
 
     def is_stage_approved(self, job: PipelineJob, stage: PipelineStage) -> bool:
-        approved = set(self._parse_stage_values(job.metadata.get("approved_stages")))
-        return stage.value in approved
+        return True
 
     def mark_pipeline_status(self, pipeline_id: UUID, status: PipelineStatus, error_reason: str | None = None) -> None:
         payload = {
@@ -546,13 +580,6 @@ class PipelineRepository:
         payload.setdefault("pipeline_version", self.settings.pipeline_default_version)
         payload.setdefault("request_id", str(row.get("id")))
         payload.setdefault("idempotency_key", None)
-        payload.setdefault("approved_stages", [])
-        payload.setdefault("manual_approval_stages", [stage.value for stage in MANUAL_APPROVAL_STAGES])
-        payload.setdefault("waiting_for_stage", None)
-        payload.setdefault("manual_cursor", "trigger")
-        payload.setdefault("manual_outputs", {})
-        payload.setdefault("manual_qa_attempt", 0)
-        payload.setdefault("manual_build_iteration", 0)
         payload.setdefault("operator_control", {"pause_requested": False, "cancel_requested": False})
         return PipelineJob(
             pipeline_id=UUID(str(row["id"])),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from app.orchestration.nodes.builder_parts.asset_memory import collect_asset_memory_context
@@ -35,7 +35,7 @@ def _log(
         pipeline_id=pipeline_id,
         stage=stage,
         status=status,
-        agent_name=PipelineAgentName.BUILDER if stage == PipelineStage.BUILD else PipelineAgentName.SENTINEL,
+        agent_name=PipelineAgentName.DEVELOPER if stage == PipelineStage.BUILD else PipelineAgentName.QA_RUNTIME,
         message="test",
         reason=reason,
         metadata=metadata or {},
@@ -89,7 +89,7 @@ def test_collect_asset_memory_context_reads_recent_build_and_failure_signals() -
         ),
         _log(
             pipeline_id=pipeline_a,
-            stage=PipelineStage.QA,
+            stage=PipelineStage.QA_RUNTIME,
             status=PipelineStatus.RETRY,
             reason="visual_quality_below_threshold",
             metadata={"failed_checks": ["contrast", "color_diversity"]},
@@ -129,10 +129,10 @@ def test_collect_asset_memory_context_reads_recent_build_and_failure_signals() -
             offset_seconds=7,
         ),
     ]
-    deps = SimpleNamespace(repository=_FakeRepository(logs))
+    deps = cast(Any, SimpleNamespace(repository=_FakeRepository(logs)))
 
     result = collect_asset_memory_context(
-        state=_state(current_pipeline_id),
+        state=cast(Any, _state(current_pipeline_id)),
         deps=deps,
         core_loop_type="webgl_three_runner",
     )
@@ -151,10 +151,12 @@ def test_collect_asset_memory_context_reads_recent_build_and_failure_signals() -
 
 def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
     current_pipeline_id = uuid4()
-    deps = SimpleNamespace(
-        repository=_FakeRepository(
-            logs=[],
-            registry_rows=[
+    deps = cast(
+        Any,
+        SimpleNamespace(
+            repository=_FakeRepository(
+                logs=[],
+                registry_rows=[
                 {
                     "pipeline_id": str(uuid4()),
                     "core_loop_type": "webgl_three_runner",
@@ -167,10 +169,11 @@ def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
                 }
             ],
         )
+        ),
     )
 
     result = collect_asset_memory_context(
-        state=_state(current_pipeline_id),
+        state=cast(Any, _state(current_pipeline_id)),
         deps=deps,
         core_loop_type="webgl_three_runner",
     )
@@ -182,10 +185,12 @@ def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
 
 def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -> None:
     current_pipeline_id = uuid4()
-    deps = SimpleNamespace(
-        repository=_FakeRepository(
-            logs=[],
-            registry_rows=[
+    deps = cast(
+        Any,
+        SimpleNamespace(
+            repository=_FakeRepository(
+                logs=[],
+                registry_rows=[
                 {
                     "pipeline_id": str(uuid4()),
                     "keyword": "generic speed game",
@@ -212,10 +217,11 @@ def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -
                 },
             ],
         )
+        ),
     )
 
     result = collect_asset_memory_context(
-        state=_state(current_pipeline_id),
+        state=cast(Any, _state(current_pipeline_id)),
         deps=deps,
         core_loop_type="webgl_three_runner",
     )

@@ -67,6 +67,26 @@ def test_delete_game_returns_response_when_service_succeeds(monkeypatch) -> None
     assert StubGameAdminService.last_call["delete_archive"] is True
 
 
+def test_delete_game_allows_archive_failure_warning(monkeypatch) -> None:
+    game_id = uuid4()
+    _set_stub_result(
+        monkeypatch,
+        {
+            "status": "ok",
+            "game_id": str(game_id),
+            "slug": "neon-drift",
+            "deleted": {"db": True, "storage": True, "archive": False},
+            "details": {"archive": {"status": "error", "reason": "archive_delete_failed"}},
+            "warnings": [{"code": "archive_delete_failed", "detail": "repository_offline"}],
+        },
+    )
+
+    response = delete_game(game_id=game_id, payload=DeleteGameRequest())
+    assert response.status == "ok"
+    assert response.warnings
+    assert response.warnings[0].get("code") == "archive_delete_failed"
+
+
 def test_delete_game_raises_404_for_not_found(monkeypatch) -> None:
     game_id = uuid4()
     _set_stub_result(

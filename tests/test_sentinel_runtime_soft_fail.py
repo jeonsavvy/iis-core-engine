@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
-from app.orchestration.nodes import sentinel
+from app.orchestration.nodes import qa_quality, sentinel
 from app.schemas.pipeline import PipelineStatus
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult, SmokeCheckResult
 
@@ -13,13 +14,16 @@ class _RepoStub:
         return SimpleNamespace(metadata={})
 
 
-class _QualityServiceSoftFail:
+class _RuntimeFailQualityService:
+    def __init__(self, *, hard_gate: bool = False) -> None:
+        self.settings = SimpleNamespace(qa_hard_gate=hard_gate)
+
     def run_smoke_check(self, *_args, **_kwargs):
         return SmokeCheckResult(
             ok=False,
             reason="runtime_console_error",
             fatal_errors=["NotAllowedError: play() failed"],
-            non_fatal_warnings=[],
+            non_fatal_warnings=["request_failed[image] file://sprite.png net::ERR_FILE_NOT_FOUND"],
             visual_metrics={
                 "canvas_width": 1280.0,
                 "canvas_height": 720.0,
@@ -28,39 +32,6 @@ class _QualityServiceSoftFail:
                 "color_bucket_count": 36.0,
                 "edge_energy": 0.05,
                 "motion_delta": 0.002,
-            },
-        )
-
-    def evaluate_quality_contract(self, *_args, **_kwargs):
-        return QualityGateResult(ok=True, score=82, threshold=40, failed_checks=[], checks={"quality": True})
-
-    def evaluate_gameplay_gate(self, *_args, **_kwargs):
-        return GameplayGateResult(ok=True, score=80, threshold=55, failed_checks=[], checks={"gameplay": True})
-
-    def evaluate_visual_gate(self, *_args, **_kwargs):
-        return QualityGateResult(ok=True, score=78, threshold=45, failed_checks=[], checks={"visual": True})
-
-    def evaluate_artifact_contract(self, *_args, **_kwargs):
-        return ArtifactContractResult(ok=True, score=80, threshold=70, failed_checks=[], checks={"artifact": True})
-
-
-class _PublisherStub:
-    def upload_screenshot(self, **_kwargs):
-        return None
-
-
-class _QualityServiceVisualSoftFail:
-    def run_smoke_check(self, *_args, **_kwargs):
-        return SmokeCheckResult(
-            ok=True,
-            visual_metrics={
-                "canvas_width": 1280.0,
-                "canvas_height": 720.0,
-                "luminance_std": 10.0,
-                "non_dark_ratio": 0.05,
-                "color_bucket_count": 8.0,
-                "edge_energy": 0.01,
-                "motion_delta": 0.0002,
             },
         )
 
@@ -83,7 +54,12 @@ class _QualityServiceVisualSoftFail:
         return ArtifactContractResult(ok=True, score=80, threshold=70, failed_checks=[], checks={"artifact": True})
 
 
-def _base_state() -> dict:
+class _PublisherStub:
+    def upload_screenshot(self, **_kwargs):
+        return None
+
+
+def _base_state() -> dict[str, Any]:
     return {
         "pipeline_id": uuid4(),
         "keyword": "neon runner",
@@ -100,7 +76,6 @@ def _base_state() -> dict:
         "outputs": {
             "artifact_html": "<html><body><canvas id='game'></canvas></body></html>",
             "artifact_manifest": {"bundle_kind": "hybrid_engine"},
-            "builder_runtime_guard": {"chosen": "selected"},
             "game_slug": "neon-runner",
             "game_genre": "arcade",
             "genre_engine": "arcade_generic",
@@ -119,43 +94,47 @@ def _deps_with_quality(quality_service) -> SimpleNamespace:
     )
 
 
-def test_sentinel_tolerates_runtime_console_error_when_builder_guard_passed() -> None:
+def test_sentinel_runtime_failure_soft_fails_and_queues_improvement() -> None:
     state = _base_state()
-    deps = _deps_with_quality(_QualityServiceSoftFail())
+    deps = _deps_with_quality(_RuntimeFailQualityService())
 
-    result = sentinel.run(state, deps)
+    result = sentinel.run(cast(Any, state), cast(Any, deps))
 
     assert result["needs_rebuild"] is False
     assert result["status"] == PipelineStatus.RUNNING
     assert any(log.status == PipelineStatus.SUCCESS for log in result["logs"])
-    assert any("runtime console error tolerated" in log.message for log in result["logs"])
+    assert any("soft-fail" in log.message for log in result["logs"])
+
+    improvement_items = result["outputs"].get("qa_improvement_items")
+    assert isinstance(improvement_items, list)
+    assert any(item.get("reason") == "runtime_console_error" for item in improvement_items if isinstance(item, dict))
 
 
-def test_sentinel_retries_runtime_console_error_without_builder_guard_context() -> None:
+def test_qa_quality_merges_runtime_and_quality_improvements() -> None:
     state = _base_state()
-    state["outputs"].pop("builder_runtime_guard", None)
-    deps = _deps_with_quality(_QualityServiceSoftFail())
+    deps = _deps_with_quality(_RuntimeFailQualityService())
 
-    result = sentinel.run(state, deps)
+    after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
+    after_quality = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
 
-    assert result["needs_rebuild"] is True
-    assert any(log.status == PipelineStatus.RETRY for log in result["logs"])
-    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
-    assert isinstance(rebuild_feedback, dict)
-    assert rebuild_feedback.get("gate") == "runtime"
-    assert rebuild_feedback.get("reason") == "runtime_console_error"
+    assert after_quality["status"] == PipelineStatus.RUNNING
+    assert after_quality["needs_rebuild"] is False
+    assert any(log.stage.value == "qa_quality" for log in after_quality["logs"])
+
+    improvement_items = after_quality["outputs"].get("qa_improvement_items")
+    assert isinstance(improvement_items, list)
+    reasons = [item.get("reason") for item in improvement_items if isinstance(item, dict)]
+    assert "runtime_console_error" in reasons
+    assert "visual_quality_below_threshold" in reasons
 
 
-def test_sentinel_visual_gate_requests_one_rebuild_then_soft_fails() -> None:
+def test_qa_quality_hard_gate_blocks_release_when_enabled() -> None:
     state = _base_state()
-    deps = _deps_with_quality(_QualityServiceVisualSoftFail())
+    deps = _deps_with_quality(_RuntimeFailQualityService(hard_gate=True))
 
-    first = sentinel.run(state, deps)
-    assert first["needs_rebuild"] is True
-    assert any(log.reason == "visual_quality_below_threshold" and log.status == PipelineStatus.RETRY for log in first["logs"])
+    after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
+    after_quality = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
 
-    first["needs_rebuild"] = False
-    second = sentinel.run(first, deps)
-    assert second["needs_rebuild"] is False
-    assert any(log.reason == "visual_quality_below_threshold" for log in second["logs"])
-    assert any(log.status == PipelineStatus.SUCCESS for log in second["logs"])
+    assert after_quality["status"] == PipelineStatus.ERROR
+    assert after_quality["reason"] == "qa_hard_gate_blocked"
+    assert any(log.status == PipelineStatus.ERROR and log.stage.value == "qa_quality" for log in after_quality["logs"])

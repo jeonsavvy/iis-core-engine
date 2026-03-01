@@ -18,4 +18,4 @@ class DeleteGameResponse(BaseModel):
     slug: str
     deleted: dict[str, bool]
     details: dict[str, Any] = Field(default_factory=dict)
-
+    warnings: list[dict[str, Any]] = Field(default_factory=list)

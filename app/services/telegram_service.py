@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from app.core.config import Settings
-from app.schemas.pipeline import ExecutionMode, PipelineStage, PipelineStatus, TriggerRequest, TriggerSource
+from app.schemas.pipeline import ExecutionMode, PipelineStatus, TriggerRequest, TriggerSource
 from app.schemas.telegram import TelegramWebhookResponse, TelegramWebhookUpdate
 from app.services.game_admin_service import GameAdminService
 from app.services.http_client import request_with_retry
@@ -221,7 +221,6 @@ class TelegramService:
             self.send_message(chat_id, "Pipeline not found.")
             return TelegramWebhookResponse(status="not_found", detail="pipeline does not exist")
 
-        waiting = repository.get_waiting_for_stage(job)
         self.send_message(
             chat_id,
             "\n".join(
@@ -230,7 +229,6 @@ class TelegramService:
                     f"status={job.status.value}",
                     f"source={job.source.value}",
                     f"execution_mode={repository.get_execution_mode(job).value}",
-                    f"waiting_for_stage={waiting.value if waiting else '-'}",
                     f"error={job.error_reason or '-'}",
                 ]
             ),
@@ -242,41 +240,8 @@ class TelegramService:
         )
 
     def _handle_approve(self, *, chat_id: str, argument: str, repository: PipelineRepository) -> TelegramWebhookResponse:
-        args = argument.split()
-        if len(args) != 2:
-            self.send_message(chat_id, "Usage: /approve <pipeline_id> <stage>")
-            return TelegramWebhookResponse(status="invalid", detail="approve_args_invalid")
-
-        pipeline_id = self._parse_uuid_arg(args[0], usage_message="Usage: /approve <pipeline_id> <stage>", chat_id=chat_id)
-        if pipeline_id is None:
-            return TelegramWebhookResponse(status="invalid", detail="pipeline_id must be UUID")
-
-        try:
-            stage = PipelineStage(args[1].lower())
-        except ValueError:
-            self.send_message(chat_id, "Invalid stage. Allowed: plan|style|build|qa|publish|echo")
-            return TelegramWebhookResponse(status="invalid", detail="invalid_stage")
-
-        if stage in {PipelineStage.TRIGGER, PipelineStage.DONE}:
-            self.send_message(chat_id, "Invalid stage. Allowed: plan|style|build|qa|publish|echo")
-            return TelegramWebhookResponse(status="invalid", detail="invalid_stage")
-
-        try:
-            job = repository.approve_stage(pipeline_id, stage)
-        except ValueError as exc:
-            self.send_message(chat_id, f"Approve failed: {exc}")
-            return TelegramWebhookResponse(status="error", detail=str(exc))
-
-        if job is None:
-            self.send_message(chat_id, "Pipeline not found.")
-            return TelegramWebhookResponse(status="not_found", detail="pipeline does not exist")
-
-        self.send_message(chat_id, f"Approved: {pipeline_id} stage={stage.value} status={job.status.value}")
-        return TelegramWebhookResponse(
-            status="approved",
-            pipeline_id=str(job.pipeline_id),
-            payload={"approved_stage": stage.value, "pipeline_status": job.status.value},
-        )
+        self.send_message(chat_id, "Approve command is removed. Pipeline now runs in auto mode only.")
+        return TelegramWebhookResponse(status="blocked", detail="approval_api_removed")
 
     def _handle_logs(self, *, chat_id: str, argument: str, repository: PipelineRepository) -> TelegramWebhookResponse:
         args = argument.split()
@@ -425,7 +390,7 @@ class TelegramService:
 
         updated = repository.update_pipeline_metadata(
             pipeline_id,
-            metadata_update={"waiting_for_stage": None},
+            metadata_update={},
             status=PipelineStatus.QUEUED,
             error_reason=None,
         )
@@ -483,15 +448,7 @@ class TelegramService:
             self.send_message(chat_id, "Pipeline not found.")
             return TelegramWebhookResponse(status="not_found", detail="pipeline does not exist")
 
-        metadata_update = {
-            "approved_stages": [],
-            "waiting_for_stage": None,
-            "manual_cursor": "trigger",
-            "manual_outputs": {},
-            "manual_qa_attempt": 0,
-            "manual_build_iteration": 0,
-            "execution_mode": job.metadata.get("execution_mode", ExecutionMode.AUTO.value),
-        }
+        metadata_update = {"execution_mode": ExecutionMode.AUTO.value}
 
         updated = repository.update_pipeline_metadata(
             pipeline_id,

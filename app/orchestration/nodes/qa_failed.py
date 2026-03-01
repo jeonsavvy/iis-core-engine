@@ -9,9 +9,9 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     state["reason"] = f"QA failed after {state['qa_attempt']} attempts"
     return append_log(
         state,
-        stage=PipelineStage.QA,
+        stage=PipelineStage.QA_RUNTIME,
         status=PipelineStatus.ERROR,
-        agent_name=PipelineAgentName.SENTINEL,
+        agent_name=PipelineAgentName.QA_RUNTIME,
         message="Pipeline stopped because QA retry budget was exhausted.",
         reason=state["reason"],
     )

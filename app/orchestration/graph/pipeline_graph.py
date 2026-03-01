@@ -3,115 +3,130 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes import architect, builder, echo, publisher, qa_failed, sentinel, stylist, trigger
+from app.orchestration.nodes import architect, builder, echo, publisher, qa_failed, qa_quality, sentinel, stylist, trigger
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineStatus
 
 
-def _route_after_trigger(state: PipelineState) -> str:
+def _route_after_analyze(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    return "Architect"
+    return "Planner"
 
 
 def _route_after_plan(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    return "Stylist"
+    return "Designer"
 
 
-def _route_after_style(state: PipelineState) -> str:
+def _route_after_design(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    return "Builder"
+    return "Developer"
 
 
 def _route_after_build(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    return "Sentinel"
+    return "QaRuntime"
 
 
-def _route_after_qa(state: PipelineState) -> str:
+def _route_after_qa_runtime(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
     if state["needs_rebuild"]:
         if state["qa_attempt"] >= state["max_qa_loops"]:
             return "QaFailed"
-        return "Builder"
-    return "Publisher"
+        return "Developer"
+    return "QaQuality"
 
 
-def _route_after_publish(state: PipelineState) -> str:
+def _route_after_qa_quality(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    return "Echo"
+    return "Release"
+
+
+def _route_after_release(state: PipelineState) -> str:
+    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+        return "End"
+    return "Report"
 
 
 def build_pipeline_graph(deps: NodeDependencies):
     graph = StateGraph(PipelineState)
 
-    graph.add_node("Trigger", lambda state: trigger.run(state, deps))
-    graph.add_node("Architect", lambda state: architect.run(state, deps))
-    graph.add_node("Stylist", lambda state: stylist.run(state, deps))
-    graph.add_node("Builder", lambda state: builder.run(state, deps))
-    graph.add_node("Sentinel", lambda state: sentinel.run(state, deps))
+    graph.add_node("Analyze", lambda state: trigger.run(state, deps))
+    graph.add_node("Planner", lambda state: architect.run(state, deps))
+    graph.add_node("Designer", lambda state: stylist.run(state, deps))
+    graph.add_node("Developer", lambda state: builder.run(state, deps))
+    graph.add_node("QaRuntime", lambda state: sentinel.run(state, deps))
+    graph.add_node("QaQuality", lambda state: qa_quality.run(state, deps))
     graph.add_node("QaFailed", lambda state: qa_failed.run(state, deps))
-    graph.add_node("Publisher", lambda state: publisher.run(state, deps))
-    graph.add_node("Echo", lambda state: echo.run(state, deps))
+    graph.add_node("Release", lambda state: publisher.run(state, deps))
+    graph.add_node("Report", lambda state: echo.run(state, deps))
 
-    graph.set_entry_point("Trigger")
+    graph.set_entry_point("Analyze")
     graph.add_conditional_edges(
-        "Trigger",
-        _route_after_trigger,
+        "Analyze",
+        _route_after_analyze,
         {
-            "Architect": "Architect",
+            "Planner": "Planner",
             "End": END,
         },
     )
     graph.add_conditional_edges(
-        "Architect",
+        "Planner",
         _route_after_plan,
         {
-            "Stylist": "Stylist",
+            "Designer": "Designer",
             "End": END,
         },
     )
     graph.add_conditional_edges(
-        "Stylist",
-        _route_after_style,
+        "Designer",
+        _route_after_design,
         {
-            "Builder": "Builder",
+            "Developer": "Developer",
             "End": END,
         },
     )
     graph.add_conditional_edges(
-        "Builder",
+        "Developer",
         _route_after_build,
         {
-            "Sentinel": "Sentinel",
+            "QaRuntime": "QaRuntime",
             "End": END,
         },
     )
     graph.add_conditional_edges(
-        "Sentinel",
-        _route_after_qa,
+        "QaRuntime",
+        _route_after_qa_runtime,
         {
-            "Builder": "Builder",
+            "Developer": "Developer",
             "QaFailed": "QaFailed",
-            "Publisher": "Publisher",
+            "QaQuality": "QaQuality",
+            "End": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "QaQuality",
+        _route_after_qa_quality,
+        {
+            "Release": "Release",
             "End": END,
         },
     )
     graph.add_edge("QaFailed", END)
     graph.add_conditional_edges(
-        "Publisher",
-        _route_after_publish,
+        "Release",
+        _route_after_release,
         {
-            "Echo": "Echo",
+            "Report": "Report",
             "End": END,
         },
     )
-    graph.add_edge("Echo", END)
+    graph.add_edge("Report", END)
 
     return graph.compile()

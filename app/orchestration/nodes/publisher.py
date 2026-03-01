@@ -11,8 +11,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
         deps,
-        stage=PipelineStage.PUBLISH,
-        agent_name=PipelineAgentName.PUBLISHER,
+        stage=PipelineStage.RELEASE,
+        agent_name=PipelineAgentName.RELEASER,
     )
     if gated_state is not None:
         return gated_state
@@ -38,9 +38,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state["reason"] = "invalid_build_artifact_payload"
         return append_log(
             state,
-            stage=PipelineStage.PUBLISH,
+            stage=PipelineStage.RELEASE,
             status=PipelineStatus.ERROR,
-            agent_name=PipelineAgentName.PUBLISHER,
+            agent_name=PipelineAgentName.RELEASER,
             message="Publish failed: build artifact payload is invalid.",
             reason=str(exc.errors()),
         )
@@ -54,9 +54,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     append_log(
         state,
-        stage=PipelineStage.PUBLISH,
+        stage=PipelineStage.RELEASE,
         status=PipelineStatus.RUNNING,
-        agent_name=PipelineAgentName.PUBLISHER,
+        agent_name=PipelineAgentName.RELEASER,
         message="Uploading artifact to Supabase storage.",
         metadata={"slug": slug},
     )
@@ -75,9 +75,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         state["reason"] = str(publish_result.get("reason", "publisher_error"))
         return append_log(
             state,
-            stage=PipelineStage.PUBLISH,
+            stage=PipelineStage.RELEASE,
             status=PipelineStatus.ERROR,
-            agent_name=PipelineAgentName.PUBLISHER,
+            agent_name=PipelineAgentName.RELEASER,
             message="Publish failed.",
             reason=state["reason"],
             metadata={"slug": slug},
@@ -96,9 +96,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     append_log(
         state,
-        stage=PipelineStage.PUBLISH,
+        stage=PipelineStage.RELEASE,
         status=PipelineStatus.RUNNING,
-        agent_name=PipelineAgentName.PUBLISHER,
+        agent_name=PipelineAgentName.RELEASER,
         message="Syncing archive repository manifest.",
         metadata={"slug": slug, "url": public_url},
     )
@@ -113,28 +113,26 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     archive_status = str(archive_result.get("status", "unknown"))
     archive_reason = archive_result.get("reason")
-
     if archive_status == "error":
-        state["status"] = PipelineStatus.ERROR
-        state["reason"] = str(archive_reason or "archive_commit_error")
-        return append_log(
-            state,
-            stage=PipelineStage.PUBLISH,
-            status=PipelineStatus.ERROR,
-            agent_name=PipelineAgentName.PUBLISHER,
-            message="Archive commit failed.",
-            reason=state["reason"],
-            metadata={"slug": slug, "url": public_url},
+        warnings = state["outputs"].get("release_warnings")
+        warning_rows = [row for row in warnings if isinstance(row, dict)] if isinstance(warnings, list) else []
+        warning_rows.append(
+            {
+                "code": "archive_commit_failed",
+                "detail": str(archive_reason or "archive_commit_error"),
+            }
         )
+        state["outputs"]["release_warnings"] = warning_rows
 
     publish_status = PipelineStatus.SUCCESS if publish_result.get("status") in {"published", "skipped"} else PipelineStatus.ERROR
 
     return append_log(
         state,
-        stage=PipelineStage.PUBLISH,
+        stage=PipelineStage.RELEASE,
         status=publish_status,
-        agent_name=PipelineAgentName.PUBLISHER,
-        message="Artifact published and archive sync completed.",
+        agent_name=PipelineAgentName.RELEASER,
+        message="Artifact published and release sync recorded.",
+        reason="archive_warning" if archive_status == "error" else None,
         metadata={
             "url": public_url,
             "publisher_status": publish_result.get("status"),

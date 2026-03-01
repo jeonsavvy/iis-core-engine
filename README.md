@@ -5,21 +5,21 @@ Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
 
 ## 아키텍처 요약
 
-- **API 프로세스**: 트리거/조회/승인 요청 수신
+- **API 프로세스**: 트리거/조회/제어 요청 수신
 - **Worker 프로세스**: 큐를 폴링하며 파이프라인 실행
 - **큐 소스**: Supabase `admin_config` 테이블 (MVP에서는 큐+감사로그 겸용)
 - **파이프라인 노드**
-  - Trigger → Architect → Stylist → Builder ↔ Sentinel(최대 3회 재시도) → Publisher → Echo
+  - Analyze → Plan → Design → Build ↔ QaRuntime(최대 3회 재시도) → QaQuality → Release → Report → Done
 
 ## 주요 엔드포인트
 
 - `POST /api/v1/pipelines/trigger`
 - `GET /api/v1/pipelines/{pipeline_id}`
 - `GET /api/v1/pipelines/{pipeline_id}/logs`
-- `POST /api/v1/pipelines/{pipeline_id}/approvals`
 - `POST /api/v1/pipelines/{pipeline_id}/controls`
 - `POST /api/v1/telegram/webhook`
 - `GET /healthz`
+- `POST /api/v1/pipelines/{pipeline_id}/approvals` *(deprecated, 410 Gone)*
 
 `pipelines` 계열 엔드포인트는 `INTERNAL_API_TOKEN` Bearer 토큰 검증을 사용합니다.  
 특히 `APP_ENV=production`에서는 `INTERNAL_API_TOKEN` 미설정 시 앱이 fail-fast로 기동을 중단합니다.
@@ -35,13 +35,11 @@ Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
 - `TELEGRAM_WEBHOOK_SECRET` 선택적으로 사용 가능
 - 트리거 키워드는 정규화/금칙어 검사 수행
 
-## 수동 승인 모드 (Studio Console)
+## 실행 모드
 
-- 트리거 payload에서 `execution_mode=manual` 지원
-- 수동 모드에서는 승인 가능한 단계에서 일시정지 후 `waiting_for_stage` 저장
-- 승인 재개 API:
-  - `POST /api/v1/pipelines/{pipeline_id}/approvals`
-  - body: `{ "stage": "plan|style|build|qa|publish|echo" }`
+- `execution_mode`는 `auto`만 허용
+- 승인 루프는 제거되었고 `/approvals`는 410으로 응답합니다.
+- 운영 제어는 `pause/resume/cancel/retry`만 지원합니다.
 
 ## Publish 플로우
 
@@ -98,10 +96,14 @@ cp .env.example .env
 - X 포스팅은 일일 쿼터 + 실패 시 당일 중단 정책 적용
 - Archive 쓰기는 allowlist 확장자/경로 정책을 적용하고 경로 우회(`..`) 및 과대 파일을 차단
 - QA는 Playwright 스모크체크 + 품질 게이트(`QA_MIN_QUALITY_SCORE`) 적용
+- QA 기본 정책은 **soft-gate**입니다.
+  - 런타임/품질 미달 항목은 `qa_improvement_queue`로 누적됩니다.
+  - 퍼블리시 차단은 시스템 치명 오류(artifact/storage 실패)만 허용됩니다.
+  - 운영 중 강제 하드게이트가 필요하면 `QA_HARD_GATE=1` 사용
 - Builder는 현재 단일 후보(1개) 생성 모드로 동작하며, 후보 다중 생성 루프는 비활성화
 - Builder는 최근 성공/실패 로그를 기반으로 자산 메모리(retriever)를 적용하며, 필요 시 `BUILDER_ASSET_MEMORY_ENABLED=false`로 즉시 비활성화 가능
 - Asset Registry(`public.asset_registry`)가 존재하면 retriever는 로그 기반 대신 DB 누적 자산 데이터를 우선 사용
-- Sentinel 단계는 Builder runtime guard가 통과한 경우 `runtime_console_error`를 경고로 완화하고 품질 게이트를 계속 평가
+- 삭제 API는 archive 삭제 실패를 warning으로 반환하고 DB/Storage 삭제를 우선 완료합니다.
 - 로그 보존/삭제 운영 기준은 `../ops/log-retention-policy.md` 정책 문서 준수
 - Supabase 보존 함수/집계 뷰 SQL은 `supabase/log_retention.sql` 참고
 - Asset Registry additive migration SQL은 `supabase/asset_registry.sql` 참고

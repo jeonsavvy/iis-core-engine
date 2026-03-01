@@ -74,7 +74,7 @@ def apply_operator_control_gate(
 
     if pause_requested:
         state["status"] = PipelineStatus.SKIPPED
-        state["reason"] = f"awaiting_approval:{stage.value}"
+        state["reason"] = "paused_by_operator"
         state["needs_rebuild"] = False
         return append_log(
             state,
