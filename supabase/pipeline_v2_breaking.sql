@@ -10,6 +10,12 @@ create table if not exists public.pipeline_logs_backup_20260301 as
 select *
 from public.pipeline_logs;
 
+-- Backup table keeps historical rows only; cast enum columns to text
+-- so v1 enum types can be dropped safely without CASCADE side effects.
+alter table if exists public.pipeline_logs_backup_20260301
+  alter column stage type text using stage::text,
+  alter column agent_name type text using agent_name::text;
+
 -- 2) Convert enum columns to text temporarily
 alter table public.pipeline_logs
   alter column stage type text using stage::text,
