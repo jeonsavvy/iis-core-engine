@@ -64,7 +64,7 @@ jobs:
           printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           if ! ssh-keyscan -T 10 -p "${DEPLOY_PORT:-22}" "${DEPLOY_HOST}" >> ~/.ssh/known_hosts; then
-            if [[ "${DEPLOY_REQUIRED:-false}" == "true" ]]; then
+            if [[ "${DEPLOY_REQUIRED:-true}" == "true" ]]; then
               echo "SSH host key scan failed and BACKEND_DEPLOY_REQUIRED=true."
               exit 1
             fi
@@ -78,7 +78,7 @@ jobs:
           set -euo pipefail
           if ! ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "bash -lc 'set -euo pipefail; cd \"${DEPLOY_PATH:-/opt/iis-core-engine}\"; git fetch --prune origin main; if git show-ref --verify --quiet refs/heads/main; then git checkout main; else git checkout -b main origin/main; fi; git pull --ff-only origin main; chmod +x scripts/deploy_remote.sh; scripts/deploy_remote.sh \"${DEPLOY_PATH:-/opt/iis-core-engine}\" main'"; then
-            if [[ "${DEPLOY_REQUIRED:-false}" == "true" ]]; then
+            if [[ "${DEPLOY_REQUIRED:-true}" == "true" ]]; then
               echo "Deploy SSH command failed and BACKEND_DEPLOY_REQUIRED=true."
               exit 1
             fi
