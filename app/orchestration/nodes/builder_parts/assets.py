@@ -342,13 +342,47 @@ def _build_hybrid_asset_bank(
     core_loop_type: str,
     asset_pack: dict[str, str],
     art_direction_contract: dict[str, object] | None = None,
+    retrieval_profile: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, object]]:
     variants = _build_asset_variant_candidates(
         core_loop_type=core_loop_type,
         asset_pack=asset_pack,
         art_direction_contract=art_direction_contract,
     )
-    selected_variant = max(variants, key=lambda row: float(row.get("score", 0.0)))
+    retrieval = retrieval_profile if isinstance(retrieval_profile, dict) else {}
+    preferred_variant_id = str(retrieval.get("preferred_variant_id", "")).strip()
+    preferred_theme = str(retrieval.get("preferred_variant_theme", "")).strip()
+    failure_reasons = {
+        str(item).strip() for item in retrieval.get("failure_reasons", []) if str(item).strip()
+    } if isinstance(retrieval.get("failure_reasons"), list) else set()
+    failure_tokens = {
+        str(item).strip() for item in retrieval.get("failure_tokens", []) if str(item).strip()
+    } if isinstance(retrieval.get("failure_tokens"), list) else set()
+
+    enriched_variants: list[dict[str, object]] = []
+    for row in variants:
+        memory_bonus = 0.0
+        variant_id = str(row.get("id", ""))
+        theme = str(row.get("theme", ""))
+        if preferred_variant_id and variant_id == preferred_variant_id:
+            memory_bonus += 15.0
+        if preferred_theme and theme == preferred_theme:
+            memory_bonus += 8.0
+        if "visual_quality_below_threshold" in failure_reasons and theme in {"readability", "high-contrast"}:
+            memory_bonus += 4.0
+        if any(token in failure_tokens for token in {"contrast", "color_diversity", "readable_motion"}):
+            if theme in {"readability", "high-contrast"}:
+                memory_bonus += 3.0
+
+        enriched_variants.append(
+            {
+                **row,
+                "memory_bonus": round(memory_bonus, 4),
+                "composed_score": round(float(row.get("score", 0.0)) + memory_bonus, 4),
+            }
+        )
+
+    selected_variant = max(enriched_variants, key=lambda row: float(row.get("composed_score", 0.0)))
 
     player_primary = str(selected_variant.get("player_primary", asset_pack.get("player_primary", "#38bdf8")))
     player_secondary = str(asset_pack.get("player_secondary", "#0f172a"))
@@ -541,13 +575,18 @@ def _build_hybrid_asset_bank(
             "automated": True,
             "source": "builtin_svg_asset_pipeline",
             "profile": str((art_direction_contract or {}).get("asset_detail_tier", "enhanced")),
-            "variant_count": len(variants),
+            "variant_count": len(enriched_variants),
             "selected_variant": str(selected_variant.get("id", "baseline-balanced")),
             "selected_theme": str(selected_variant.get("theme", "balanced")),
+            "selected_score": float(selected_variant.get("score", 0.0)),
+            "selected_composed_score": float(selected_variant.get("composed_score", selected_variant.get("score", 0.0))),
+            "selected_memory_bonus": float(selected_variant.get("memory_bonus", 0.0)),
             "steps": [
                 "derive_contract",
+                "retrieve_prior_signals",
                 "sample_visual_variants",
                 "score_readability_contrast",
+                "compose_variant_with_memory",
                 "select_best_variant",
                 "compile_svg_pack",
             ],
@@ -556,9 +595,20 @@ def _build_hybrid_asset_bank(
                     "id": str(row.get("id", f"variant-{index + 1}")),
                     "theme": str(row.get("theme", "balanced")),
                     "score": float(row.get("score", 0.0)),
+                    "memory_bonus": float(row.get("memory_bonus", 0.0)),
+                    "composed_score": float(row.get("composed_score", row.get("score", 0.0))),
                 }
-                for index, row in enumerate(variants)
+                for index, row in enumerate(enriched_variants)
             ],
+            "retriever": {
+                "enabled": bool(preferred_variant_id or preferred_theme or failure_reasons or failure_tokens),
+                "source": str(retrieval.get("source", "pipeline_logs_v1") or "pipeline_logs_v1"),
+                "preferred_variant_id": preferred_variant_id or None,
+                "preferred_variant_theme": preferred_theme or None,
+                "failure_reasons": sorted(failure_reasons),
+                "failure_tokens": sorted(failure_tokens),
+                "sample_size": int(retrieval.get("sample_size", 0) or 0),
+            },
         },
         "contract": {
             "min_image_assets": 5,

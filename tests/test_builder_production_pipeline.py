@@ -304,3 +304,44 @@ def test_build_production_artifact_applies_rebuild_feedback_hint(monkeypatch) ->
     assert vertex.generate_variation_hints
     assert "Prior QA runtime failure detected" in vertex.generate_variation_hints[0]
     assert "immediate_game_over_overlay" in vertex.generate_variation_hints[0]
+
+
+def test_build_production_artifact_applies_asset_memory_hint(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    deps = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_FakeQualityService(smoke_ok=True),
+    )
+    state = _make_state()
+    result = build_production_artifact(
+        state=state,
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+        memory_hint="Reuse proven asset pack arcade-pack. Avoid recurrent QA failures: visual_quality_below_threshold.",
+        memory_tokens=["visual_quality_below_threshold", "contrast"],
+    )
+
+    assert result.metadata["memory_hint_applied"] is True
+    assert "visual_quality_below_threshold" in result.metadata["memory_tokens"]
+    assert vertex.generate_variation_hints
+    assert "Reuse proven asset pack arcade-pack." in vertex.generate_variation_hints[0]

@@ -244,3 +244,29 @@ def test_hybrid_asset_bank_applies_contract_variant_count() -> None:
     assert isinstance(pipeline_meta, dict)
     assert int(pipeline_meta.get("variant_count", 0)) == 5
     assert pipeline_meta.get("profile") == "cinematic"
+
+
+def test_hybrid_asset_bank_applies_retriever_bias_for_visual_failures() -> None:
+    mode = "webgl_three_runner"
+    asset_pack = _resolve_asset_pack(core_loop_type=mode, palette=["#22c55e", "#10162c", "#60a5fa", "#f43f5e"])
+    _, runtime_manifest = _build_hybrid_asset_bank(
+        slug="retriever-memory",
+        core_loop_type=mode,
+        asset_pack=asset_pack,
+        art_direction_contract={"asset_variant_count": 5},
+        retrieval_profile={
+            "source": "pipeline_logs_v1",
+            "preferred_variant_id": "clarity-first",
+            "preferred_variant_theme": "readability",
+            "failure_reasons": ["visual_quality_below_threshold"],
+            "failure_tokens": ["contrast"],
+            "sample_size": 4,
+        },
+    )
+    pipeline_meta = runtime_manifest.get("asset_pipeline")
+    assert isinstance(pipeline_meta, dict)
+    assert pipeline_meta.get("selected_variant") == "clarity-first"
+    retriever = pipeline_meta.get("retriever")
+    assert isinstance(retriever, dict)
+    assert retriever.get("enabled") is True
+    assert retriever.get("preferred_variant_id") == "clarity-first"

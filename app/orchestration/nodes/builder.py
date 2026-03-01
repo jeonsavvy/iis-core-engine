@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
+from app.orchestration.nodes.builder_parts.asset_memory import collect_asset_memory_context
 from app.orchestration.nodes.builder_parts.assets import _build_hybrid_asset_bank, _resolve_asset_pack
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
@@ -107,6 +108,27 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     asset_pack = _resolve_asset_pack(core_loop_type=core_loop_type, palette=palette)
+    asset_memory_context = collect_asset_memory_context(
+        state=state,
+        deps=deps,
+        core_loop_type=core_loop_type,
+    )
+    state["outputs"]["asset_memory_context"] = asset_memory_context.registry_snapshot
+
+    append_log(
+        state,
+        stage=PipelineStage.BUILD,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.BUILDER,
+        message="Asset memory retriever composed prior successes/failures.",
+        metadata={
+            "core_loop_type": core_loop_type,
+            "asset_memory_hint_applied": bool(asset_memory_context.hint),
+            "asset_memory_profile": asset_memory_context.retrieval_profile,
+            "asset_memory_snapshot": asset_memory_context.registry_snapshot,
+        },
+    )
+
     art_direction_contract = state["outputs"].get("art_direction_contract")
     if not isinstance(art_direction_contract, dict):
         art_direction_contract = {}
@@ -116,6 +138,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         core_loop_type=core_loop_type,
         asset_pack=asset_pack,
         art_direction_contract=art_direction_contract,
+        retrieval_profile=asset_memory_context.retrieval_profile,
     )
     contract = runtime_asset_manifest.get("contract")
     if isinstance(contract, dict):
@@ -163,6 +186,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         asset_pack=asset_pack,
         asset_bank_files=asset_bank_files,
         runtime_asset_manifest=runtime_asset_manifest,
+        memory_hint=asset_memory_context.hint,
+        memory_tokens=asset_memory_context.recurring_failures,
     )
     build_artifact = production_result.build_artifact
 

@@ -113,6 +113,8 @@ def build_production_artifact(
     asset_pack: dict[str, Any],
     asset_bank_files: list[dict[str, str]],
     runtime_asset_manifest: dict[str, Any],
+    memory_hint: str = "",
+    memory_tokens: list[str] | None = None,
 ) -> ProductionBuildResult:
     configured_candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     candidate_count = 1
@@ -133,7 +135,12 @@ def build_production_artifact(
                 + ". Improve contrast, color diversity, edge definition, and readable motion cues."
             )
 
-    combined_feedback_hint = " ".join(chunk for chunk in (rebuild_feedback_hint, visual_feedback_hint) if chunk).strip()
+    normalized_memory_hint = memory_hint.strip()
+    memory_feedback_tokens = [str(item).strip() for item in (memory_tokens or []) if str(item).strip()]
+
+    combined_feedback_hint = " ".join(
+        chunk for chunk in (rebuild_feedback_hint, visual_feedback_hint, normalized_memory_hint) if chunk
+    ).strip()
 
     append_log(
         state,
@@ -151,6 +158,8 @@ def build_production_artifact(
             "rebuild_feedback_tokens": rebuild_feedback_tokens,
             "visual_feedback_hint_applied": bool(visual_feedback_hint),
             "visual_feedback_failed_checks": visual_feedback_failed_checks,
+            "memory_hint_applied": bool(normalized_memory_hint),
+            "memory_feedback_tokens": memory_feedback_tokens,
         },
     )
 
@@ -457,6 +466,16 @@ def build_production_artifact(
         "builder_strategy": builder_strategy,
         "genre_engine_selected": core_loop_type,
         "asset_pack": asset_pack["name"],
+        "asset_pipeline_selected_variant": (
+            runtime_asset_manifest.get("asset_pipeline", {}).get("selected_variant")
+            if isinstance(runtime_asset_manifest.get("asset_pipeline"), dict)
+            else None
+        ),
+        "asset_pipeline_selected_theme": (
+            runtime_asset_manifest.get("asset_pipeline", {}).get("selected_theme")
+            if isinstance(runtime_asset_manifest.get("asset_pipeline"), dict)
+            else None
+        ),
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "configured_candidate_count": configured_candidate_count,
         "candidate_count": candidate_count,
@@ -469,6 +488,8 @@ def build_production_artifact(
         "final_composite_score": final_composite_score,
         "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
         "rebuild_feedback_tokens": rebuild_feedback_tokens,
+        "memory_hint_applied": bool(normalized_memory_hint),
+        "memory_tokens": memory_feedback_tokens,
         "polish_applied": use_polished,
         "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
         "polish_model": polish_result.meta.get("model"),
