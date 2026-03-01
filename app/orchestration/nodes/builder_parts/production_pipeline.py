@@ -11,6 +11,7 @@ from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+from app.services.quality_types import GameplayGateResult, QualityGateResult, SmokeCheckResult
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,157 @@ class ProductionBuildResult:
     build_artifact: BuildArtifactPayload
     selected_generation_meta: dict[str, Any]
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ArtifactAssessment:
+    html: str
+    quality: QualityGateResult
+    gameplay: GameplayGateResult
+    smoke: SmokeCheckResult
+    visual: QualityGateResult
+    builder_score: float
+
+
+def _coerce_float(value: object, *, fallback: float) -> float:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return float(text)
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _coerce_int(value: object, *, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return int(float(text))
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _evaluate_visual_or_fallback(
+    *,
+    deps: NodeDependencies,
+    visual_metrics: dict[str, float] | None,
+    core_loop_type: str,
+) -> QualityGateResult:
+    evaluate_visual = getattr(deps.quality_service, "evaluate_visual_gate", None)
+    if callable(evaluate_visual):
+        evaluated = evaluate_visual(visual_metrics, genre_engine=core_loop_type)
+        if isinstance(evaluated, QualityGateResult):
+            return evaluated
+    has_metrics = bool(visual_metrics)
+    fallback_score = 70 if has_metrics else 45
+    return QualityGateResult(
+        ok=has_metrics,
+        score=fallback_score,
+        threshold=50,
+        failed_checks=[] if has_metrics else ["visual_metrics_missing"],
+        checks={"visual_fallback": has_metrics},
+    )
+
+
+def _compose_builder_score(
+    *,
+    quality_score: int,
+    gameplay_score: int,
+    visual_score: int,
+    smoke_ok: bool,
+) -> float:
+    score = (quality_score * 0.32) + (gameplay_score * 0.46) + (visual_score * 0.22)
+    if not smoke_ok:
+        score -= 22.0
+    return round(max(0.0, score), 2)
+
+
+def _build_builder_refinement_hint(
+    *,
+    keyword: str,
+    core_loop_type: str,
+    quality: QualityGateResult,
+    gameplay: GameplayGateResult,
+    visual: QualityGateResult,
+    smoke: SmokeCheckResult,
+) -> str:
+    parts: list[str] = [
+        "Strengthen gameplay depth and visual readability for this build.",
+        "Avoid primitive rectangle-only silhouettes; use layered sprites, distinct character proportions, and impact effects.",
+        "Keep the runtime full-screen in embedded iframe with stable 16:9 stage composition and no clipped canvas.",
+        f"Honor requested intent from keyword: {keyword}.",
+        f"Core loop must remain consistent with mode {core_loop_type}.",
+    ]
+    if quality.failed_checks:
+        parts.append(f"Quality gaps: {', '.join(quality.failed_checks[:6])}.")
+    if gameplay.failed_checks:
+        parts.append(f"Gameplay gaps: {', '.join(gameplay.failed_checks[:6])}.")
+    if visual.failed_checks:
+        parts.append(f"Visual gaps: {', '.join(visual.failed_checks[:6])}.")
+    if smoke.reason:
+        parts.append(f"Runtime smoke note: {smoke.reason}.")
+    return " ".join(parts)
+
+
+def _assess_artifact_quality(
+    *,
+    deps: NodeDependencies,
+    html_content: str,
+    design_spec: dict[str, Any],
+    genre: str,
+    core_loop_type: str,
+    keyword: str,
+    artifact_files: list[dict[str, str]],
+    slug: str,
+) -> _ArtifactAssessment:
+    quality = deps.quality_service.evaluate_quality_contract(html_content, design_spec=design_spec)
+    gameplay = deps.quality_service.evaluate_gameplay_gate(
+        html_content,
+        design_spec=design_spec,
+        genre=genre,
+        genre_engine=core_loop_type,
+        keyword=keyword,
+    )
+    smoke = deps.quality_service.run_smoke_check(
+        html_content,
+        artifact_files=artifact_files,
+        entrypoint_path=f"games/{slug}/index.html",
+    )
+    visual = _evaluate_visual_or_fallback(
+        deps=deps,
+        visual_metrics=smoke.visual_metrics,
+        core_loop_type=core_loop_type,
+    )
+    score = _compose_builder_score(
+        quality_score=quality.score,
+        gameplay_score=gameplay.score,
+        visual_score=visual.score,
+        smoke_ok=smoke.ok,
+    )
+    return _ArtifactAssessment(
+        html=html_content,
+        quality=quality,
+        gameplay=gameplay,
+        smoke=smoke,
+        visual=visual,
+        builder_score=score,
+    )
 
 
 def _string_list(value: object) -> list[str]:
@@ -254,38 +406,41 @@ def build_production_artifact(
                     "reason": codegen_result.meta.get("reason"),
                 }
             )
-        base_quality_probe = deps.quality_service.evaluate_quality_contract(base_candidate_html, design_spec=design_spec_dump)
-        base_gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
-            base_candidate_html,
+        base_assessment = _assess_artifact_quality(
+            deps=deps,
+            html_content=base_candidate_html,
             design_spec=design_spec_dump,
             genre=genre,
-            genre_engine=core_loop_type,
+            core_loop_type=core_loop_type,
             keyword=state["keyword"],
+            artifact_files=asset_bank_files,
+            slug=slug,
         )
         base_composite_score = _candidate_composite_score(
-            quality_score=base_quality_probe.score,
-            gameplay_score=base_gameplay_probe.score,
-            quality_ok=base_quality_probe.ok,
-            gameplay_ok=base_gameplay_probe.ok,
+            quality_score=base_assessment.quality.score,
+            gameplay_score=base_assessment.gameplay.score,
+            quality_ok=base_assessment.quality.ok,
+            gameplay_ok=base_assessment.gameplay.ok,
         )
-        quality_probe = deps.quality_service.evaluate_quality_contract(candidate_html, design_spec=design_spec_dump)
-        gameplay_probe = deps.quality_service.evaluate_gameplay_gate(
-            candidate_html,
+        candidate_assessment = _assess_artifact_quality(
+            deps=deps,
+            html_content=candidate_html,
             design_spec=design_spec_dump,
             genre=genre,
-            genre_engine=core_loop_type,
+            core_loop_type=core_loop_type,
             keyword=state["keyword"],
+            artifact_files=asset_bank_files,
+            slug=slug,
         )
         composite_score = _candidate_composite_score(
-            quality_score=quality_probe.score,
-            gameplay_score=gameplay_probe.score,
-            quality_ok=quality_probe.ok,
-            gameplay_ok=gameplay_probe.ok,
+            quality_score=candidate_assessment.quality.score,
+            gameplay_score=candidate_assessment.gameplay.score,
+            quality_ok=candidate_assessment.quality.ok,
+            gameplay_ok=candidate_assessment.gameplay.ok,
         )
         if base_composite_score > composite_score:
             candidate_html = base_candidate_html
-            quality_probe = base_quality_probe
-            gameplay_probe = base_gameplay_probe
+            candidate_assessment = base_assessment
             composite_score = base_composite_score
             codegen_meta_rows.append(
                 {
@@ -304,10 +459,15 @@ def build_production_artifact(
             "artifact_html": candidate_html,
             "baseline_artifact_html": base_candidate_html,
             "generation_meta": generated_config.meta,
-            "quality_ok": quality_probe.ok,
-            "quality_score": quality_probe.score,
-            "gameplay_ok": gameplay_probe.ok,
-            "gameplay_score": gameplay_probe.score,
+            "quality_ok": candidate_assessment.quality.ok,
+            "quality_score": candidate_assessment.quality.score,
+            "gameplay_ok": candidate_assessment.gameplay.ok,
+            "gameplay_score": candidate_assessment.gameplay.score,
+            "visual_ok": candidate_assessment.visual.ok,
+            "visual_score": candidate_assessment.visual.score,
+            "smoke_ok": candidate_assessment.smoke.ok,
+            "smoke_reason": candidate_assessment.smoke.reason,
+            "builder_quality_score": candidate_assessment.builder_score,
             "composite_score": composite_score,
             "asset_pack": asset_pack["name"],
             "codegen_passes": codegen_meta_rows,
@@ -323,8 +483,11 @@ def build_production_artifact(
             metadata={
                 "iteration": state["build_iteration"],
                 "candidate_index": index,
-                "quality_score": quality_probe.score,
-                "gameplay_score": gameplay_probe.score,
+                "quality_score": candidate_assessment.quality.score,
+                "gameplay_score": candidate_assessment.gameplay.score,
+                "visual_score": candidate_assessment.visual.score,
+                "smoke_ok": candidate_assessment.smoke.ok,
+                "builder_quality_score": candidate_assessment.builder_score,
                 "composite_score": composite_score,
                 "generation_source": generated_config.meta.get("generation_source", "stub"),
                 "model": generated_config.meta.get("model"),
@@ -336,7 +499,12 @@ def build_production_artifact(
 
     best_candidate = max(
         candidate_rows,
-        key=lambda row: (float(row["composite_score"]), int(row["gameplay_score"]), int(row["quality_score"])),
+        key=lambda row: (
+            float(row.get("builder_quality_score", 0.0)),
+            float(row["composite_score"]),
+            int(row["gameplay_score"]),
+            int(row["quality_score"]),
+        ),
     )
     selected_generation_meta = dict(best_candidate.get("generation_meta", {}))
     selected_html = str(best_candidate["artifact_html"])
@@ -355,6 +523,27 @@ def build_production_artifact(
         },
     )
 
+    selected_assessment = _assess_artifact_quality(
+        deps=deps,
+        html_content=selected_html,
+        design_spec=design_spec_dump,
+        genre=genre,
+        core_loop_type=core_loop_type,
+        keyword=state["keyword"],
+        artifact_files=asset_bank_files,
+        slug=slug,
+    )
+    baseline_assessment = _assess_artifact_quality(
+        deps=deps,
+        html_content=selected_baseline_html,
+        design_spec=design_spec_dump,
+        genre=genre,
+        core_loop_type=core_loop_type,
+        keyword=state["keyword"],
+        artifact_files=asset_bank_files,
+        slug=slug,
+    )
+
     polish_result = deps.vertex_service.polish_hybrid_artifact(
         keyword=state["keyword"],
         title=title,
@@ -362,62 +551,135 @@ def build_production_artifact(
         html_content=selected_html,
     )
     polished_html = str(polish_result.payload.get("artifact_html", "")).strip() or selected_html
-    polished_quality = deps.quality_service.evaluate_quality_contract(polished_html, design_spec=design_spec_dump)
-    polished_gameplay = deps.quality_service.evaluate_gameplay_gate(
-        polished_html,
+    polished_assessment = _assess_artifact_quality(
+        deps=deps,
+        html_content=polished_html,
         design_spec=design_spec_dump,
         genre=genre,
-        genre_engine=core_loop_type,
+        core_loop_type=core_loop_type,
         keyword=state["keyword"],
+        artifact_files=asset_bank_files,
+        slug=slug,
     )
-    polished_composite = _candidate_composite_score(
-        quality_score=polished_quality.score,
-        gameplay_score=polished_gameplay.score,
-        quality_ok=polished_quality.ok,
-        gameplay_ok=polished_gameplay.ok,
-    )
-    selected_composite = float(best_candidate["composite_score"])
-    use_polished = polished_composite >= (selected_composite - 2.0)
-    if polished_quality.ok and polished_gameplay.ok:
-        use_polished = True
-    artifact_html = polished_html if use_polished else selected_html
-
-    final_quality_score = polished_quality.score if use_polished else int(best_candidate["quality_score"])
-    final_gameplay_score = polished_gameplay.score if use_polished else int(best_candidate["gameplay_score"])
-    final_composite_score = polished_composite if use_polished else selected_composite
-
-    runtime_guard_candidates = [
-        ("polished", artifact_html),
-        ("selected", selected_html),
-        ("baseline", selected_baseline_html),
+    runtime_guard_candidates: list[tuple[str, _ArtifactAssessment]] = [
+        ("polished", polished_assessment),
+        ("selected", selected_assessment),
+        ("baseline", baseline_assessment),
     ]
-    runtime_guard_result: dict[str, Any] = {"chosen": None, "reason": None, "probes": []}
-    for label, candidate_html in runtime_guard_candidates:
-        smoke_probe = deps.quality_service.run_smoke_check(
-            candidate_html,
-            artifact_files=asset_bank_files,
-            entrypoint_path=f"games/{slug}/index.html",
-        )
+    runtime_guard_result: dict[str, Any] = {"chosen": None, "reason": None, "probes": [], "refinement": []}
+    preferred_label: str | None = None
+    preferred_assessment: _ArtifactAssessment | None = None
+    for label, assessment in runtime_guard_candidates:
         runtime_guard_result["probes"].append(
             {
                 "label": label,
-                "ok": bool(smoke_probe.ok),
-                "reason": smoke_probe.reason,
-                "console_errors": smoke_probe.console_errors or [],
-                "fatal_errors": smoke_probe.fatal_errors or [],
-                "non_fatal_warnings": smoke_probe.non_fatal_warnings or [],
+                "ok": bool(assessment.smoke.ok),
+                "reason": assessment.smoke.reason,
+                "console_errors": assessment.smoke.console_errors or [],
+                "fatal_errors": assessment.smoke.fatal_errors or [],
+                "non_fatal_warnings": assessment.smoke.non_fatal_warnings or [],
+                "quality_score": assessment.quality.score,
+                "gameplay_score": assessment.gameplay.score,
+                "visual_score": assessment.visual.score,
+                "builder_quality_score": assessment.builder_score,
             }
         )
-        if smoke_probe.ok:
-            artifact_html = candidate_html
-            runtime_guard_result["chosen"] = label
-            runtime_guard_result["reason"] = smoke_probe.reason
-            break
+        if assessment.smoke.ok and (
+            preferred_assessment is None or assessment.builder_score > preferred_assessment.builder_score
+        ):
+            preferred_label = label
+            preferred_assessment = assessment
 
-    if runtime_guard_result["chosen"] is None:
-        artifact_html = selected_baseline_html
-        runtime_guard_result["chosen"] = "baseline_force"
+    if preferred_assessment is None:
+        preferred_label = "baseline_force"
+        preferred_assessment = baseline_assessment
         runtime_guard_result["reason"] = "builder_runtime_guard_all_failed"
+    else:
+        runtime_guard_result["reason"] = preferred_assessment.smoke.reason
+    runtime_guard_result["chosen"] = preferred_label
+
+    refinement_round_limit = _coerce_int(
+        getattr(deps.vertex_service.settings, "builder_refinement_rounds", 1),
+        fallback=1,
+    )
+    refinement_round_limit = max(0, min(refinement_round_limit, 3))
+    refinement_target_score = _coerce_float(
+        getattr(deps.vertex_service.settings, "builder_refinement_target_score", 78.0),
+        fallback=78.0,
+    )
+    refinement_target_score = max(0.0, min(refinement_target_score, 100.0))
+    refinement_rounds_executed = 0
+
+    if preferred_assessment.smoke.ok and preferred_assessment.builder_score < refinement_target_score:
+        for round_index in range(1, refinement_round_limit + 1):
+            refinement_rounds_executed += 1
+            refinement_hint = _build_builder_refinement_hint(
+                keyword=state["keyword"],
+                core_loop_type=core_loop_type,
+                quality=preferred_assessment.quality,
+                gameplay=preferred_assessment.gameplay,
+                visual=preferred_assessment.visual,
+                smoke=preferred_assessment.smoke,
+            )
+            refinement_result = deps.vertex_service.generate_codegen_candidate_artifact(
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                objective=gdd.objective,
+                core_loop_type=core_loop_type,
+                variation_hint=refinement_hint,
+                design_spec=design_spec_dump,
+                asset_pack=asset_pack,
+                html_content=preferred_assessment.html,
+            )
+            refined_html = str(refinement_result.payload.get("artifact_html", "")).strip() or preferred_assessment.html
+            refined_assessment = _assess_artifact_quality(
+                deps=deps,
+                html_content=refined_html,
+                design_spec=design_spec_dump,
+                genre=genre,
+                core_loop_type=core_loop_type,
+                keyword=state["keyword"],
+                artifact_files=asset_bank_files,
+                slug=slug,
+            )
+            promoted = refined_assessment.smoke.ok and refined_assessment.builder_score > preferred_assessment.builder_score
+            runtime_guard_result["refinement"].append(
+                {
+                    "round": round_index,
+                    "promoted": promoted,
+                    "quality_score": refined_assessment.quality.score,
+                    "gameplay_score": refined_assessment.gameplay.score,
+                    "visual_score": refined_assessment.visual.score,
+                    "builder_quality_score": refined_assessment.builder_score,
+                    "smoke_ok": refined_assessment.smoke.ok,
+                    "smoke_reason": refined_assessment.smoke.reason,
+                    "generation_source": refinement_result.meta.get("generation_source", "stub"),
+                    "model": refinement_result.meta.get("model"),
+                    "reason": refinement_result.meta.get("reason"),
+                }
+            )
+            if promoted:
+                preferred_assessment = refined_assessment
+                preferred_label = f"refined_{round_index}"
+                runtime_guard_result["chosen"] = preferred_label
+                runtime_guard_result["reason"] = refined_assessment.smoke.reason
+                if preferred_assessment.builder_score >= refinement_target_score:
+                    break
+
+    artifact_html = preferred_assessment.html
+    final_quality_score = preferred_assessment.quality.score
+    final_gameplay_score = preferred_assessment.gameplay.score
+    final_visual_score = preferred_assessment.visual.score
+    final_builder_quality_score = preferred_assessment.builder_score
+    final_composite_score = _candidate_composite_score(
+        quality_score=final_quality_score,
+        gameplay_score=final_gameplay_score,
+        quality_ok=preferred_assessment.quality.ok,
+        gameplay_ok=preferred_assessment.gameplay.ok,
+    )
+    selected_composite = float(best_candidate["composite_score"])
+    use_polished = preferred_label == "polished"
 
     builder_strategy = "production_v3_candidates_codegen_qa_polish"
     candidate_scoreboard = [
@@ -425,6 +687,10 @@ def build_production_artifact(
             "index": int(row["index"]),
             "quality_score": int(row["quality_score"]),
             "gameplay_score": int(row["gameplay_score"]),
+            "visual_score": int(row.get("visual_score", 0)),
+            "smoke_ok": bool(row.get("smoke_ok")),
+            "smoke_reason": row.get("smoke_reason"),
+            "builder_quality_score": float(row.get("builder_quality_score", 0.0)),
             "composite_score": float(row["composite_score"]),
             "quality_ok": bool(row["quality_ok"]),
             "gameplay_ok": bool(row["gameplay_ok"]),
@@ -524,12 +790,20 @@ def build_production_artifact(
         "selected_candidate_score": selected_composite,
         "final_quality_score": final_quality_score,
         "final_gameplay_score": final_gameplay_score,
+        "final_visual_score": final_visual_score,
+        "final_builder_quality_score": final_builder_quality_score,
+        "final_smoke_ok": preferred_assessment.smoke.ok,
+        "final_smoke_reason": preferred_assessment.smoke.reason,
         "final_composite_score": final_composite_score,
         "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
         "rebuild_feedback_tokens": rebuild_feedback_tokens,
         "memory_hint_applied": bool(normalized_memory_hint),
         "memory_tokens": memory_feedback_tokens,
         "polish_applied": use_polished,
+        "final_variant_label": preferred_label,
+        "refinement_target_score": refinement_target_score,
+        "refinement_round_limit": refinement_round_limit,
+        "refinement_rounds_executed": refinement_rounds_executed,
         "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
         "polish_model": polish_result.meta.get("model"),
         "polish_reason": polish_result.meta.get("reason"),

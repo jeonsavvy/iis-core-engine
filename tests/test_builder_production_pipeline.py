@@ -400,3 +400,48 @@ def test_build_production_artifact_applies_asset_memory_hint(monkeypatch) -> Non
     assert "visual_quality_below_threshold" in result.metadata["memory_tokens"]
     assert vertex.generate_variation_hints
     assert "Reuse proven asset pack arcade-pack." in vertex.generate_variation_hints[0]
+
+
+def test_build_production_artifact_records_builder_refinement_attempts(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    vertex.settings.builder_refinement_rounds = 2
+    vertex.settings.builder_refinement_target_score = 90
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_FakeQualityService(smoke_ok=True),
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["refinement_rounds_executed"] == 2
+    runtime_guard = result.metadata["runtime_guard"]
+    assert isinstance(runtime_guard, dict)
+    refinement_rows = runtime_guard.get("refinement")
+    assert isinstance(refinement_rows, list)
+    assert len(refinement_rows) == 2
+    scoreboard = result.metadata["candidate_scoreboard"]
+    assert isinstance(scoreboard, list)
+    assert scoreboard and "builder_quality_score" in scoreboard[0]
