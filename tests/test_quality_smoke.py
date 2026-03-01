@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.services.quality_smoke import (
+    evaluate_runtime_liveness,
     is_non_fatal_request_failure,
     is_non_fatal_runtime_issue,
     prepare_smoke_workspace,
@@ -47,3 +48,56 @@ def test_non_fatal_issue_classifiers() -> None:
         url="https://example.com/app.js",
         error_text="timed out",
     )
+
+
+def test_runtime_liveness_detects_overlay_and_stuck_timer() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 60.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": True,
+            "timer_text": "Time: 60.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+    )
+
+    assert "immediate_game_over_overlay" in fatal
+    assert "timer_not_progressing" in fatal
+    assert warnings == []
+
+
+def test_runtime_liveness_flags_overflow_as_warning() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 60.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 58.4",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 1600,
+            "client_height": 720,
+        },
+    )
+
+    assert fatal == []
+    assert "runtime_layout_scroll_overflow" in warnings

@@ -14,7 +14,9 @@ from app.services.quality_gates import (
     evaluate_visual_gate as evaluate_visual_gate_gate,
 )
 from app.services.quality_smoke import (
+    capture_runtime_probe,
     capture_visual_metrics,
+    evaluate_runtime_liveness,
     is_non_fatal_request_failure,
     is_non_fatal_runtime_issue,
     prepare_smoke_workspace,
@@ -98,6 +100,16 @@ class QualityService:
 
                     page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
                     page.wait_for_timeout(300)
+                    probe_before = capture_runtime_probe(page)
+                    try:
+                        page.keyboard.press("ArrowUp")
+                    except Exception:
+                        non_fatal_warnings.append("input_probe_keypress_failed")
+                    page.wait_for_timeout(1200)
+                    probe_after = capture_runtime_probe(page)
+                    runtime_fatal, runtime_warnings = evaluate_runtime_liveness(before=probe_before, after=probe_after)
+                    fatal_errors.extend(runtime_fatal)
+                    non_fatal_warnings.extend(runtime_warnings)
 
                     try:
                         canvas = page.locator("canvas")

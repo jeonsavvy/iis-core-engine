@@ -235,9 +235,11 @@ def build_runtime_update_function_js() -> str:
         state.spawnTimer += dt;
         state.attackCooldown = Math.max(0, state.attackCooldown - dt);
         state.dashCooldown = Math.max(0, state.dashCooldown - dt);
+        state.run.spawnGraceSec = Math.max(0, Number(state.run.spawnGraceSec || 0) - dt);
         stepProgression(dt);
         const spawnRate = ((CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8))
           * Math.max(0.78, Number(state.run.synergy.spawnEase || 1));
+        const collisionEnabled = (state.run.spawnGraceSec || 0) <= 0;
 
         if (MODE_IS_FORMULA_CIRCUIT) {{
           const left = keys.has("ArrowLeft") || keys.has("a");
@@ -330,6 +332,10 @@ def build_runtime_update_function_js() -> str:
                   playSfx("boost");
                   burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.6, ASSET.boost_color, 14);
                 }} else {{
+                  if (!collisionEnabled) {{
+                    e.z = 2;
+                    continue;
+                  }}
                   const dangerScale = e.kind === "opponent_elite" ? 2 : 1;
                   state.hp -= dangerScale;
                   state.formula.overtakeChain = 0;
@@ -426,12 +432,20 @@ def build_runtime_update_function_js() -> str:
                   playSfx("boost");
                   burst(playerCx, playerCy - 10, ASSET.boost_color, 18);
                 }} else if (e.kind === "turbulence") {{
+                  if (!collisionEnabled) {{
+                    e.z = 2;
+                    continue;
+                  }}
                   state.run.shake = Math.max(state.run.shake, 0.26);
                   state.flight.stability = Math.max(0.28, state.flight.stability - 0.2);
                   state.score = Math.max(0, state.score - 8);
                   playSfx("damage");
                   burst(playerCx, playerCy, ASSET.enemy_primary, 12);
                 }} else {{
+                  if (!collisionEnabled) {{
+                    e.z = 2;
+                    continue;
+                  }}
                   state.hp -= 1;
                   state.flight.checkpointCombo = 0;
                   state.run.combo = 0;
@@ -525,6 +539,10 @@ def build_runtime_update_function_js() -> str:
                   playSfx("boost");
                   burst(state.player.x + state.player.w / 2, state.player.y + 4, ASSET.boost_color, 14);
                 }} else {{
+                  if (!collisionEnabled) {{
+                    e.z = 2;
+                    continue;
+                  }}
                   state.hp -= 1;
                   state.run.combo = 0;
                   state.score = Math.max(0, state.score - 15);

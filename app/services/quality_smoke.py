@@ -175,3 +175,117 @@ def capture_visual_metrics(page) -> dict[str, float] | None:
         except Exception:
             continue
     return metrics or None
+
+
+def capture_runtime_probe(page) -> dict[str, object] | None:
+    try:
+        probe = page.evaluate(
+            """
+            () => {
+              const overlay = document.getElementById("overlay");
+              const timerText = document.getElementById("timer")?.textContent ?? "";
+              const scoreText = document.getElementById("score")?.textContent ?? "";
+              const hpText = document.getElementById("hp")?.textContent ?? "";
+              const canvas = document.querySelector("canvas");
+              const root = document.documentElement;
+              return {
+                boot_ok: Boolean(window.__iis_game_boot_ok),
+                overlay_visible: Boolean(overlay && overlay.classList.contains("show")),
+                timer_text: String(timerText),
+                score_text: String(scoreText),
+                hp_text: String(hpText),
+                canvas_width: Number(canvas?.width || 0),
+                canvas_height: Number(canvas?.height || 0),
+                scroll_height: Number(root?.scrollHeight || 0),
+                client_height: Number(root?.clientHeight || 0),
+              };
+            }
+            """
+        )
+    except Exception:
+        return None
+    if not isinstance(probe, dict):
+        return None
+    normalized: dict[str, object] = {}
+    for key, value in probe.items():
+        normalized[str(key)] = value
+    return normalized
+
+
+def _extract_first_number(raw: object) -> float | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    number_chars: list[str] = []
+    has_dot = False
+    has_digit = False
+    for ch in text:
+        if ch.isdigit():
+            number_chars.append(ch)
+            has_digit = True
+            continue
+        if ch == "." and not has_dot and has_digit:
+            number_chars.append(ch)
+            has_dot = True
+            continue
+        if has_digit:
+            break
+    if not number_chars:
+        return None
+    try:
+        return float("".join(number_chars))
+    except Exception:
+        return None
+
+
+def _to_float(raw: object) -> float:
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except Exception:
+            return 0.0
+    return 0.0
+
+
+def evaluate_runtime_liveness(
+    *,
+    before: dict[str, object] | None,
+    after: dict[str, object] | None,
+) -> tuple[list[str], list[str]]:
+    fatal_errors: list[str] = []
+    warnings: list[str] = []
+
+    if not before or not after:
+        warnings.append("runtime_probe_unavailable")
+        return fatal_errors, warnings
+
+    if not bool(after.get("boot_ok")):
+        fatal_errors.append("boot_flag_missing")
+
+    if bool(after.get("overlay_visible")):
+        fatal_errors.append("immediate_game_over_overlay")
+
+    timer_before = _extract_first_number(before.get("timer_text"))
+    timer_after = _extract_first_number(after.get("timer_text"))
+    if timer_before is not None and timer_after is not None and timer_after >= timer_before:
+        fatal_errors.append("timer_not_progressing")
+
+    canvas_width = _to_float(after.get("canvas_width", 0))
+    canvas_height = _to_float(after.get("canvas_height", 0))
+
+    if canvas_width < 640 or canvas_height < 360:
+        fatal_errors.append("runtime_canvas_too_small")
+
+    scroll_height = _to_float(after.get("scroll_height", 0))
+    client_height = _to_float(after.get("client_height", 0))
+    if client_height > 0 and scroll_height > (client_height * 1.2):
+        warnings.append("runtime_layout_scroll_overflow")
+
+    return fatal_errors, warnings
