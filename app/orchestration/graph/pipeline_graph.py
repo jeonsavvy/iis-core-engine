@@ -45,6 +45,10 @@ def _route_after_qa_runtime(state: PipelineState) -> str:
 def _route_after_qa_quality(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
+    if state["needs_rebuild"]:
+        if state["qa_attempt"] >= state["max_qa_loops"]:
+            return "QaFailed"
+        return "Developer"
     return "Release"
 
 
@@ -114,6 +118,8 @@ def build_pipeline_graph(deps: NodeDependencies):
         "QaQuality",
         _route_after_qa_quality,
         {
+            "Developer": "Developer",
+            "QaFailed": "QaFailed",
             "Release": "Release",
             "End": END,
         },

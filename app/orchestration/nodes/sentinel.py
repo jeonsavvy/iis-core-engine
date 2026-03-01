@@ -81,7 +81,16 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         non_fatal_warnings = [str(item).strip() for item in smoke_result.non_fatal_warnings or [] if str(item).strip()]
         critical_failure = _is_critical_runtime_failure(reason=smoke_result.reason, fatal_errors=fatal_errors)
         state["needs_rebuild"] = critical_failure
-        state["outputs"].pop("qa_rebuild_feedback", None)
+        if critical_failure:
+            state["outputs"]["qa_rebuild_feedback"] = {
+                "gate": "runtime",
+                "reason": str(smoke_result.reason or "runtime_smoke_failed"),
+                "failed_checks": [],
+                "fatal_errors": fatal_errors,
+                "non_fatal_warnings": non_fatal_warnings,
+            }
+        else:
+            state["outputs"].pop("qa_rebuild_feedback", None)
         queued_items = state["outputs"].get("qa_improvement_items")
         improvement_items = [row for row in queued_items if isinstance(row, dict)] if isinstance(queued_items, list) else []
         improvement_items.append(

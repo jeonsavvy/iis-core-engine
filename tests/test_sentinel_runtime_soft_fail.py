@@ -46,8 +46,8 @@ class _RuntimeFailQualityService:
             ok=False,
             score=24,
             threshold=45,
-            failed_checks=["visual_palette_too_flat", "visual_shape_definition_too_low"],
-            checks={"visual_palette_too_flat": False, "visual_shape_definition_too_low": False},
+            failed_checks=["visual_contrast", "color_diversity"],
+            checks={"visual_contrast": False, "color_diversity": False},
         )
 
     def evaluate_artifact_contract(self, *_args, **_kwargs):
@@ -71,6 +71,37 @@ class _RuntimeCriticalFailQualityService(_RuntimeFailQualityService):
                 "motion_delta": 0.0009,
             },
         )
+
+
+class _GameplayCriticalQualityService(_RuntimeFailQualityService):
+    def run_smoke_check(self, *_args, **_kwargs):
+        return SmokeCheckResult(
+            ok=True,
+            reason=None,
+            fatal_errors=[],
+            non_fatal_warnings=[],
+            visual_metrics={
+                "canvas_width": 1280.0,
+                "canvas_height": 720.0,
+                "luminance_std": 38.0,
+                "non_dark_ratio": 0.41,
+                "color_bucket_count": 40.0,
+                "edge_energy": 0.052,
+                "motion_delta": 0.003,
+            },
+        )
+
+    def evaluate_gameplay_gate(self, *_args, **_kwargs):
+        return GameplayGateResult(
+            ok=False,
+            score=42,
+            threshold=55,
+            failed_checks=["missing_realtime_loop", "no_enemy_pressure"],
+            checks={"missing_realtime_loop": False, "no_enemy_pressure": False},
+        )
+
+    def evaluate_visual_gate(self, *_args, **_kwargs):
+        return QualityGateResult(ok=True, score=74, threshold=45, failed_checks=[], checks={"visual": True})
 
 
 class _PublisherStub:
@@ -167,4 +198,22 @@ def test_sentinel_runtime_critical_failure_requests_rebuild() -> None:
 
     assert result["status"] == PipelineStatus.RUNNING
     assert result["needs_rebuild"] is True
+    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
+    assert isinstance(rebuild_feedback, dict)
+    assert rebuild_feedback.get("gate") == "runtime"
+    assert any(log.status == PipelineStatus.RETRY and log.reason == "retry_builder" for log in result["logs"])
+
+
+def test_qa_quality_critical_failure_requests_rebuild() -> None:
+    state = _base_state()
+    deps = _deps_with_quality(_GameplayCriticalQualityService())
+
+    after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
+    result = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.RUNNING
+    assert result["needs_rebuild"] is True
+    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
+    assert isinstance(rebuild_feedback, dict)
+    assert rebuild_feedback.get("gate") == "gameplay"
     assert any(log.status == PipelineStatus.RETRY and log.reason == "retry_builder" for log in result["logs"])
