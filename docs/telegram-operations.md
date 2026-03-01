@@ -8,7 +8,7 @@
   2. chat id가 `TELEGRAM_ALLOWED_CHAT_IDS`에 포함
   3. user id가 `TELEGRAM_ALLOWED_USER_IDS`에 포함
 - 비인가 요청은 전부 차단되며 감사 로그(`admin_config`)로 남습니다.
-- 위험 명령은 `/confirm` 2단계 확인 전까지 실행되지 않습니다.
+- 위험 명령은 허용 상태(`TELEGRAM_ALLOW_DANGEROUS_COMMANDS=true`)에서 즉시 실행됩니다.
 
 ## 2) 환경변수
 
@@ -18,8 +18,6 @@
 - `TELEGRAM_ALLOWED_CHAT_IDS` (쉼표 구분)
 - `TELEGRAM_ALLOWED_USER_IDS` (쉼표 구분)
 - `TELEGRAM_ALLOW_DANGEROUS_COMMANDS` (`true`일 때만 위험 명령 허용)
-- `TELEGRAM_CONFIRM_TTL_SECONDS` (`30~600`)
-- `TELEGRAM_CONFIRM_SECRET` (없으면 webhook secret으로 서명)
 
 ## 3) 명령어
 
@@ -28,20 +26,18 @@
   - `/status <pipeline_id>`
   - `/approve <pipeline_id> <stage>`
   - `/logs <pipeline_id> [limit]`
-- 위험 명령 (항상 2단계 확인)
+- 위험 명령 (허용 시 즉시 실행)
   - `/retry <pipeline_id>`
   - `/cancel <pipeline_id>`
   - `/reset <pipeline_id>`
   - `/delete_game <game_id>`
-  - `/confirm <token>`
 
-## 4) 위험 명령 확인 플로우
+## 4) 위험 명령 실행 플로우
 
 1. 운영자가 `/retry ...` 등 위험 명령 전송
-2. 봇이 `telegram_confirm_required` 감사 로그 생성
-3. 봇이 `/confirm <token>` 안내 메시지 전송
-4. 운영자가 TTL 내 `/confirm <token>` 실행 시에만 실제 작업 수행
-5. 토큰 만료/서명 오류/user/chat 불일치 시 즉시 거부
+2. 봇이 권한(chat/user) 검증
+3. 검증 통과 시 즉시 실행
+4. `TELEGRAM_ALLOW_DANGEROUS_COMMANDS=false`면 즉시 차단
 
 ## 5) 차단/감사 reason 코드
 
@@ -51,11 +47,7 @@
 - `telegram_allowed_user_ids_missing`
 - `telegram_chat_not_allowed`
 - `telegram_user_not_allowed`
-- `telegram_confirm_required`
-- `confirm_signature_invalid`
-- `confirm_token_expired`
-- `confirm_chat_mismatch`
-- `confirm_user_mismatch`
+- `dangerous_commands_disabled`
 
 ## 6) 장애 대응
 
@@ -75,4 +67,4 @@
 - `/run` 실행 시 `trigger_source='telegram'` 확인
 - `/status`, `/approve`, `/logs` 정상 응답 확인
 - 비허용 user/chat 요청에서 `status=blocked` + 감사 로그 생성 확인
-- 위험 명령이 `/confirm` 없이는 실행되지 않는지 확인
+- 위험 명령이 허용 설정에서 즉시 실행되는지 확인

@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
-import time
-from typing import Any
 from uuid import UUID
 
 from app.core.config import Settings
@@ -124,43 +118,20 @@ class TelegramService:
             return TelegramWebhookResponse(status="blocked", detail="dangerous_commands_disabled")
 
         if command == "/retry":
-            return self._request_confirmation(
-                chat_id=chat_id,
-                user_id=user_id,
-                action="retry",
-                target=argument,
-                repository=repository,
-            )
+            return self._execute_retry(chat_id=chat_id, target=argument, repository=repository)
 
         if command == "/cancel":
-            return self._request_confirmation(
-                chat_id=chat_id,
-                user_id=user_id,
-                action="cancel",
-                target=argument,
-                repository=repository,
-            )
+            return self._execute_cancel(chat_id=chat_id, target=argument, repository=repository)
 
         if command == "/reset":
-            return self._request_confirmation(
-                chat_id=chat_id,
-                user_id=user_id,
-                action="reset",
-                target=argument,
-                repository=repository,
-            )
+            return self._execute_reset(chat_id=chat_id, target=argument, repository=repository)
 
         if command == "/delete_game":
-            return self._request_confirmation(
-                chat_id=chat_id,
-                user_id=user_id,
-                action="delete_game",
-                target=argument,
-                repository=repository,
-            )
+            return self._execute_delete_game(chat_id=chat_id, target=argument)
 
         if command == "/confirm":
-            return self._handle_confirm(chat_id=chat_id, user_id=user_id, token=argument, repository=repository)
+            self.send_message(chat_id, "confirm 명령은 제거되었습니다. 위험 명령은 즉시 실행됩니다.")
+            return TelegramWebhookResponse(status="blocked", detail="confirm_command_removed")
 
         self.send_message(
             chat_id,
@@ -176,9 +147,8 @@ class TelegramService:
             "- /status <pipeline_id>\n"
             "- /approve <pipeline_id> <stage>\n"
             "- /logs <pipeline_id> [limit]\n"
-            "- /retry|/cancel|/reset <pipeline_id> (확인 필요)\n"
-            "- /delete_game <game_id> (확인 필요)\n"
-            "- /confirm <token>"
+            "- /retry|/cancel|/reset <pipeline_id>\n"
+            "- /delete_game <game_id>"
         )
 
     def _handle_run(
@@ -274,100 +244,6 @@ class TelegramService:
             pipeline_id=str(pipeline_id),
             payload={"log_count": len(tail)},
         )
-
-    def _request_confirmation(
-        self,
-        *,
-        chat_id: str,
-        user_id: str,
-        action: str,
-        target: str,
-        repository: PipelineRepository,
-    ) -> TelegramWebhookResponse:
-        if not target.strip():
-            self.send_message(chat_id, f"Usage: /{action} <target_id>")
-            return TelegramWebhookResponse(status="invalid", detail=f"missing_target_for_{action}")
-
-        issued_at = int(time.time())
-        payload = {
-            "action": action,
-            "target": target.strip(),
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "iat": issued_at,
-            "exp": issued_at + int(self.settings.telegram_confirm_ttl_seconds),
-        }
-        token = self._encode_confirm_token(payload)
-        if not token:
-            self.send_message(chat_id, "confirm 토큰 생성 실패: TELEGRAM_CONFIRM_SECRET 또는 TELEGRAM_WEBHOOK_SECRET 필요")
-            return TelegramWebhookResponse(status="error", detail="confirm_secret_missing")
-
-        audit = repository.create_audit_entry(
-            source=TriggerSource.TELEGRAM,
-            keyword=f"[CONFIRM_REQUIRED] /{action} {target[:80]}",
-            reason="telegram_confirm_required",
-            metadata={"chat_id": chat_id, "user_id": user_id, "action": action, "target": target},
-        )
-
-        self.send_message(
-            chat_id,
-            "\n".join(
-                [
-                    f"확인 필요: action={action} target={target}",
-                    f"만료: {self.settings.telegram_confirm_ttl_seconds}초",
-                    f"실행 명령: /confirm {token}",
-                ]
-            ),
-        )
-        return TelegramWebhookResponse(
-            status="confirm_required",
-            pipeline_id=str(audit.pipeline_id),
-            payload={"action": action, "target": target, "require_confirm": True},
-        )
-
-    def _handle_confirm(
-        self,
-        *,
-        chat_id: str,
-        user_id: str,
-        token: str,
-        repository: PipelineRepository,
-    ) -> TelegramWebhookResponse:
-        if not token.strip():
-            self.send_message(chat_id, "Usage: /confirm <token>")
-            return TelegramWebhookResponse(status="invalid", detail="missing_confirm_token")
-
-        decoded, reason = self._decode_confirm_token(token.strip())
-        if decoded is None:
-            repository.create_audit_entry(
-                source=TriggerSource.TELEGRAM,
-                keyword="[CONFIRM_FAILED]",
-                reason=reason or "confirm_invalid",
-                metadata={"chat_id": chat_id, "user_id": user_id},
-            )
-            self.send_message(chat_id, f"confirm 실패: {reason or 'invalid'}")
-            return TelegramWebhookResponse(status="invalid", detail=reason or "confirm_invalid")
-
-        if str(decoded.get("chat_id")) != chat_id:
-            self.send_message(chat_id, "confirm 실패: chat mismatch")
-            return TelegramWebhookResponse(status="invalid", detail="confirm_chat_mismatch")
-        if str(decoded.get("user_id")) != user_id:
-            self.send_message(chat_id, "confirm 실패: user mismatch")
-            return TelegramWebhookResponse(status="invalid", detail="confirm_user_mismatch")
-
-        action = str(decoded.get("action", ""))
-        target = str(decoded.get("target", ""))
-        if action == "retry":
-            return self._execute_retry(chat_id=chat_id, target=target, repository=repository)
-        if action == "cancel":
-            return self._execute_cancel(chat_id=chat_id, target=target, repository=repository)
-        if action == "reset":
-            return self._execute_reset(chat_id=chat_id, target=target, repository=repository)
-        if action == "delete_game":
-            return self._execute_delete_game(chat_id=chat_id, target=target)
-
-        self.send_message(chat_id, f"confirm 실패: unsupported action={action}")
-        return TelegramWebhookResponse(status="invalid", detail="confirm_action_unsupported")
 
     def _execute_retry(
         self,
@@ -544,57 +420,6 @@ class TelegramService:
     def _is_allowed_user(self, user_id: str) -> bool:
         allowed = self.settings.telegram_allowed_user_id_set()
         return bool(user_id and allowed and user_id in allowed)
-
-    def _encode_confirm_token(self, payload: dict[str, Any]) -> str | None:
-        secret = self.settings.telegram_confirm_secret or self.settings.telegram_webhook_secret
-        if not secret:
-            return None
-        payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        payload_encoded = self._b64encode(payload_json)
-        signature = hmac.new(secret.encode("utf-8"), payload_encoded.encode("utf-8"), hashlib.sha256).digest()
-        signature_encoded = self._b64encode(signature)
-        return f"{payload_encoded}.{signature_encoded}"
-
-    def _decode_confirm_token(self, token: str) -> tuple[dict[str, Any] | None, str | None]:
-        secret = self.settings.telegram_confirm_secret or self.settings.telegram_webhook_secret
-        if not secret:
-            return None, "confirm_secret_missing"
-
-        parts = token.split(".")
-        if len(parts) != 2:
-            return None, "confirm_token_format_invalid"
-
-        payload_encoded, signature_encoded = parts
-        expected_sig = hmac.new(secret.encode("utf-8"), payload_encoded.encode("utf-8"), hashlib.sha256).digest()
-        expected_sig_encoded = self._b64encode(expected_sig)
-        if not hmac.compare_digest(signature_encoded, expected_sig_encoded):
-            return None, "confirm_signature_invalid"
-
-        try:
-            payload_raw = self._b64decode(payload_encoded)
-            payload = json.loads(payload_raw.decode("utf-8"))
-        except Exception:
-            return None, "confirm_payload_invalid"
-
-        if not isinstance(payload, dict):
-            return None, "confirm_payload_invalid"
-
-        exp = payload.get("exp")
-        if not isinstance(exp, int):
-            return None, "confirm_exp_missing"
-        if exp < int(time.time()):
-            return None, "confirm_token_expired"
-
-        return payload, None
-
-    @staticmethod
-    def _b64encode(value: bytes) -> str:
-        return base64.urlsafe_b64encode(value).decode("utf-8").rstrip("=")
-
-    @staticmethod
-    def _b64decode(value: str) -> bytes:
-        padding = "=" * (-len(value) % 4)
-        return base64.urlsafe_b64decode(value + padding)
 
     def _parse_uuid_arg(self, raw: str, *, usage_message: str, chat_id: str) -> UUID | None:
         value = raw.strip()

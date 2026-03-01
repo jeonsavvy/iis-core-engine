@@ -91,7 +91,7 @@ def test_missing_webhook_secret_blocks_control_commands() -> None:
     assert result.pipeline_id is not None
 
 
-def test_retry_requires_confirm_then_confirm_executes_retry() -> None:
+def test_retry_executes_immediately_without_confirm() -> None:
     settings = _default_settings()
     repository = PipelineRepository(settings=settings)
     service = StubTelegramService(settings)
@@ -100,13 +100,7 @@ def test_retry_requires_confirm_then_confirm_executes_retry() -> None:
     repository.mark_pipeline_status(job.pipeline_id, PipelineStatus.ERROR, error_reason="forced_error")
 
     request = service.handle_update(make_update(f"/retry {job.pipeline_id}"), repository)
-    assert request.status == "confirm_required"
-
-    confirm_message = service.sent_messages[-1][1]
-    token = confirm_message.split("/confirm ", maxsplit=1)[1].strip()
-    confirm = service.handle_update(make_update(f"/confirm {token}"), repository)
-
-    assert confirm.status == "ok"
+    assert request.status == "ok"
     updated = repository.get_pipeline(job.pipeline_id)
     assert updated is not None
     assert updated.status == PipelineStatus.QUEUED
