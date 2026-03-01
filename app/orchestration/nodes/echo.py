@@ -11,6 +11,24 @@ def _latest_stage_log_metadata(state: PipelineState, stage: PipelineStage) -> di
     return {}
 
 
+def _latest_stage_log(state: PipelineState, stage: PipelineStage):
+    for log in reversed(state["logs"]):
+        if log.stage == stage:
+            return log
+    return None
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    rows: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            rows.append(text)
+    return rows
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -35,6 +53,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     
     build_metadata = _latest_stage_log_metadata(state, PipelineStage.BUILD)
     qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA)
+    qa_log = _latest_stage_log(state, PipelineStage.QA)
     grounded_evidence = {
         "slug": slug,
         "genre_engine": genre_engine,
@@ -129,6 +148,47 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         },
         reason=reason,
     )
+
+    upsert_registry = getattr(deps.repository, "upsert_asset_registry_entry", None)
+    if callable(upsert_registry):
+        failure_reasons: list[str] = []
+        if qa_log and isinstance(qa_log.reason, str) and qa_log.reason.strip():
+            failure_reasons.append(qa_log.reason.strip())
+        if isinstance(qa_metadata.get("visual_failed_checks"), list):
+            failure_reasons.extend(_string_list(qa_metadata.get("visual_failed_checks")))
+
+        failure_tokens = _string_list(qa_metadata.get("fatal_errors")) + _string_list(qa_metadata.get("non_fatal_warnings"))
+
+        try:
+            upsert_registry(
+                {
+                    "pipeline_id": str(state["pipeline_id"]),
+                    "game_slug": str(slug),
+                    "game_name": str(game_name),
+                    "keyword": str(keyword),
+                    "core_loop_type": genre_engine,
+                    "asset_pack": str(build_metadata.get("asset_pack") or state["outputs"].get("asset_pack") or ""),
+                    "variant_id": str(build_metadata.get("asset_pipeline_selected_variant") or ""),
+                    "variant_theme": str(build_metadata.get("asset_pipeline_selected_theme") or ""),
+                    "final_composite_score": build_metadata.get("final_composite_score"),
+                    "final_quality_score": build_metadata.get("final_quality_score") or qa_metadata.get("quality_score"),
+                    "final_gameplay_score": build_metadata.get("final_gameplay_score") or qa_metadata.get("gameplay_score"),
+                    "qa_status": qa_log.status.value if qa_log else "",
+                    "qa_reason": qa_log.reason if qa_log else None,
+                    "failure_reasons": failure_reasons,
+                    "failure_tokens": failure_tokens,
+                    "artifact_manifest": state["outputs"].get("artifact_manifest")
+                    if isinstance(state["outputs"].get("artifact_manifest"), dict)
+                    else {},
+                    "metadata": {
+                        "resolved_public_url": resolved_public_url,
+                        "review_generation_source": review_result.meta.get("generation_source"),
+                    },
+                }
+            )
+            state["outputs"]["asset_registry_synced"] = True
+        except Exception:
+            state["outputs"]["asset_registry_synced"] = False
 
     if state["status"] != PipelineStatus.ERROR:
         state["status"] = PipelineStatus.SUCCESS

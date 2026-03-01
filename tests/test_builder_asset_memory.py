@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
 from app.orchestration.nodes.builder_parts.asset_memory import collect_asset_memory_context
@@ -9,11 +10,16 @@ from app.schemas.pipeline import PipelineAgentName, PipelineLogRecord, PipelineS
 
 
 class _FakeRepository:
-    def __init__(self, logs: list[PipelineLogRecord]) -> None:
+    def __init__(self, logs: list[PipelineLogRecord], registry_rows: list[dict] | None = None) -> None:
         self._logs = logs
+        self._registry_rows = registry_rows or []
 
     def list_recent_logs(self, limit: int = 100) -> list[PipelineLogRecord]:
         return self._logs[:limit]
+
+    def list_asset_registry(self, *, core_loop_type: str, limit: int = 80) -> list[dict]:
+        filtered = [row for row in self._registry_rows if row.get("core_loop_type") == core_loop_type]
+        return filtered[:limit]
 
 
 def _log(
@@ -132,10 +138,43 @@ def test_collect_asset_memory_context_reads_recent_build_and_failure_signals() -
     )
 
     profile = result.retrieval_profile
+    failure_reasons = cast(list[str], profile.get("failure_reasons", []))
+    failure_tokens = cast(list[str], profile.get("failure_tokens", []))
     assert profile.get("preferred_asset_pack") == "webgl_neon_highway"
     assert profile.get("preferred_variant_id") == "clarity-first"
     assert profile.get("preferred_variant_theme") == "readability"
-    assert "visual_quality_below_threshold" in profile.get("failure_reasons", [])
-    assert "contrast" in profile.get("failure_tokens", [])
+    assert "visual_quality_below_threshold" in failure_reasons
+    assert "contrast" in failure_tokens
     assert result.hint
     assert "Reuse proven asset pack webgl_neon_highway." in result.hint
+
+
+def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
+    current_pipeline_id = uuid4()
+    deps = SimpleNamespace(
+        repository=_FakeRepository(
+            logs=[],
+            registry_rows=[
+                {
+                    "pipeline_id": str(uuid4()),
+                    "core_loop_type": "webgl_three_runner",
+                    "asset_pack": "webgl_neon_highway",
+                    "variant_id": "clarity-first",
+                    "variant_theme": "readability",
+                    "final_composite_score": 95.6,
+                    "failure_reasons": ["visual_quality_below_threshold"],
+                    "failure_tokens": ["contrast"],
+                }
+            ],
+        )
+    )
+
+    result = collect_asset_memory_context(
+        state=_state(current_pipeline_id),
+        deps=deps,
+        core_loop_type="webgl_three_runner",
+    )
+
+    assert result.retrieval_profile.get("source") == "asset_registry_v1"
+    assert result.retrieval_profile.get("preferred_asset_pack") == "webgl_neon_highway"
+    assert "visual_quality_below_threshold" in cast(list[str], result.retrieval_profile.get("failure_reasons", []))

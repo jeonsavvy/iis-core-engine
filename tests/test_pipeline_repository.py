@@ -57,3 +57,29 @@ def test_create_pipeline_reuses_job_for_same_idempotency_key() -> None:
     assert first.pipeline_id == second.pipeline_id
     assert first.metadata.get("idempotency_key") == "idem-key-0001"
     assert first.metadata.get("request_id") == second.metadata.get("request_id")
+
+
+def test_asset_registry_in_memory_upsert_and_list() -> None:
+    repository = PipelineRepository(settings=Settings())
+    job = repository.create_pipeline(TriggerRequest(keyword="asset memory sample"))
+
+    repository.upsert_asset_registry_entry(
+        {
+            "pipeline_id": str(job.pipeline_id),
+            "game_slug": "asset-memory-sample",
+            "game_name": "Asset Memory Sample",
+            "keyword": "asset memory sample",
+            "core_loop_type": "webgl_three_runner",
+            "asset_pack": "webgl_neon_highway",
+            "variant_id": "clarity-first",
+            "variant_theme": "readability",
+            "final_composite_score": 91.4,
+            "failure_reasons": ["visual_quality_below_threshold"],
+            "failure_tokens": ["contrast"],
+        }
+    )
+
+    rows = repository.list_asset_registry(core_loop_type="webgl_three_runner", limit=10)
+    assert len(rows) == 1
+    assert rows[0]["asset_pack"] == "webgl_neon_highway"
+    assert rows[0]["variant_id"] == "clarity-first"

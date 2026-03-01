@@ -37,6 +37,7 @@ def _state_with_publish_result() -> dict:
 def test_echo_prefers_portal_play_link_when_configured() -> None:
     state = _state_with_publish_result()
     captured = {}
+    registry_rows: list[dict] = []
 
     def _broadcast(message: str) -> dict[str, str]:
         captured["message"] = message
@@ -46,7 +47,8 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
         repository=SimpleNamespace(
             get_pipeline=lambda _pipeline_id: SimpleNamespace(
                 metadata={"operator_control": {"pause_requested": False, "cancel_requested": False}}
-            )
+            ),
+            upsert_asset_registry_entry=lambda row: registry_rows.append(row),
         ),
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
@@ -71,6 +73,8 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
     next_state = run(state, deps)
     assert next_state["status"] == PipelineStatus.SUCCESS
     assert "/play/11111111-1111-1111-1111-111111111111" in captured["message"]
+    assert registry_rows
+    assert registry_rows[0]["game_slug"] == "game-portal-link"
 
     echo_log = next(log for log in next_state["logs"] if log.stage.value == "echo")
     assert echo_log.metadata["resolved_public_url"].endswith("/play/11111111-1111-1111-1111-111111111111")
@@ -79,6 +83,7 @@ def test_echo_prefers_portal_play_link_when_configured() -> None:
 def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
     state = _state_with_publish_result()
     captured = {}
+    registry_rows: list[dict] = []
 
     def _broadcast(message: str) -> dict[str, str]:
         captured["message"] = message
@@ -88,7 +93,8 @@ def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
         repository=SimpleNamespace(
             get_pipeline=lambda _pipeline_id: SimpleNamespace(
                 metadata={"operator_control": {"pause_requested": False, "cancel_requested": False}}
-            )
+            ),
+            upsert_asset_registry_entry=lambda row: registry_rows.append(row),
         ),
         vertex_service=SimpleNamespace(
             generate_marketing_copy=lambda **_: SimpleNamespace(
@@ -113,3 +119,4 @@ def test_echo_uses_storage_url_when_portal_base_is_missing() -> None:
     next_state = run(state, deps)
     assert next_state["status"] == PipelineStatus.SUCCESS
     assert "https://storage.example.com/games/game-portal-link/index.html" in captured["message"]
+    assert registry_rows

@@ -56,6 +56,7 @@ class PipelineRepository:
         self._lock = Lock()
         self._memory_jobs: dict[str, dict[str, Any]] = {}
         self._memory_logs: dict[str, list[dict[str, Any]]] = {}
+        self._memory_asset_registry: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PipelineRepository":
@@ -313,6 +314,52 @@ class PipelineRepository:
                 rows.extend(log_list)
             rows.sort(key=lambda row: row["created_at"], reverse=True)
             return [self._log_from_row(row) for row in rows[:limit]]
+
+    def upsert_asset_registry_entry(self, payload: dict[str, Any]) -> None:
+        if not payload:
+            return
+
+        if self.client:
+            try:
+                self.client.table("asset_registry").upsert(payload, on_conflict="pipeline_id").execute()
+            except Exception as exc:
+                logger.warning("Failed to upsert asset_registry entry (continuing): %s", exc)
+            return
+
+        pipeline_id = str(payload.get("pipeline_id", "")).strip()
+        if not pipeline_id:
+            return
+        with self._lock:
+            row = dict(payload)
+            row.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+            row["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._memory_asset_registry[pipeline_id] = row
+
+    def list_asset_registry(self, *, core_loop_type: str, limit: int = 80) -> list[dict[str, Any]]:
+        normalized = core_loop_type.strip()
+        if not normalized:
+            return []
+
+        if self.client:
+            try:
+                result = (
+                    self.client.table("asset_registry")
+                    .select("*")
+                    .eq("core_loop_type", normalized)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+                rows = result.data or []
+                return [row for row in rows if isinstance(row, dict)]
+            except Exception as exc:
+                logger.warning("Failed to read asset_registry (fallback to logs): %s", exc)
+                return []
+
+        with self._lock:
+            rows = [dict(row) for row in self._memory_asset_registry.values() if str(row.get("core_loop_type", "")).strip() == normalized]
+            rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
+            return rows[:limit]
 
     def claim_next_queued_pipeline(self) -> PipelineJob | None:
         if self.client:
