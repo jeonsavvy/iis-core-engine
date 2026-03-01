@@ -12,6 +12,32 @@ class GDDPayload(BaseModel):
     visual_style: str | None = Field(default=None, max_length=80)
 
 
+class AnalyzeContractPayload(BaseModel):
+    intent: str = Field(min_length=1, max_length=200)
+    scope_in: list[str] = Field(default_factory=list, max_length=10)
+    scope_out: list[str] = Field(default_factory=list, max_length=10)
+    hard_constraints: list[str] = Field(default_factory=list, max_length=10)
+    forbidden_patterns: list[str] = Field(default_factory=list, max_length=12)
+    success_outcome: str = Field(min_length=1, max_length=240)
+
+
+class PlanContractPayload(BaseModel):
+    core_mechanics: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    progression_plan: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    encounter_plan: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    risk_reward_plan: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    control_model: str = Field(min_length=1, max_length=120)
+    balance_baseline: dict[str, float] = Field(default_factory=dict)
+
+
+class DesignContractPayload(BaseModel):
+    camera_ui_contract: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    asset_blueprint_2d3d: list[str] = Field(default_factory=list, min_length=1, max_length=18)
+    scene_layers: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    feedback_fx_contract: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    readability_contract: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+
+
 class DesignSpecPayload(BaseModel):
     visual_style: str = Field(min_length=1, max_length=80)
     palette: list[str] = Field(min_length=1, max_length=8)

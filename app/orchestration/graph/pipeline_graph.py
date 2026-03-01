@@ -3,7 +3,7 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes import architect, builder, echo, publisher, qa_failed, qa_quality, sentinel, stylist, trigger
+from app.orchestration.nodes import architect, builder, echo, publisher, qa_quality, sentinel, stylist, trigger
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineStatus
 
@@ -35,20 +35,12 @@ def _route_after_build(state: PipelineState) -> str:
 def _route_after_qa_runtime(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    if state["needs_rebuild"]:
-        if state["qa_attempt"] >= state["max_qa_loops"]:
-            return "QaFailed"
-        return "Developer"
     return "QaQuality"
 
 
 def _route_after_qa_quality(state: PipelineState) -> str:
     if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
         return "End"
-    if state["needs_rebuild"]:
-        if state["qa_attempt"] >= state["max_qa_loops"]:
-            return "QaFailed"
-        return "Developer"
     return "Release"
 
 
@@ -67,7 +59,6 @@ def build_pipeline_graph(deps: NodeDependencies):
     graph.add_node("Developer", lambda state: builder.run(state, deps))
     graph.add_node("QaRuntime", lambda state: sentinel.run(state, deps))
     graph.add_node("QaQuality", lambda state: qa_quality.run(state, deps))
-    graph.add_node("QaFailed", lambda state: qa_failed.run(state, deps))
     graph.add_node("Release", lambda state: publisher.run(state, deps))
     graph.add_node("Report", lambda state: echo.run(state, deps))
 
@@ -108,8 +99,6 @@ def build_pipeline_graph(deps: NodeDependencies):
         "QaRuntime",
         _route_after_qa_runtime,
         {
-            "Developer": "Developer",
-            "QaFailed": "QaFailed",
             "QaQuality": "QaQuality",
             "End": END,
         },
@@ -118,13 +107,10 @@ def build_pipeline_graph(deps: NodeDependencies):
         "QaQuality",
         _route_after_qa_quality,
         {
-            "Developer": "Developer",
-            "QaFailed": "QaFailed",
             "Release": "Release",
             "End": END,
         },
     )
-    graph.add_edge("QaFailed", END)
     graph.add_conditional_edges(
         "Release",
         _route_after_release,

@@ -101,6 +101,26 @@ def evaluate_gameplay_gate(
         ("replay_loop", any(token in lowered for token in ("restartgame", "combo", "timeleft")), 10),
         ("telegraph_or_counterplay", any(token in lowered for token in ("attackcooldown", "dashcooldown", "kind === \"elite\"", "lanefloat")), 10),
         ("failure_feedback", "overlaytext" in lowered and "endgame(" in lowered, 8),
+        (
+            "mechanical_depth",
+            sum(
+                1
+                for token in ("dash", "jump", "boost", "drift", "reload", "parry", "combo", "overtake", "checkpoint")
+                if token in lowered
+            )
+            >= 3,
+            14,
+        ),
+        (
+            "encounter_variety",
+            sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern", "kind ===") if token in lowered) >= 3,
+            12,
+        ),
+        (
+            "feedback_fidelity",
+            sum(1 for token in ("shake", "flash", "particles", "playsfx", "hit", "impact", "trail") if token in lowered) >= 4,
+            12,
+        ),
     ]
 
     if any(token in genre_hint for token in ("racing", "레이싱", "drift", "드리프트")):
@@ -231,6 +251,7 @@ def evaluate_visual_gate(
         ("edge_definition", edge_energy >= 0.025, 18),
         ("motion_presence", motion_delta >= 0.0012, 14),
         ("metrics_available", bool(metrics), 10),
+        ("visual_cohesion", luminance_std >= 18.0 and edge_energy >= 0.02 and color_bucket_count >= 18.0, 12),
     ]
     if engine in {"webgl_three_runner", "flight_sim_3d"}:
         checks.append(("advanced_visual_density", color_bucket_count >= 28.0 and edge_energy >= 0.034, 12))
@@ -329,6 +350,7 @@ def evaluate_artifact_contract(
         ("asset_pipeline_variant_count", asset_pipeline_variant_count >= 2, 8),
         ("asset_pipeline_selected_variant", bool(asset_pipeline_selected_variant), 4),
         ("art_direction_contract_present", bool(art_contract), 12),
+        ("asset_density", image_assets >= 6 and procedural_layer_count >= 3 and module_count >= 4, 12),
     ]
 
     total_weight = sum(weight for _, _, weight in checks)

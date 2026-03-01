@@ -4,6 +4,63 @@ import json
 from typing import Any
 
 
+def build_analyze_contract_prompt(keyword: str) -> str:
+    return (
+        "You are a principal game producer. Return JSON only.\n"
+        f"Keyword: {keyword}\n"
+        "Build an execution contract for downstream agents.\n"
+        "Output fields exactly: intent, scope_in, scope_out, hard_constraints, forbidden_patterns, success_outcome.\n"
+        "Rules:\n"
+        "- scope_in/out should be concise actionable lists\n"
+        "- hard_constraints must include platform/runtime constraints\n"
+        "- forbidden_patterns must include anti-patterns that degrade game quality\n"
+        "- success_outcome should define player-facing completion quality"
+    )
+
+
+def build_plan_contract_prompt(
+    *,
+    keyword: str,
+    gdd: dict[str, Any],
+    research_summary: dict[str, Any] | None = None,
+) -> str:
+    gdd_json = json.dumps(gdd, ensure_ascii=False)
+    research_json = json.dumps(research_summary or {}, ensure_ascii=False)
+    return (
+        "You are a senior gameplay planner. Return JSON only.\n"
+        f"Keyword: {keyword}\n"
+        f"GDD JSON: {gdd_json}\n"
+        f"ResearchSummary JSON: {research_json}\n"
+        "Output fields exactly: core_mechanics, progression_plan, encounter_plan, risk_reward_plan, control_model, balance_baseline.\n"
+        "Rules:\n"
+        "- Every list must contain concrete player-action oriented items\n"
+        "- balance_baseline must contain numeric values (hp/speed/spawn/timer scale etc.)\n"
+        "- avoid generic filler statements"
+    )
+
+
+def build_design_contract_prompt(
+    *,
+    keyword: str,
+    genre: str,
+    visual_style: str,
+    design_spec: dict[str, Any],
+) -> str:
+    design_json = json.dumps(design_spec, ensure_ascii=False)
+    return (
+        "You are a principal game art director. Return JSON only.\n"
+        f"Keyword: {keyword}\n"
+        f"Genre: {genre}\n"
+        f"VisualStyle: {visual_style}\n"
+        f"DesignSpec JSON: {design_json}\n"
+        "Output fields exactly: camera_ui_contract, asset_blueprint_2d3d, scene_layers, feedback_fx_contract, readability_contract.\n"
+        "Rules:\n"
+        "- asset_blueprint_2d3d must include reusable 2D/3D asset categories\n"
+        "- scene_layers must describe layered visual composition\n"
+        "- readability_contract must include player/enemy/projectile readability requirements"
+    )
+
+
 def build_gdd_prompt(keyword: str) -> str:
     return (
         "You are a principal game designer for a viral browser arcade studio. "

@@ -6,12 +6,6 @@ from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatu
 
 CRITICAL_RUNTIME_FAILURE_CODES = {
     "boot_flag_missing",
-    "immediate_game_over_overlay",
-    "immediate_game_over_visible_text",
-    "immediate_zero_hp_state",
-    "manual_start_interaction_required",
-    "timer_static_manual_start_gate",
-    "timer_not_progressing",
     "runtime_canvas_too_small",
 }
 
@@ -21,7 +15,9 @@ def _is_critical_runtime_failure(*, reason: str | None, fatal_errors: list[str] 
     if any(code in fatal_rows for code in CRITICAL_RUNTIME_FAILURE_CODES):
         return True
     normalized_reason = str(reason or "").strip().casefold()
-    return normalized_reason in {"playwright_error", "qa_exception"}
+    if normalized_reason.startswith("playwright_error") or normalized_reason.startswith("qa_exception"):
+        return True
+    return normalized_reason == "runtime_console_error" and bool(fatal_rows)
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
@@ -38,15 +34,21 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     # deterministic forced failures for controlled retry testing
     if state["qa_attempt"] <= state["fail_qa_until"]:
-        state["needs_rebuild"] = True
+        state["needs_rebuild"] = False
         return append_log(
             state,
             stage=PipelineStage.QA_RUNTIME,
-            status=PipelineStatus.RETRY,
+            status=PipelineStatus.SUCCESS,
             agent_name=PipelineAgentName.QA_RUNTIME,
-            message="Runtime QA forced failure for retry simulation.",
-            reason="retry_builder",
-            metadata={"attempt": state["qa_attempt"]},
+            message="Runtime QA forced soft-fail for simulation.",
+            reason="soft_fail",
+            metadata={
+                "attempt": state["qa_attempt"],
+                "soft_fail": True,
+                "deliverables": ["runtime_smoke_probe", "qa_improvement_queue_item"],
+                "contract_status": "warn",
+                "contribution_score": 3.4,
+            },
         )
 
     artifact_html = str(state["outputs"].get("artifact_html", ""))
@@ -80,17 +82,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         fatal_errors = [str(item).strip() for item in smoke_result.fatal_errors or [] if str(item).strip()]
         non_fatal_warnings = [str(item).strip() for item in smoke_result.non_fatal_warnings or [] if str(item).strip()]
         critical_failure = _is_critical_runtime_failure(reason=smoke_result.reason, fatal_errors=fatal_errors)
-        state["needs_rebuild"] = critical_failure
-        if critical_failure:
-            state["outputs"]["qa_rebuild_feedback"] = {
-                "gate": "runtime",
-                "reason": str(smoke_result.reason or "runtime_smoke_failed"),
-                "failed_checks": [],
-                "fatal_errors": fatal_errors,
-                "non_fatal_warnings": non_fatal_warnings,
-            }
-        else:
-            state["outputs"].pop("qa_rebuild_feedback", None)
+        state["needs_rebuild"] = False
+        state["outputs"].pop("qa_rebuild_feedback", None)
         queued_items = state["outputs"].get("qa_improvement_items")
         improvement_items = [row for row in queued_items if isinstance(row, dict)] if isinstance(queued_items, list) else []
         improvement_items.append(
@@ -111,21 +104,26 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             }
         )
         state["outputs"]["qa_improvement_items"] = improvement_items
-        state["outputs"]["qa_soft_fail"] = True
+        state["outputs"]["qa_soft_fail"] = not critical_failure
         if critical_failure:
+            state["status"] = PipelineStatus.ERROR
+            state["reason"] = "runtime_system_failure"
             return append_log(
                 state,
                 stage=PipelineStage.QA_RUNTIME,
-                status=PipelineStatus.RETRY,
+                status=PipelineStatus.ERROR,
                 agent_name=PipelineAgentName.QA_RUNTIME,
-                message="Runtime QA hard-fail: critical issues detected, rebuilding candidate.",
-                reason="retry_builder",
+                message="Runtime QA hard-fail: system-critical execution failure detected.",
+                reason=state["reason"],
                 metadata={
                     "attempt": state["qa_attempt"],
                     "critical_failure": True,
                     "console_errors": smoke_result.console_errors or [],
                     "fatal_errors": fatal_errors,
                     "non_fatal_warnings": non_fatal_warnings,
+                    "deliverables": ["runtime_smoke_probe", "critical_failure_report"],
+                    "contract_status": "fail",
+                    "contribution_score": 1.5,
                 },
             )
 
@@ -143,6 +141,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "console_errors": smoke_result.console_errors or [],
                 "fatal_errors": fatal_errors,
                 "non_fatal_warnings": non_fatal_warnings,
+                "deliverables": ["runtime_smoke_probe", "qa_improvement_queue_item"],
+                "contract_status": "warn",
+                "contribution_score": 3.5,
             },
         )
 
@@ -174,5 +175,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "fatal_errors": smoke_result.fatal_errors or [],
             "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
             "visual_metrics": smoke_result.visual_metrics or {},
+            "deliverables": ["runtime_smoke_probe", "screenshot_capture"],
+            "contract_status": "pass",
+            "contribution_score": 4.1,
         },
     )

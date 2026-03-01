@@ -54,7 +54,42 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     build_metadata = _latest_stage_log_metadata(state, PipelineStage.BUILD)
     runtime_qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA_RUNTIME)
     quality_qa_metadata = _latest_stage_log_metadata(state, PipelineStage.QA_QUALITY)
+    analyze_metadata = _latest_stage_log_metadata(state, PipelineStage.ANALYZE)
+    plan_metadata = _latest_stage_log_metadata(state, PipelineStage.PLAN)
+    design_metadata = _latest_stage_log_metadata(state, PipelineStage.DESIGN)
     qa_quality_log = _latest_stage_log(state, PipelineStage.QA_QUALITY)
+    stage_contribution_summary = {
+        "analyze": {
+            "contract_status": analyze_metadata.get("contract_status"),
+            "contribution_score": analyze_metadata.get("contribution_score"),
+            "deliverables": _string_list(analyze_metadata.get("deliverables")),
+        },
+        "plan": {
+            "contract_status": plan_metadata.get("contract_status"),
+            "contribution_score": plan_metadata.get("contribution_score"),
+            "deliverables": _string_list(plan_metadata.get("deliverables")),
+        },
+        "design": {
+            "contract_status": design_metadata.get("contract_status"),
+            "contribution_score": design_metadata.get("contribution_score"),
+            "deliverables": _string_list(design_metadata.get("deliverables")),
+        },
+        "build": {
+            "contract_status": build_metadata.get("contract_status"),
+            "contribution_score": build_metadata.get("contribution_score"),
+            "deliverables": _string_list(build_metadata.get("deliverables")),
+        },
+        "qa_runtime": {
+            "contract_status": runtime_qa_metadata.get("contract_status"),
+            "contribution_score": runtime_qa_metadata.get("contribution_score"),
+            "deliverables": _string_list(runtime_qa_metadata.get("deliverables")),
+        },
+        "qa_quality": {
+            "contract_status": quality_qa_metadata.get("contract_status"),
+            "contribution_score": quality_qa_metadata.get("contribution_score"),
+            "deliverables": _string_list(quality_qa_metadata.get("deliverables")),
+        },
+    }
     grounded_evidence = {
         "slug": slug,
         "genre_engine": genre_engine,
@@ -146,6 +181,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "marketing_updated": bool(marketing_updated),
             "marketing_language": "ko-KR",
             "resolved_public_url": resolved_public_url,
+            "deliverables": ["telegram_broadcast", "ai_review_update", "asset_registry_sync"],
+            "contract_status": "pass",
+            "contract_summary": "final reporting and persistence completed",
+            "contribution_score": 4.4,
+            "stage_contribution_summary": stage_contribution_summary,
         },
         reason=reason,
     )

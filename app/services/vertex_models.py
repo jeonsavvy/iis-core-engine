@@ -35,3 +35,29 @@ class DesignSpecModel(BaseModel):
     text_overflow_policy: str = "ellipsis-clamp"
     typography: str = "inter-bold-hud"
     thumbnail_concept: str = "High-contrast action scene"
+
+
+class AnalyzeContractModel(BaseModel):
+    intent: str
+    scope_in: list[str] = Field(default_factory=list)
+    scope_out: list[str] = Field(default_factory=list)
+    hard_constraints: list[str] = Field(default_factory=list)
+    forbidden_patterns: list[str] = Field(default_factory=list)
+    success_outcome: str
+
+
+class PlanContractModel(BaseModel):
+    core_mechanics: list[str] = Field(default_factory=list)
+    progression_plan: list[str] = Field(default_factory=list)
+    encounter_plan: list[str] = Field(default_factory=list)
+    risk_reward_plan: list[str] = Field(default_factory=list)
+    control_model: str
+    balance_baseline: dict[str, float] = Field(default_factory=dict)
+
+
+class DesignContractModel(BaseModel):
+    camera_ui_contract: list[str] = Field(default_factory=list)
+    asset_blueprint_2d3d: list[str] = Field(default_factory=list)
+    scene_layers: list[str] = Field(default_factory=list)
+    feedback_fx_contract: list[str] = Field(default_factory=list)
+    readability_contract: list[str] = Field(default_factory=list)

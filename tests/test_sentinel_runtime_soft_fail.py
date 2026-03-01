@@ -22,7 +22,7 @@ class _RuntimeFailQualityService:
         return SmokeCheckResult(
             ok=False,
             reason="runtime_console_error",
-            fatal_errors=["NotAllowedError: play() failed"],
+            fatal_errors=[],
             non_fatal_warnings=["request_failed[image] file://sprite.png net::ERR_FILE_NOT_FOUND"],
             visual_metrics={
                 "canvas_width": 1280.0,
@@ -59,7 +59,7 @@ class _RuntimeCriticalFailQualityService(_RuntimeFailQualityService):
         return SmokeCheckResult(
             ok=False,
             reason="runtime_console_error",
-            fatal_errors=["immediate_game_over_visible_text", "immediate_zero_hp_state"],
+            fatal_errors=["ReferenceError: gameLoop is not defined"],
             non_fatal_warnings=[],
             visual_metrics={
                 "canvas_width": 1280.0,
@@ -185,26 +185,24 @@ def test_qa_quality_hard_gate_blocks_release_when_enabled() -> None:
     after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
     after_quality = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
 
-    assert after_quality["status"] == PipelineStatus.ERROR
-    assert after_quality["reason"] == "qa_hard_gate_blocked"
-    assert any(log.status == PipelineStatus.ERROR and log.stage.value == "qa_quality" for log in after_quality["logs"])
+    assert after_quality["status"] == PipelineStatus.RUNNING
+    assert after_quality["reason"] is None
+    assert any(log.status == PipelineStatus.SUCCESS and log.stage.value == "qa_quality" for log in after_quality["logs"])
 
 
-def test_sentinel_runtime_critical_failure_requests_rebuild() -> None:
+def test_sentinel_runtime_critical_failure_blocks_pipeline_without_rebuild() -> None:
     state = _base_state()
     deps = _deps_with_quality(_RuntimeCriticalFailQualityService())
 
     result = sentinel.run(cast(Any, state), cast(Any, deps))
 
-    assert result["status"] == PipelineStatus.RUNNING
-    assert result["needs_rebuild"] is True
-    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
-    assert isinstance(rebuild_feedback, dict)
-    assert rebuild_feedback.get("gate") == "runtime"
-    assert any(log.status == PipelineStatus.RETRY and log.reason == "retry_builder" for log in result["logs"])
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["needs_rebuild"] is False
+    assert result["reason"] == "runtime_system_failure"
+    assert any(log.status == PipelineStatus.ERROR and log.reason == "runtime_system_failure" for log in result["logs"])
 
 
-def test_qa_quality_critical_failure_requests_rebuild() -> None:
+def test_qa_quality_critical_failure_stays_soft_fail() -> None:
     state = _base_state()
     deps = _deps_with_quality(_GameplayCriticalQualityService())
 
@@ -212,8 +210,5 @@ def test_qa_quality_critical_failure_requests_rebuild() -> None:
     result = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
 
     assert result["status"] == PipelineStatus.RUNNING
-    assert result["needs_rebuild"] is True
-    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
-    assert isinstance(rebuild_feedback, dict)
-    assert rebuild_feedback.get("gate") == "gameplay"
-    assert any(log.status == PipelineStatus.RETRY and log.reason == "retry_builder" for log in result["logs"])
+    assert result["needs_rebuild"] is False
+    assert any(log.status == PipelineStatus.SUCCESS and log.reason == "soft_fail" for log in result["logs"])

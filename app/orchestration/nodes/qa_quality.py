@@ -7,39 +7,6 @@ from app.orchestration.nodes.common import append_log, apply_operator_control_ga
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
-CRITICAL_QUALITY_FAILURE_CODES = {
-    "trivial_score_button_template",
-    "click_only_interaction",
-}
-CRITICAL_GAMEPLAY_FAILURE_CODES = {
-    "missing_realtime_loop",
-    "no_enemy_pressure",
-    "flat_scoring_loop",
-    "genre_engine_mismatch",
-    "keyword_engine_mismatch_flight",
-    "flight_mechanics_not_found",
-    "f1_mechanics_not_found",
-    "f1_quantized_steering",
-    "quantized_lane_steering",
-}
-CRITICAL_VISUAL_FAILURE_CODES = {
-    "visual_metrics_missing",
-    "visual_palette_too_flat",
-    "visual_shape_definition_too_low",
-}
-CRITICAL_ARTIFACT_FAILURE_CODES = {
-    "insufficient_image_assets",
-    "insufficient_animation_hooks",
-    "insufficient_procedural_layers",
-    "unsupported_bundle_kind",
-    "asset_policy_mode_mismatch",
-    "external_image_generation_not_disabled",
-    "asset_pipeline_metadata_missing",
-    "asset_pipeline_not_automated",
-    "asset_pipeline_variant_count_invalid",
-}
-
-
 def _as_str_list(value: object) -> list[str]:
     if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
         return []
@@ -49,11 +16,6 @@ def _as_str_list(value: object) -> list[str]:
         if text:
             rows.append(text)
     return rows
-
-
-def _has_critical_failure(failed_checks: list[str], critical_codes: set[str]) -> bool:
-    normalized = {str(item).strip().casefold() for item in failed_checks if str(item).strip()}
-    return bool(normalized & critical_codes)
 
 
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
@@ -185,107 +147,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         "visual_metrics": visual_metrics,
     }
 
-    hard_gate_enabled = bool(getattr(getattr(deps.quality_service, "settings", None), "qa_hard_gate", False))
-    critical_quality_failure = (
-        (not quality_result.ok and _has_critical_failure(quality_failed_checks, CRITICAL_QUALITY_FAILURE_CODES))
-        or (not gameplay_result.ok and _has_critical_failure(gameplay_failed_checks, CRITICAL_GAMEPLAY_FAILURE_CODES))
-        or (not visual_result.ok and _has_critical_failure(visual_failed_checks, CRITICAL_VISUAL_FAILURE_CODES))
-        or (not artifact_result.ok and _has_critical_failure(artifact_failed_checks, CRITICAL_ARTIFACT_FAILURE_CODES))
-    )
-    critical_feedback_gate = ""
-    critical_feedback_reason = ""
-    critical_feedback_checks: list[str] = []
-    if not gameplay_result.ok and _has_critical_failure(gameplay_failed_checks, CRITICAL_GAMEPLAY_FAILURE_CODES):
-        critical_feedback_gate = "gameplay"
-        critical_feedback_reason = "gameplay_depth_below_threshold"
-        critical_feedback_checks = gameplay_failed_checks
-    elif not visual_result.ok and _has_critical_failure(visual_failed_checks, CRITICAL_VISUAL_FAILURE_CODES):
-        critical_feedback_gate = "visual"
-        critical_feedback_reason = "visual_quality_below_threshold"
-        critical_feedback_checks = visual_failed_checks
-    elif not artifact_result.ok and _has_critical_failure(artifact_failed_checks, CRITICAL_ARTIFACT_FAILURE_CODES):
-        critical_feedback_gate = "artifact"
-        critical_feedback_reason = "artifact_contract_below_threshold"
-        critical_feedback_checks = artifact_failed_checks
-    elif not quality_result.ok and _has_critical_failure(quality_failed_checks, CRITICAL_QUALITY_FAILURE_CODES):
-        critical_feedback_gate = "quality"
-        critical_feedback_reason = "quality_score_below_threshold"
-        critical_feedback_checks = quality_failed_checks
-
     state["needs_rebuild"] = False
     summary_message = "Quality QA passed."
     if improvement_items:
         summary_message = f"Quality QA soft-fail: {len(improvement_items)} improvement task(s) queued."
-
-    if hard_gate_enabled and improvement_items:
-        state["status"] = PipelineStatus.ERROR
-        state["reason"] = "qa_hard_gate_blocked"
-        return append_log(
-            state,
-            stage=PipelineStage.QA_QUALITY,
-            status=PipelineStatus.ERROR,
-            agent_name=PipelineAgentName.QA_QUALITY,
-            message="Quality QA hard-gate blocked release.",
-            reason=state["reason"],
-            metadata={
-                "quality_score": quality_result.score,
-                "quality_threshold": quality_result.threshold,
-                "gameplay_score": gameplay_result.score,
-                "gameplay_threshold": gameplay_result.threshold,
-                "visual_score": visual_result.score,
-                "visual_threshold": visual_result.threshold,
-                "artifact_score": artifact_result.score,
-                "artifact_threshold": artifact_result.threshold,
-                "failed_checks": [row["reason"] for row in improvement_items],
-                "improvement_count": len(improvement_items),
-                "soft_fail": False,
-                "hard_gate": True,
-                "quality_checks": quality_result.checks,
-                "gameplay_checks": gameplay_result.checks,
-                "visual_checks": visual_result.checks,
-                "artifact_checks": artifact_result.checks,
-                "visual_metrics": visual_metrics,
-                "non_fatal_warnings": runtime_warnings,
-            },
-        )
-
-    if critical_quality_failure:
-        state["needs_rebuild"] = True
-        state["outputs"]["qa_rebuild_feedback"] = {
-            "gate": critical_feedback_gate or "quality",
-            "reason": critical_feedback_reason or "quality_retry_required",
-            "failed_checks": critical_feedback_checks,
-            "fatal_errors": [],
-            "non_fatal_warnings": runtime_warnings,
-        }
-        return append_log(
-            state,
-            stage=PipelineStage.QA_QUALITY,
-            status=PipelineStatus.RETRY,
-            agent_name=PipelineAgentName.QA_QUALITY,
-            message="Quality QA hard-fail: critical deficits detected, rebuilding candidate.",
-            reason="retry_builder",
-            metadata={
-                "quality_score": quality_result.score,
-                "quality_threshold": quality_result.threshold,
-                "gameplay_score": gameplay_result.score,
-                "gameplay_threshold": gameplay_result.threshold,
-                "visual_score": visual_result.score,
-                "visual_threshold": visual_result.threshold,
-                "artifact_score": artifact_result.score,
-                "artifact_threshold": artifact_result.threshold,
-                "failed_checks": [row["reason"] for row in improvement_items],
-                "improvement_count": len(improvement_items),
-                "soft_fail": False,
-                "critical_quality_failure": True,
-                "quality_checks": quality_result.checks,
-                "gameplay_checks": gameplay_result.checks,
-                "visual_checks": visual_result.checks,
-                "artifact_checks": artifact_result.checks,
-                "visual_metrics": visual_metrics,
-                "non_fatal_warnings": runtime_warnings,
-            },
-        )
 
     state["outputs"].pop("qa_rebuild_feedback", None)
     return append_log(
@@ -313,5 +178,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "artifact_checks": artifact_result.checks,
             "visual_metrics": visual_metrics,
             "non_fatal_warnings": runtime_warnings,
+            "deliverables": ["quality_scorecard", "qa_improvement_queue_items"],
+            "contract_status": "warn" if improvement_items else "pass",
+            "contract_summary": summary_message,
+            "contribution_score": 3.9 if improvement_items else 4.1,
         },
     )

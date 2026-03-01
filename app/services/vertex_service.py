@@ -11,14 +11,20 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from app.core.config import Settings
 from app.services.vertex_models import GameConfigModel
 from app.services.vertex_prompts import (
+    build_analyze_contract_prompt,
     build_builder_prompt,
+    build_design_contract_prompt,
     build_design_prompt,
     build_gdd_prompt,
+    build_plan_contract_prompt,
 )
 from app.services.vertex_structured_generation import (
+    generate_analyze_contract as generate_analyze_contract_bundle,
+    generate_design_contract as generate_design_contract_bundle,
     generate_design_spec as generate_design_spec_bundle,
     generate_game_config as generate_game_config_bundle,
     generate_gdd_bundle as generate_gdd_bundle_bundle,
+    generate_plan_contract as generate_plan_contract_bundle,
 )
 from app.services.vertex_text_generation import (
     generate_ai_review as generate_ai_review_text,
@@ -63,6 +69,39 @@ class VertexService:
 
     def generate_gdd_bundle(self, keyword: str) -> VertexGenerationResult:
         return generate_gdd_bundle_bundle(self, keyword)
+
+    def generate_analyze_contract(self, *, keyword: str) -> VertexGenerationResult:
+        return generate_analyze_contract_bundle(self, keyword=keyword)
+
+    def generate_plan_contract(
+        self,
+        *,
+        keyword: str,
+        gdd: dict[str, Any],
+        research_summary: dict[str, Any] | None = None,
+    ) -> VertexGenerationResult:
+        return generate_plan_contract_bundle(
+            self,
+            keyword=keyword,
+            gdd=gdd,
+            research_summary=research_summary,
+        )
+
+    def generate_design_contract(
+        self,
+        *,
+        keyword: str,
+        genre: str,
+        visual_style: str,
+        design_spec: dict[str, Any],
+    ) -> VertexGenerationResult:
+        return generate_design_contract_bundle(
+            self,
+            keyword=keyword,
+            genre=genre,
+            visual_style=visual_style,
+            design_spec=design_spec,
+        )
 
     def generate_design_spec(self, *, keyword: str, visual_style: str, genre: str) -> VertexGenerationResult:
         return generate_design_spec_bundle(
@@ -266,6 +305,38 @@ class VertexService:
     def _design_prompt(*, keyword: str, visual_style: str, genre: str) -> str:
         return build_design_prompt(keyword=keyword, visual_style=visual_style, genre=genre)
 
+    @staticmethod
+    def _analyze_contract_prompt(keyword: str) -> str:
+        return build_analyze_contract_prompt(keyword)
+
+    @staticmethod
+    def _plan_contract_prompt(
+        *,
+        keyword: str,
+        gdd: dict[str, Any],
+        research_summary: dict[str, Any] | None = None,
+    ) -> str:
+        return build_plan_contract_prompt(
+            keyword=keyword,
+            gdd=gdd,
+            research_summary=research_summary,
+        )
+
+    @staticmethod
+    def _design_contract_prompt(
+        *,
+        keyword: str,
+        genre: str,
+        visual_style: str,
+        design_spec: dict[str, Any],
+    ) -> str:
+        return build_design_contract_prompt(
+            keyword=keyword,
+            genre=genre,
+            visual_style=visual_style,
+            design_spec=design_spec,
+        )
+
     def generate_marketing_copy(
         self,
         *,
@@ -415,6 +486,127 @@ class VertexService:
         }
         return VertexGenerationResult(
             payload={"research_summary": research_summary, "gdd": gdd},
+            meta={"generation_source": "stub", "reason": reason},
+        )
+
+    @staticmethod
+    def _fallback_analyze_contract(
+        keyword: str,
+        *,
+        reason: str = "vertex_not_configured",
+    ) -> VertexGenerationResult:
+        intent = f"{keyword} 요청을 플레이 가능한 브라우저 게임으로 자동 제작"
+        payload = {
+            "intent": intent,
+            "scope_in": [
+                "single-file playable html runtime",
+                "keyboard-first control model",
+                "runtime logs and deployable artifact",
+            ],
+            "scope_out": [
+                "external paid asset dependency",
+                "manual operator approval loop",
+                "non-browser native runtime",
+            ],
+            "hard_constraints": [
+                "no secret leakage",
+                "no external image generation dependency",
+                "must keep leaderboard runtime contract",
+            ],
+            "forbidden_patterns": [
+                "single button score increment toy",
+                "placeholder-only rectangle visuals",
+                "uncaught runtime exception on boot",
+            ],
+            "success_outcome": "요청 의도와 조작감이 명확한 게임이 자동 제작되고 운영실에서 단계별 근거가 노출된다.",
+        }
+        return VertexGenerationResult(
+            payload=payload,
+            meta={"generation_source": "stub", "reason": reason},
+        )
+
+    @staticmethod
+    def _fallback_plan_contract(
+        *,
+        keyword: str,
+        gdd: dict[str, Any],
+        reason: str = "vertex_not_configured",
+    ) -> VertexGenerationResult:
+        genre = str(gdd.get("genre", "arcade"))
+        payload = {
+            "core_mechanics": [
+                "directional movement + timing action",
+                "enemy pressure with dodge/attack response",
+                "score chain through risk-reward decisions",
+            ],
+            "progression_plan": [
+                "early onboarding pressure",
+                "mid-session escalation with variant patterns",
+                "late-session clutch window with comeback route",
+            ],
+            "encounter_plan": [
+                "baseline mobs + elite cadence",
+                "telegraphed hazard wave",
+                "periodic miniboss pressure",
+            ],
+            "risk_reward_plan": [
+                "optional high-risk combo window",
+                "resource tradeoff between safety and score",
+                "failure penalty with recovery route",
+            ],
+            "control_model": f"genre:{genre} / keyboard analog intent / restartable loop",
+            "balance_baseline": {
+                "base_hp": 3.0,
+                "base_spawn_rate": 1.0,
+                "difficulty_scale_per_min": 1.2,
+                "session_time_sec": 120.0,
+            },
+        }
+        return VertexGenerationResult(
+            payload=payload,
+            meta={"generation_source": "stub", "reason": reason},
+        )
+
+    @staticmethod
+    def _fallback_design_contract(
+        *,
+        keyword: str,
+        genre: str,
+        visual_style: str,
+        reason: str = "vertex_not_configured",
+    ) -> VertexGenerationResult:
+        payload = {
+            "camera_ui_contract": [
+                "camera motion must preserve player orientation",
+                "hud keeps score + time + hp readable at a glance",
+                "no full-screen overlay blocking active playfield",
+            ],
+            "asset_blueprint_2d3d": [
+                f"{genre} player rig silhouette",
+                "enemy archetype set (light/heavy/elite)",
+                "projectile and trail VFX pack",
+                "arena modules and prop kit",
+                f"style kit: {visual_style} / keyword: {keyword}",
+            ],
+            "scene_layers": [
+                "foreground gameplay layer",
+                "midground interaction layer",
+                "background depth/parallax layer",
+                "postfx feedback layer",
+            ],
+            "feedback_fx_contract": [
+                "hit confirmation flash + sound hook",
+                "danger telegraph before burst",
+                "combo escalation visual response",
+            ],
+            "readability_contract": [
+                "player/enemy/projectile color separation",
+                "critical interactables are edge-highlighted",
+                "motion effects never hide collision shapes",
+            ],
+        }
+        return VertexGenerationResult(
+            payload=payload,
             meta={"generation_source": "stub", "reason": reason},
         )
 

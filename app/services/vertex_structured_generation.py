@@ -5,7 +5,14 @@ import time
 from typing import Any, Protocol
 
 from app.core.config import Settings
-from app.services.vertex_models import DesignSpecModel, GDDModel, GameConfigModel
+from app.services.vertex_models import (
+    AnalyzeContractModel,
+    DesignContractModel,
+    DesignSpecModel,
+    GDDModel,
+    GameConfigModel,
+    PlanContractModel,
+)
 from app.services.vertex_types import VertexGenerationResult
 
 logger = logging.getLogger(__name__)
@@ -38,6 +45,22 @@ class VertexStructuredGenerationClient(Protocol):
     def _gdd_prompt(self, keyword: str) -> str: ...
 
     def _design_prompt(self, *, keyword: str, visual_style: str, genre: str) -> str: ...
+    def _analyze_contract_prompt(self, keyword: str) -> str: ...
+    def _plan_contract_prompt(
+        self,
+        *,
+        keyword: str,
+        gdd: dict[str, Any],
+        research_summary: dict[str, Any] | None,
+    ) -> str: ...
+    def _design_contract_prompt(
+        self,
+        *,
+        keyword: str,
+        genre: str,
+        visual_style: str,
+        design_spec: dict[str, Any],
+    ) -> str: ...
 
     def _builder_prompt(
         self,
@@ -55,6 +78,22 @@ class VertexStructuredGenerationClient(Protocol):
     def _fallback_design_spec(self, *, visual_style: str, reason: str = "vertex_not_configured") -> VertexGenerationResult: ...
 
     def _fallback_game_config(self) -> GameConfigModel: ...
+    def _fallback_analyze_contract(self, keyword: str, *, reason: str = "vertex_not_configured") -> VertexGenerationResult: ...
+    def _fallback_plan_contract(
+        self,
+        *,
+        keyword: str,
+        gdd: dict[str, Any],
+        reason: str = "vertex_not_configured",
+    ) -> VertexGenerationResult: ...
+    def _fallback_design_contract(
+        self,
+        *,
+        keyword: str,
+        genre: str,
+        visual_style: str,
+        reason: str = "vertex_not_configured",
+    ) -> VertexGenerationResult: ...
 
     def _model_to_dict(self, model: Any) -> dict[str, Any]: ...
 
@@ -119,6 +158,171 @@ def generate_gdd_bundle(service: VertexStructuredGenerationClient, keyword: str)
         )
 
 
+def generate_analyze_contract(
+    service: VertexStructuredGenerationClient,
+    *,
+    keyword: str,
+) -> VertexGenerationResult:
+    fallback = service._fallback_analyze_contract(keyword)
+    if not service._is_enabled():
+        return fallback
+
+    started = time.perf_counter()
+    try:
+        prompt = service._analyze_contract_prompt(keyword)
+        usage: dict[str, Any] = {}
+        if service._use_genai_sdk():
+            raw, usage = service._genai_json(
+                model_name=service.settings.gemini_pro_model,
+                prompt=prompt,
+                schema=AnalyzeContractModel,
+                temperature=0.25,
+            )
+        else:
+            model = service._pro_model()
+            runnable = model.with_structured_output(AnalyzeContractModel, method="json_mode")
+            raw = service._invoke_with_retry(runnable, prompt)
+        parsed = raw if isinstance(raw, AnalyzeContractModel) else AnalyzeContractModel.model_validate(raw)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return VertexGenerationResult(
+            payload=parsed.model_dump(),
+            meta={
+                "generation_source": "vertex",
+                "model": service.settings.gemini_pro_model,
+                "latency_ms": latency_ms,
+                "usage": usage,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - external API path
+        logger.warning("Vertex analyze contract generation failed, using fallback: %s", exc)
+        failed = service._fallback_analyze_contract(keyword, reason=f"vertex_error:{type(exc).__name__}")
+        return VertexGenerationResult(
+            payload=failed.payload,
+            meta={
+                **failed.meta,
+                "vertex_error": str(exc),
+                "model": service.settings.gemini_pro_model,
+            },
+        )
+
+
+def generate_plan_contract(
+    service: VertexStructuredGenerationClient,
+    *,
+    keyword: str,
+    gdd: dict[str, Any],
+    research_summary: dict[str, Any] | None = None,
+) -> VertexGenerationResult:
+    fallback = service._fallback_plan_contract(keyword=keyword, gdd=gdd)
+    if not service._is_enabled():
+        return fallback
+
+    started = time.perf_counter()
+    try:
+        prompt = service._plan_contract_prompt(
+            keyword=keyword,
+            gdd=gdd,
+            research_summary=research_summary,
+        )
+        usage: dict[str, Any] = {}
+        if service._use_genai_sdk():
+            raw, usage = service._genai_json(
+                model_name=service.settings.gemini_pro_model,
+                prompt=prompt,
+                schema=PlanContractModel,
+                temperature=0.3,
+            )
+        else:
+            model = service._pro_model()
+            runnable = model.with_structured_output(PlanContractModel, method="json_mode")
+            raw = service._invoke_with_retry(runnable, prompt)
+        parsed = raw if isinstance(raw, PlanContractModel) else PlanContractModel.model_validate(raw)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return VertexGenerationResult(
+            payload=parsed.model_dump(),
+            meta={
+                "generation_source": "vertex",
+                "model": service.settings.gemini_pro_model,
+                "latency_ms": latency_ms,
+                "usage": usage,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - external API path
+        logger.warning("Vertex plan contract generation failed, using fallback: %s", exc)
+        failed = service._fallback_plan_contract(
+            keyword=keyword,
+            gdd=gdd,
+            reason=f"vertex_error:{type(exc).__name__}",
+        )
+        return VertexGenerationResult(
+            payload=failed.payload,
+            meta={
+                **failed.meta,
+                "vertex_error": str(exc),
+                "model": service.settings.gemini_pro_model,
+            },
+        )
+
+
+def generate_design_contract(
+    service: VertexStructuredGenerationClient,
+    *,
+    keyword: str,
+    genre: str,
+    visual_style: str,
+    design_spec: dict[str, Any],
+) -> VertexGenerationResult:
+    fallback = service._fallback_design_contract(keyword=keyword, genre=genre, visual_style=visual_style)
+    if not service._is_enabled():
+        return fallback
+
+    started = time.perf_counter()
+    try:
+        prompt = service._design_contract_prompt(
+            keyword=keyword,
+            genre=genre,
+            visual_style=visual_style,
+            design_spec=design_spec,
+        )
+        usage: dict[str, Any] = {}
+        if service._use_genai_sdk():
+            raw, usage = service._genai_json(
+                model_name=service.settings.gemini_pro_model,
+                prompt=prompt,
+                schema=DesignContractModel,
+                temperature=0.25,
+            )
+        else:
+            model = service._pro_model()
+            runnable = model.with_structured_output(DesignContractModel, method="json_mode")
+            raw = service._invoke_with_retry(runnable, prompt)
+        parsed = raw if isinstance(raw, DesignContractModel) else DesignContractModel.model_validate(raw)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return VertexGenerationResult(
+            payload=parsed.model_dump(),
+            meta={
+                "generation_source": "vertex",
+                "model": service.settings.gemini_pro_model,
+                "latency_ms": latency_ms,
+                "usage": usage,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - external API path
+        logger.warning("Vertex design contract generation failed, using fallback: %s", exc)
+        failed = service._fallback_design_contract(
+            keyword=keyword,
+            genre=genre,
+            visual_style=visual_style,
+            reason=f"vertex_error:{type(exc).__name__}",
+        )
+        return VertexGenerationResult(
+            payload=failed.payload,
+            meta={
+                **failed.meta,
+                "vertex_error": str(exc),
+                "model": service.settings.gemini_pro_model,
+            },
+        )
 def generate_design_spec(
     service: VertexStructuredGenerationClient,
     *,

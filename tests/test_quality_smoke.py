@@ -50,7 +50,7 @@ def test_non_fatal_issue_classifiers() -> None:
     )
 
 
-def test_runtime_liveness_detects_immediate_game_over_overlay() -> None:
+def test_runtime_liveness_flags_game_over_overlay_as_warning() -> None:
     fatal, warnings = evaluate_runtime_liveness(
         before={
             "boot_ok": True,
@@ -73,11 +73,12 @@ def test_runtime_liveness_detects_immediate_game_over_overlay() -> None:
         },
     )
 
-    assert "immediate_game_over_overlay" in fatal
-    assert warnings == ["timer_static_with_overlay"]
+    assert fatal == []
+    assert "overlay_game_over_visible" in warnings
+    assert "timer_static_with_overlay" in warnings
 
 
-def test_runtime_liveness_flags_manual_start_overlay_as_fatal() -> None:
+def test_runtime_liveness_flags_manual_start_overlay_as_warning() -> None:
     fatal, warnings = evaluate_runtime_liveness(
         before={
             "boot_ok": True,
@@ -100,9 +101,9 @@ def test_runtime_liveness_flags_manual_start_overlay_as_fatal() -> None:
         },
     )
 
-    assert "manual_start_interaction_required" in fatal
-    assert "timer_static_manual_start_gate" in fatal
-    assert warnings == []
+    assert fatal == []
+    assert "manual_start_interaction_required" in warnings
+    assert "timer_static_manual_start_gate" in warnings
 
 
 def test_runtime_liveness_flags_overflow_as_warning() -> None:
@@ -157,9 +158,9 @@ def test_runtime_liveness_detects_game_over_via_visible_text() -> None:
         },
     )
 
-    assert "immediate_game_over_visible_text" in fatal
-    assert "immediate_zero_hp_state" in fatal
-    assert warnings == []
+    assert fatal == []
+    assert "immediate_zero_hp_state" in warnings
+    assert "game_over_visible_with_runtime_signal" in warnings
 
 
 def test_runtime_liveness_treats_game_over_text_only_as_warning() -> None:

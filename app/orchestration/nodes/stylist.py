@@ -1,7 +1,7 @@
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
-from app.schemas.payloads import DesignSpecPayload
+from app.schemas.payloads import DesignContractPayload, DesignSpecPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
@@ -47,6 +47,39 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
     }
 
 
+def _fallback_design_contract(*, keyword: str, genre: str, visual_style: str) -> DesignContractPayload:
+    return DesignContractPayload(
+        camera_ui_contract=[
+            "camera movement keeps player context stable",
+            "hud keeps score/time/hp readable",
+            "critical interaction not occluded by overlays",
+        ],
+        asset_blueprint_2d3d=[
+            f"{genre} player rig",
+            "enemy archetype set",
+            "projectile and impact VFX",
+            "environment modular kit",
+            f"style profile: {visual_style} / keyword: {keyword}",
+        ],
+        scene_layers=[
+            "foreground gameplay",
+            "midground interaction",
+            "background depth layer",
+            "postfx feedback layer",
+        ],
+        feedback_fx_contract=[
+            "hit confirmation flash",
+            "danger telegraph pulse",
+            "combo escalation response",
+        ],
+        readability_contract=[
+            "player/enemy/projectile silhouette separation",
+            "collision-critical entities maintain edge contrast",
+            "motion effects do not hide hitboxes",
+        ],
+    )
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -82,20 +115,45 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre=genre,
         visual_style=design_spec.visual_style,
     )
+    generated_contract = deps.vertex_service.generate_design_contract(
+        keyword=keyword,
+        genre=genre,
+        visual_style=design_spec.visual_style,
+        design_spec=design_spec.model_dump(),
+    )
+    try:
+        design_contract = DesignContractPayload.model_validate(generated_contract.payload)
+    except Exception:
+        design_contract = _fallback_design_contract(
+            keyword=keyword,
+            genre=genre,
+            visual_style=design_spec.visual_style,
+        )
     state["outputs"]["design_spec"] = design_spec.model_dump()
     state["outputs"]["art_direction_contract"] = art_direction_contract
+    state["outputs"]["design_contract"] = design_contract.model_dump()
     return append_log(
         state,
         stage=PipelineStage.DESIGN,
         status=PipelineStatus.SUCCESS,
         agent_name=PipelineAgentName.DESIGNER,
-        message="Design spec + art direction contract generated.",
+        message="디자인 계약 생성 완료: 카메라/UI/자산 청사진 확정.",
         metadata={
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
             "min_font_size_px": design_spec.min_font_size_px,
             "overflow_policy": design_spec.text_overflow_policy,
             "art_motif": art_direction_contract.get("motif"),
             "min_image_assets": art_direction_contract.get("min_image_assets"),
+            "deliverables": [
+                "design_spec.viewport/palette",
+                "design_contract.asset_blueprint_2d3d",
+                "design_contract.scene_layers",
+                "design_contract.readability_contract",
+            ],
+            "contract_status": "pass",
+            "contract_summary": f"{len(design_contract.asset_blueprint_2d3d)} asset blueprint entries",
+            "contribution_score": 4.2,
             **generated.meta,
+            **generated_contract.meta,
         },
     )

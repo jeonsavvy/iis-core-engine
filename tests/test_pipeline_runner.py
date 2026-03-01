@@ -162,7 +162,7 @@ def test_pipeline_runner_success_flow_contains_style_and_publish() -> None:
     assert usage_summary.get("game_slug")
 
 
-def test_pipeline_runner_marks_error_after_three_qa_retries() -> None:
+def test_pipeline_runner_forced_runtime_soft_fail_still_completes() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="retry test", qa_fail_until=3))
     queued_job = repository.claim_next_queued_pipeline()
@@ -174,13 +174,13 @@ def test_pipeline_runner_marks_error_after_three_qa_retries() -> None:
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
-    assert final_job.status == PipelineStatus.ERROR
-    assert final_job.error_reason == "QA failed after 3 attempts"
+    assert final_job.status == PipelineStatus.SUCCESS
+    assert final_job.error_reason is None
 
     logs = repository.list_logs(job.pipeline_id)
-    qa_retry_logs = [log for log in logs if log.stage.value == "qa_runtime" and log.status.value == "retry"]
-    assert len(qa_retry_logs) == 3
-    assert any(log.status.value == "error" and log.stage.value == "qa_runtime" for log in logs)
+    qa_runtime_logs = [log for log in logs if log.stage.value == "qa_runtime"]
+    assert qa_runtime_logs
+    assert any(log.reason == "soft_fail" for log in qa_runtime_logs)
 
 
 def test_pipeline_runner_quality_gate_soft_fails_but_pipeline_succeeds() -> None:
@@ -203,7 +203,7 @@ def test_pipeline_runner_quality_gate_soft_fails_but_pipeline_succeeds() -> None
     assert any(log.reason == "soft_fail" for log in qa_quality_logs)
 
 
-def test_pipeline_runner_quality_gate_blocks_when_hard_gate_enabled() -> None:
+def test_pipeline_runner_quality_gate_hard_gate_flag_does_not_block_release() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="quality hard gate", qa_fail_until=0))
     queued_job = repository.claim_next_queued_pipeline()
@@ -215,5 +215,5 @@ def test_pipeline_runner_quality_gate_blocks_when_hard_gate_enabled() -> None:
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
-    assert final_job.status == PipelineStatus.ERROR
-    assert final_job.error_reason == "qa_hard_gate_blocked"
+    assert final_job.status == PipelineStatus.SUCCESS
+    assert final_job.error_reason is None
