@@ -140,6 +140,10 @@ def test_sentinel_retries_runtime_console_error_without_builder_guard_context() 
 
     assert result["needs_rebuild"] is True
     assert any(log.status == PipelineStatus.RETRY for log in result["logs"])
+    rebuild_feedback = result["outputs"].get("qa_rebuild_feedback")
+    assert isinstance(rebuild_feedback, dict)
+    assert rebuild_feedback.get("gate") == "runtime"
+    assert rebuild_feedback.get("reason") == "runtime_console_error"
 
 
 def test_sentinel_visual_gate_requests_one_rebuild_then_soft_fails() -> None:

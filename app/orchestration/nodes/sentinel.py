@@ -16,9 +16,27 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     state["qa_attempt"] += 1
 
+    def _set_rebuild_feedback(
+        *,
+        gate: str,
+        reason: str,
+        failed_checks: list[str] | None = None,
+        fatal_errors: list[str] | None = None,
+        non_fatal_warnings: list[str] | None = None,
+    ) -> None:
+        state["outputs"]["qa_rebuild_feedback"] = {
+            "gate": gate,
+            "reason": reason,
+            "qa_attempt": state["qa_attempt"],
+            "failed_checks": [str(item).strip() for item in (failed_checks or []) if str(item).strip()],
+            "fatal_errors": [str(item).strip() for item in (fatal_errors or []) if str(item).strip()],
+            "non_fatal_warnings": [str(item).strip() for item in (non_fatal_warnings or []) if str(item).strip()],
+        }
+
     # deterministic forced failures for controlled retry testing
     if state["qa_attempt"] <= state["fail_qa_until"]:
         state["needs_rebuild"] = True
+        state["outputs"].pop("qa_rebuild_feedback", None)
         return append_log(
             state,
             stage=PipelineStage.QA,
@@ -73,6 +91,12 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 },
             )
         else:
+            _set_rebuild_feedback(
+                gate="runtime",
+                reason=str(smoke_result.reason or "runtime_console_error"),
+                fatal_errors=smoke_result.fatal_errors or [],
+                non_fatal_warnings=smoke_result.non_fatal_warnings or [],
+            )
             state["needs_rebuild"] = True
             return append_log(
                 state,
@@ -104,6 +128,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         design_spec=design_spec if isinstance(design_spec, dict) else None,
     )
     if not quality_result.ok:
+        _set_rebuild_feedback(
+            gate="quality",
+            reason="quality_score_below_threshold",
+            failed_checks=quality_result.failed_checks,
+        )
         state["needs_rebuild"] = True
         return append_log(
             state,
@@ -129,6 +158,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         keyword=str(state.get("keyword", "")),
     )
     if not gameplay_result.ok:
+        _set_rebuild_feedback(
+            gate="gameplay",
+            reason="gameplay_depth_below_threshold",
+            failed_checks=gameplay_result.failed_checks,
+        )
         state["needs_rebuild"] = True
         return append_log(
             state,
@@ -162,6 +196,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "visual_metrics": smoke_result.visual_metrics or {},
         }
         if visual_retry_count < visual_retry_budget:
+            _set_rebuild_feedback(
+                gate="visual",
+                reason="visual_quality_below_threshold",
+                failed_checks=visual_result.failed_checks,
+            )
             state["outputs"]["visual_retry_count"] = visual_retry_count + 1
             state["needs_rebuild"] = True
             return append_log(
@@ -213,6 +252,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         else None,
     )
     if not artifact_result.ok:
+        _set_rebuild_feedback(
+            gate="artifact",
+            reason="artifact_contract_below_threshold",
+            failed_checks=artifact_result.failed_checks,
+        )
         state["needs_rebuild"] = True
         return append_log(
             state,
@@ -231,6 +275,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     state["needs_rebuild"] = False
+    state["outputs"].pop("qa_rebuild_feedback", None)
     qa_message = "QA passed via Playwright smoke check and quality/gameplay gates."
     if smoke_result.reason:
         qa_message = f"QA passed with fallback: {smoke_result.reason}"

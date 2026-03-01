@@ -275,6 +275,8 @@ def evaluate_runtime_liveness(
         overlay_text = str(after.get("overlay_text", "") or "").casefold()
         if any(token in overlay_text for token in ("game over", "최종 점수", "실패", "패배")):
             fatal_errors.append("immediate_game_over_overlay")
+        elif any(token in overlay_text for token in ("tap", "click", "start", "시작")):
+            fatal_errors.append("manual_start_interaction_required")
         else:
             warnings.append("startup_overlay_visible")
 
@@ -284,7 +286,11 @@ def evaluate_runtime_liveness(
         timer_delta = abs(timer_after - timer_before)
         if timer_delta < 0.05:
             if bool(after.get("overlay_visible")):
-                warnings.append("timer_static_with_overlay")
+                overlay_text = str(after.get("overlay_text", "") or "").casefold()
+                if any(token in overlay_text for token in ("tap", "click", "start", "시작")):
+                    fatal_errors.append("timer_static_manual_start_gate")
+                else:
+                    warnings.append("timer_static_with_overlay")
             else:
                 fatal_errors.append("timer_not_progressing")
 

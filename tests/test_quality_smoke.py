@@ -77,7 +77,7 @@ def test_runtime_liveness_detects_immediate_game_over_overlay() -> None:
     assert warnings == ["timer_static_with_overlay"]
 
 
-def test_runtime_liveness_tolerates_start_overlay_without_game_over_text() -> None:
+def test_runtime_liveness_flags_manual_start_overlay_as_fatal() -> None:
     fatal, warnings = evaluate_runtime_liveness(
         before={
             "boot_ok": True,
@@ -100,9 +100,9 @@ def test_runtime_liveness_tolerates_start_overlay_without_game_over_text() -> No
         },
     )
 
-    assert fatal == []
-    assert "startup_overlay_visible" in warnings
-    assert "timer_static_with_overlay" in warnings
+    assert "manual_start_interaction_required" in fatal
+    assert "timer_static_manual_start_gate" in fatal
+    assert warnings == []
 
 
 def test_runtime_liveness_flags_overflow_as_warning() -> None:

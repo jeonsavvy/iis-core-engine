@@ -20,6 +20,85 @@ class ProductionBuildResult:
     metadata: dict[str, Any]
 
 
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _build_rebuild_feedback_hint(state: PipelineState) -> tuple[str, list[str]]:
+    feedback = state["outputs"].get("qa_rebuild_feedback")
+    if not isinstance(feedback, dict):
+        return "", []
+
+    gate = str(feedback.get("gate", "")).strip().casefold()
+    reason = str(feedback.get("reason", "")).strip()
+    failed_checks = _string_list(feedback.get("failed_checks"))
+    fatal_errors = _string_list(feedback.get("fatal_errors"))
+    warning_rows = _string_list(feedback.get("non_fatal_warnings"))
+    tokens = failed_checks + fatal_errors
+    token_preview = ", ".join(tokens[:6]) if tokens else ""
+
+    if gate == "runtime":
+        hint = (
+            "Prior QA runtime failure detected. Ensure iframe-ready auto-start without click dependency, "
+            "stable first 3 seconds, and no immediate game-over overlay."
+        )
+        if token_preview:
+            hint += f" Runtime issues: {token_preview}."
+        if reason:
+            hint += f" Reason: {reason}."
+        if warning_rows:
+            hint += f" Warnings: {', '.join(warning_rows[:4])}."
+        return hint, tokens
+
+    if gate == "quality":
+        hint = "Prior QA quality gate failed. Reinforce viewport/readability/contract tokens and runtime shell compatibility."
+        if token_preview:
+            hint += f" Failed checks: {token_preview}."
+        if reason:
+            hint += f" Reason: {reason}."
+        return hint, tokens
+
+    if gate == "gameplay":
+        hint = "Prior QA gameplay gate failed. Strengthen core loop pressure, restart loop, telegraphs, and risk-reward pacing."
+        if token_preview:
+            hint += f" Failed checks: {token_preview}."
+        if reason:
+            hint += f" Reason: {reason}."
+        return hint, tokens
+
+    if gate == "artifact":
+        hint = "Prior artifact contract gate failed. Increase procedural layer richness, animation hooks, and asset pipeline metadata integrity."
+        if token_preview:
+            hint += f" Failed checks: {token_preview}."
+        if reason:
+            hint += f" Reason: {reason}."
+        return hint, tokens
+
+    if gate == "visual":
+        hint = "Prior visual gate retry request detected. Improve contrast, color diversity, silhouette clarity, and motion readability."
+        if token_preview:
+            hint += f" Failed checks: {token_preview}."
+        if reason:
+            hint += f" Reason: {reason}."
+        return hint, tokens
+
+    if not reason and not token_preview:
+        return "", []
+    generic = "Prior QA feedback exists. Resolve recent gate failures before adding new complexity."
+    if token_preview:
+        generic += f" Issues: {token_preview}."
+    if reason:
+        generic += f" Reason: {reason}."
+    return generic, tokens
+
+
 def build_production_artifact(
     *,
     state: PipelineState,
@@ -39,6 +118,7 @@ def build_production_artifact(
     candidate_count = 1
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
     design_spec_dump = design_spec.model_dump()
+    rebuild_feedback_hint, rebuild_feedback_tokens = _build_rebuild_feedback_hint(state)
     qa_visual_feedback = state["outputs"].get("qa_visual_feedback")
     visual_feedback_hint = ""
     visual_feedback_failed_checks: list[str] = []
@@ -53,6 +133,8 @@ def build_production_artifact(
                 + ". Improve contrast, color diversity, edge definition, and readable motion cues."
             )
 
+    combined_feedback_hint = " ".join(chunk for chunk in (rebuild_feedback_hint, visual_feedback_hint) if chunk).strip()
+
     append_log(
         state,
         stage=PipelineStage.BUILD,
@@ -65,6 +147,8 @@ def build_production_artifact(
             "asset_pack": asset_pack["name"],
             "configured_candidate_count": configured_candidate_count,
             "candidate_count": candidate_count,
+            "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
+            "rebuild_feedback_tokens": rebuild_feedback_tokens,
             "visual_feedback_hint_applied": bool(visual_feedback_hint),
             "visual_feedback_failed_checks": visual_feedback_failed_checks,
         },
@@ -73,8 +157,8 @@ def build_production_artifact(
     candidate_rows: list[dict[str, Any]] = []
     for index, variation_hint in enumerate(variation_hints, start=1):
         effective_variation_hint = (
-            f"{variation_hint} | {visual_feedback_hint}"
-            if visual_feedback_hint
+            f"{variation_hint} | {combined_feedback_hint}"
+            if combined_feedback_hint
             else variation_hint
         )
         generated_config = deps.vertex_service.generate_game_config(
@@ -383,6 +467,8 @@ def build_production_artifact(
         "final_quality_score": final_quality_score,
         "final_gameplay_score": final_gameplay_score,
         "final_composite_score": final_composite_score,
+        "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
+        "rebuild_feedback_tokens": rebuild_feedback_tokens,
         "polish_applied": use_polished,
         "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
         "polish_model": polish_result.meta.get("model"),
