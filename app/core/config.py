@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     builder_codegen_max_output_tokens: int = Field(default=12_000, ge=512, le=65_536)
     builder_force_pro_model: bool = True
     builder_scope_guard_enabled: bool = True
+    builder_asset_memory_enabled: bool = True
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
 
     pipeline_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30.0)

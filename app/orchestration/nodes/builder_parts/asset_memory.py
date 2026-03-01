@@ -58,21 +58,7 @@ def collect_asset_memory_context(
 ) -> AssetMemoryContext:
     logs = deps.repository.list_recent_logs(limit=limit)
     if not logs:
-        empty_profile = {
-            "source": "pipeline_logs_v1",
-            "preferred_asset_pack": None,
-            "preferred_variant_id": None,
-            "preferred_variant_theme": None,
-            "failure_reasons": [],
-            "failure_tokens": [],
-            "sample_size": 0,
-        }
-        return AssetMemoryContext(
-            hint="",
-            recurring_failures=[],
-            retrieval_profile=empty_profile,
-            registry_snapshot={"build_success_samples": 0, "qa_failure_samples": 0},
-        )
+        return empty_asset_memory_context()
 
     pipeline_engine = _resolve_pipeline_engine(logs)
     current_pipeline_id = str(state["pipeline_id"])
@@ -173,4 +159,22 @@ def collect_asset_memory_context(
         recurring_failures=[*top_reasons, *top_tokens],
         retrieval_profile=retrieval_profile,
         registry_snapshot=registry_snapshot,
+    )
+
+
+def empty_asset_memory_context() -> AssetMemoryContext:
+    empty_profile: dict[str, object] = {
+        "source": "pipeline_logs_v1",
+        "preferred_asset_pack": None,
+        "preferred_variant_id": None,
+        "preferred_variant_theme": None,
+        "failure_reasons": [],
+        "failure_tokens": [],
+        "sample_size": 0,
+    }
+    return AssetMemoryContext(
+        hint="",
+        recurring_failures=[],
+        retrieval_profile=empty_profile,
+        registry_snapshot={"build_success_samples": 0, "qa_failure_samples": 0},
     )

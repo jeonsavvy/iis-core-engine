@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.builder_parts.asset_memory import collect_asset_memory_context
+from app.orchestration.nodes.builder_parts.asset_memory import collect_asset_memory_context, empty_asset_memory_context
 from app.orchestration.nodes.builder_parts.assets import _build_hybrid_asset_bank, _resolve_asset_pack
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
@@ -108,11 +108,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     asset_pack = _resolve_asset_pack(core_loop_type=core_loop_type, palette=palette)
-    asset_memory_context = collect_asset_memory_context(
-        state=state,
-        deps=deps,
-        core_loop_type=core_loop_type,
-    )
+    if deps.vertex_service.settings.builder_asset_memory_enabled:
+        asset_memory_context = collect_asset_memory_context(
+            state=state,
+            deps=deps,
+            core_loop_type=core_loop_type,
+        )
+    else:
+        asset_memory_context = empty_asset_memory_context()
     state["outputs"]["asset_memory_context"] = asset_memory_context.registry_snapshot
 
     append_log(
