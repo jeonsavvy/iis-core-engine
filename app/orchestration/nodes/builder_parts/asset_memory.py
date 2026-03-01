@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import re
 from statistics import mean
 
 from app.orchestration.graph.state import PipelineState
@@ -58,32 +59,84 @@ def _resolve_pipeline_engine(logs: list[PipelineLogRecord]) -> dict[str, str]:
     return mapping
 
 
+def _tokenize_keyword(value: str) -> set[str]:
+    return {token for token in re.split(r"[^a-z0-9]+", value.lower()) if len(token) >= 2}
+
+
+def _row_effective_quality(row: dict[str, object]) -> float:
+    for key in ("final_composite_score", "final_quality_score", "final_gameplay_score"):
+        score = _to_float(row.get(key), -1.0)
+        if score >= 0:
+            return score
+    return 0.0
+
+
+def _registry_row_score(
+    *,
+    row: dict[str, object],
+    current_keyword_tokens: set[str],
+    rank: int,
+) -> tuple[float, float]:
+    row_keyword_tokens = _tokenize_keyword(str(row.get("keyword", "")).strip())
+    shared_tokens = len(current_keyword_tokens & row_keyword_tokens)
+    keyword_overlap = (
+        shared_tokens / max(len(current_keyword_tokens), 1)
+        if current_keyword_tokens
+        else 0.0
+    )
+
+    qa_status = str(row.get("qa_status", "")).strip().lower()
+    qa_bonus = 0.0
+    if qa_status == "success":
+        qa_bonus = 8.0
+    elif qa_status in {"retry", "error"}:
+        qa_bonus = -14.0
+
+    failure_penalty = min(len(_to_str_list(row.get("failure_reasons"))) * 2.5, 12.0)
+    recency_bonus = max(6.0 - (rank * 0.12), 0.0)
+    overlap_bonus = keyword_overlap * 16.0
+    base_quality = _row_effective_quality(row)
+    composed_score = base_quality + qa_bonus + overlap_bonus + recency_bonus - failure_penalty
+    return max(composed_score, 0.0), keyword_overlap
+
+
 def _build_context_from_registry_entries(
     *,
     entries: list[dict[str, object]],
     core_loop_type: str,
+    keyword: str,
 ) -> AssetMemoryContext | None:
     if not entries:
         return None
 
+    current_keyword_tokens = _tokenize_keyword(keyword)
     pack_scores: dict[str, list[float]] = defaultdict(list)
     variant_scores: dict[str, list[float]] = defaultdict(list)
     theme_scores: dict[str, list[float]] = defaultdict(list)
     failure_reason_counter: Counter[str] = Counter()
     failure_token_counter: Counter[str] = Counter()
+    keyword_match_count = 0
 
-    for row in entries:
+    for index, row in enumerate(entries):
+        row_score, overlap = _registry_row_score(
+            row=row,
+            current_keyword_tokens=current_keyword_tokens,
+            rank=index,
+        )
+        if overlap > 0:
+            keyword_match_count += 1
+
         asset_pack = str(row.get("asset_pack", "")).strip()
         if asset_pack:
-            pack_scores[asset_pack].append(_to_float(row.get("final_composite_score"), 0.0))
+            pack_scores[asset_pack].append(row_score)
 
         variant_id = str(row.get("variant_id", "")).strip()
         if variant_id:
-            variant_scores[variant_id].append(_to_float(row.get("final_composite_score"), 0.0))
+            variant_scores[variant_id].append(row_score)
 
         variant_theme = str(row.get("variant_theme", "")).strip()
         if variant_theme:
-            theme_scores[variant_theme].append(_to_float(row.get("final_composite_score"), 0.0))
+            theme_scores[variant_theme].append(row_score)
 
         for reason in _to_str_list(row.get("failure_reasons")):
             failure_reason_counter[reason] += 1
@@ -116,6 +169,9 @@ def _build_context_from_registry_entries(
         "failure_reasons": top_reasons,
         "failure_tokens": top_tokens,
         "sample_size": len(entries),
+        "keyword_match_count": keyword_match_count,
+        "keyword_query_tokens": sorted(current_keyword_tokens),
+        "scoring_profile": "quality+qa_status+keyword_overlap+recency-failure_penalty",
     }
     registry_snapshot: dict[str, object] = {
         "core_loop_type": core_loop_type,
@@ -137,6 +193,7 @@ def _build_context_from_registry_entries(
         ],
         "failure_reasons": [{"reason": key, "count": count} for key, count in failure_reason_counter.items()],
         "failure_tokens": [{"token": key, "count": count} for key, count in failure_token_counter.items()],
+        "keyword_match_count": keyword_match_count,
     }
     return AssetMemoryContext(
         hint=" ".join(hint_parts).strip(),
@@ -157,7 +214,11 @@ def collect_asset_memory_context(
     if callable(list_registry):
         rows = list_registry(core_loop_type=core_loop_type, limit=min(limit, 120))
         typed_rows = [row for row in rows if isinstance(row, dict)]
-        registry_context = _build_context_from_registry_entries(entries=typed_rows, core_loop_type=core_loop_type)
+        registry_context = _build_context_from_registry_entries(
+            entries=typed_rows,
+            core_loop_type=core_loop_type,
+            keyword=state.get("keyword", ""),
+        )
         if registry_context is not None:
             return registry_context
 

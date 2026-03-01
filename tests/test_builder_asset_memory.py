@@ -178,3 +178,48 @@ def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
     assert result.retrieval_profile.get("source") == "asset_registry_v1"
     assert result.retrieval_profile.get("preferred_asset_pack") == "webgl_neon_highway"
     assert "visual_quality_below_threshold" in cast(list[str], result.retrieval_profile.get("failure_reasons", []))
+
+
+def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -> None:
+    current_pipeline_id = uuid4()
+    deps = SimpleNamespace(
+        repository=_FakeRepository(
+            logs=[],
+            registry_rows=[
+                {
+                    "pipeline_id": str(uuid4()),
+                    "keyword": "generic speed game",
+                    "core_loop_type": "webgl_three_runner",
+                    "asset_pack": "failed_pack",
+                    "variant_id": "failed-variant",
+                    "variant_theme": "aggressive",
+                    "final_composite_score": 99.0,
+                    "qa_status": "error",
+                    "failure_reasons": ["runtime_error_detected"],
+                    "failure_tokens": ["console_error"],
+                },
+                {
+                    "pipeline_id": str(uuid4()),
+                    "keyword": "neon racer sprint",
+                    "core_loop_type": "webgl_three_runner",
+                    "asset_pack": "stable_pack",
+                    "variant_id": "clarity-first",
+                    "variant_theme": "readability",
+                    "final_composite_score": 88.0,
+                    "qa_status": "success",
+                    "failure_reasons": [],
+                    "failure_tokens": [],
+                },
+            ],
+        )
+    )
+
+    result = collect_asset_memory_context(
+        state=_state(current_pipeline_id),
+        deps=deps,
+        core_loop_type="webgl_three_runner",
+    )
+
+    assert result.retrieval_profile.get("preferred_asset_pack") == "stable_pack"
+    assert result.retrieval_profile.get("preferred_variant_id") == "clarity-first"
+    assert cast(int, result.retrieval_profile.get("keyword_match_count", 0)) >= 1
