@@ -1,5 +1,8 @@
+from typing import Any
+from uuid import uuid4
+
 from app.core.config import Settings
-from app.schemas.pipeline import PipelineStage, TriggerRequest
+from app.schemas.pipeline import PipelineAgentName, PipelineStage, TriggerRequest
 from app.services.pipeline_repository import PipelineRepository
 
 
@@ -75,3 +78,41 @@ def test_asset_registry_in_memory_upsert_and_list() -> None:
     assert len(rows) == 1
     assert rows[0]["asset_pack"] == "webgl_neon_highway"
     assert rows[0]["variant_id"] == "clarity-first"
+
+
+def test_log_from_row_normalizes_legacy_stage_and_agent_name() -> None:
+    row: dict[str, Any] = {
+        "pipeline_id": str(uuid4()),
+        "stage": "echo",
+        "status": "success",
+        "agent_name": "Echo",
+        "message": "legacy log",
+        "reason": None,
+        "attempt": 1,
+        "metadata": {},
+        "created_at": "2026-03-01T00:00:00Z",
+    }
+
+    parsed = PipelineRepository._log_from_row(row)
+
+    assert parsed.stage == PipelineStage.REPORT
+    assert parsed.agent_name == PipelineAgentName.REPORTER
+
+
+def test_log_from_row_falls_back_agent_by_stage_when_unknown() -> None:
+    row: dict[str, Any] = {
+        "pipeline_id": str(uuid4()),
+        "stage": "build",
+        "status": "running",
+        "agent_name": "unknown-agent",
+        "message": "legacy log",
+        "reason": None,
+        "attempt": 1,
+        "metadata": {},
+        "created_at": "2026-03-01T00:00:00Z",
+    }
+
+    parsed = PipelineRepository._log_from_row(row)
+
+    assert parsed.stage == PipelineStage.BUILD
+    assert parsed.agent_name == PipelineAgentName.DEVELOPER

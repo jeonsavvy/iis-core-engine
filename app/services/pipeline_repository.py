@@ -15,6 +15,36 @@ from app.services.trigger_guard import validate_keyword
 
 logger = logging.getLogger(__name__)
 
+LEGACY_STAGE_ALIASES: dict[str, str] = {
+    "trigger": PipelineStage.ANALYZE.value,
+    "style": PipelineStage.DESIGN.value,
+    "qa": PipelineStage.QA_RUNTIME.value,
+    "publish": PipelineStage.RELEASE.value,
+    "echo": PipelineStage.REPORT.value,
+}
+
+LEGACY_AGENT_ALIASES: dict[str, str] = {
+    "trigger": PipelineAgentName.ANALYZER.value,
+    "architect": PipelineAgentName.PLANNER.value,
+    "stylist": PipelineAgentName.DESIGNER.value,
+    "builder": PipelineAgentName.DEVELOPER.value,
+    "sentinel": PipelineAgentName.QA_RUNTIME.value,
+    "publisher": PipelineAgentName.RELEASER.value,
+    "echo": PipelineAgentName.REPORTER.value,
+}
+
+DEFAULT_AGENT_BY_STAGE: dict[PipelineStage, PipelineAgentName] = {
+    PipelineStage.ANALYZE: PipelineAgentName.ANALYZER,
+    PipelineStage.PLAN: PipelineAgentName.PLANNER,
+    PipelineStage.DESIGN: PipelineAgentName.DESIGNER,
+    PipelineStage.BUILD: PipelineAgentName.DEVELOPER,
+    PipelineStage.QA_RUNTIME: PipelineAgentName.QA_RUNTIME,
+    PipelineStage.QA_QUALITY: PipelineAgentName.QA_QUALITY,
+    PipelineStage.RELEASE: PipelineAgentName.RELEASER,
+    PipelineStage.REPORT: PipelineAgentName.REPORTER,
+    PipelineStage.DONE: PipelineAgentName.REPORTER,
+}
+
 
 @dataclass
 class PipelineJob:
@@ -618,14 +648,44 @@ class PipelineRepository:
 
     @staticmethod
     def _log_from_row(row: dict[str, Any]) -> PipelineLogRecord:
+        stage = PipelineRepository._normalize_stage(row.get("stage"))
         return PipelineLogRecord(
             pipeline_id=UUID(str(row["pipeline_id"])),
-            stage=PipelineStage(row["stage"]),
+            stage=stage,
             status=PipelineStatus(row["status"]),
-            agent_name=PipelineAgentName(row["agent_name"]),
+            agent_name=PipelineRepository._normalize_agent_name(row.get("agent_name"), stage=stage),
             message=row.get("message", ""),
             reason=row.get("reason"),
             attempt=int(row.get("attempt", 1)),
             metadata=row.get("metadata") or {},
             created_at=PipelineRepository._to_dt(row.get("created_at")),
         )
+
+    @staticmethod
+    def _normalize_stage(value: Any) -> PipelineStage:
+        if isinstance(value, PipelineStage):
+            return value
+        normalized = str(value or "").strip()
+        if not normalized:
+            return PipelineStage.ANALYZE
+        mapped = LEGACY_STAGE_ALIASES.get(normalized.lower(), normalized)
+        try:
+            return PipelineStage(mapped)
+        except ValueError:
+            logger.warning("Unknown pipeline stage '%s'; fallback to analyze", value)
+            return PipelineStage.ANALYZE
+
+    @staticmethod
+    def _normalize_agent_name(value: Any, *, stage: PipelineStage) -> PipelineAgentName:
+        if isinstance(value, PipelineAgentName):
+            return value
+
+        normalized = str(value or "").strip()
+        if normalized:
+            mapped = LEGACY_AGENT_ALIASES.get(normalized.lower(), normalized.lower())
+            try:
+                return PipelineAgentName(mapped)
+            except ValueError:
+                logger.warning("Unknown pipeline agent '%s'; fallback by stage=%s", value, stage.value)
+
+        return DEFAULT_AGENT_BY_STAGE.get(stage, PipelineAgentName.ANALYZER)
