@@ -6,6 +6,8 @@ BRANCH="${2:-main}"
 API_SERVICE="${API_SERVICE:-iis-core-api.service}"
 WORKER_SERVICE="${WORKER_SERVICE:-iis-core-worker.service}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8000/healthz}"
+HEALTHCHECK_RETRIES="${HEALTHCHECK_RETRIES:-20}"
+HEALTHCHECK_RETRY_DELAY="${HEALTHCHECK_RETRY_DELAY:-2}"
 
 resolve_python_bin() {
   if [[ -n "${PYTHON_BIN:-}" ]]; then
@@ -48,6 +50,15 @@ resolve_venv_dir() {
     return
   fi
   echo "${APP_DIR}/.venv311"
+}
+
+run_healthcheck() {
+  curl --fail --silent --show-error \
+    --max-time 10 \
+    --retry "${HEALTHCHECK_RETRIES}" \
+    --retry-delay "${HEALTHCHECK_RETRY_DELAY}" \
+    --retry-connrefused \
+    "${HEALTHCHECK_URL}" >/dev/null
 }
 
 PY_BIN="$(resolve_python_bin)"
@@ -95,12 +106,12 @@ fi
 
 sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
 
-if ! curl --fail --silent --show-error --max-time 10 --retry 3 --retry-delay 2 "${HEALTHCHECK_URL}" >/dev/null; then
+if ! run_healthcheck; then
   echo "Healthcheck failed. Rolling back to ${PREVIOUS_COMMIT}"
   git reset --hard "${PREVIOUS_COMMIT}"
   "${VENV_DIR}/bin/pip" install -r requirements.txt
   sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
-  curl --fail --silent --show-error --max-time 10 --retry 3 --retry-delay 2 "${HEALTHCHECK_URL}" >/dev/null
+  run_healthcheck
   echo "Rollback completed."
   exit 1
 fi
