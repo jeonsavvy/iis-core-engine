@@ -182,6 +182,24 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
         probe = page.evaluate(
             """
             () => {
+              const isVisible = (element) => {
+                if (!element) return false;
+                const style = window.getComputedStyle(element);
+                if (!style) return false;
+                if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || "1") <= 0.01) return false;
+                const rect = element.getBoundingClientRect();
+                return rect.width > 1 && rect.height > 1;
+              };
+              const collectVisibleText = (selector) => {
+                const rows = [];
+                document.querySelectorAll(selector).forEach((node) => {
+                  if (!isVisible(node)) return;
+                  const raw = String(node.textContent ?? "").replace(/\\s+/g, " ").trim();
+                  if (!raw) return;
+                  rows.push(raw);
+                });
+                return rows.slice(0, 10).join(" | ").slice(0, 1200);
+              };
               const overlay = document.getElementById("overlay");
               const overlayText = document.getElementById("overlay-text")?.textContent ?? "";
               const timerText = document.getElementById("timer")?.textContent ?? "";
@@ -189,6 +207,8 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
               const hpText = document.getElementById("hp")?.textContent ?? "";
               const canvas = document.querySelector("canvas");
               const root = document.documentElement;
+              const visibleText = collectVisibleText("h1, h2, h3, [role='dialog'], [role='alert'], button, .overlay, .modal, .hud-overlay, #overlay, #overlay-text");
+              const visibleTextLower = visibleText.toLowerCase();
               return {
                 boot_ok: Boolean(window.__iis_game_boot_ok),
                 overlay_visible: Boolean(overlay && overlay.classList.contains("show")),
@@ -196,6 +216,13 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
                 timer_text: String(timerText),
                 score_text: String(scoreText),
                 hp_text: String(hpText),
+                visible_ui_text: visibleText,
+                game_over_visible: visibleTextLower.includes("game over") || visibleTextLower.includes("최종 점수"),
+                start_gate_visible:
+                  visibleTextLower.includes("tap to start")
+                  || visibleTextLower.includes("click to start")
+                  || visibleTextLower.includes("press start")
+                  || visibleTextLower.includes("시작하려면"),
                 canvas_width: Number(canvas?.width || 0),
                 canvas_height: Number(canvas?.height || 0),
                 scroll_height: Number(root?.scrollHeight || 0),
@@ -279,6 +306,10 @@ def evaluate_runtime_liveness(
             fatal_errors.append("manual_start_interaction_required")
         else:
             warnings.append("startup_overlay_visible")
+    if bool(after.get("game_over_visible")):
+        fatal_errors.append("immediate_game_over_visible_text")
+    if bool(after.get("start_gate_visible")):
+        fatal_errors.append("manual_start_interaction_required")
 
     timer_before = _extract_first_number(before.get("timer_text"))
     timer_after = _extract_first_number(after.get("timer_text"))
@@ -294,6 +325,14 @@ def evaluate_runtime_liveness(
             else:
                 fatal_errors.append("timer_not_progressing")
 
+    hp_before = _extract_first_number(before.get("hp_text"))
+    hp_after = _extract_first_number(after.get("hp_text"))
+    if hp_after is not None and hp_after <= 0:
+        if hp_before is None or hp_before > 0:
+            fatal_errors.append("immediate_zero_hp_state")
+        else:
+            warnings.append("zero_hp_state")
+
     canvas_width = _to_float(after.get("canvas_width", 0))
     canvas_height = _to_float(after.get("canvas_height", 0))
 
@@ -305,4 +344,6 @@ def evaluate_runtime_liveness(
     if client_height > 0 and scroll_height > (client_height * 1.2):
         warnings.append("runtime_layout_scroll_overflow")
 
+    fatal_errors = list(dict.fromkeys(fatal_errors))
+    warnings = [item for item in dict.fromkeys(warnings) if item not in set(fatal_errors)]
     return fatal_errors, warnings

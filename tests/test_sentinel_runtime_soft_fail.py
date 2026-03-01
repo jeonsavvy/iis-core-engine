@@ -54,6 +54,25 @@ class _RuntimeFailQualityService:
         return ArtifactContractResult(ok=True, score=80, threshold=70, failed_checks=[], checks={"artifact": True})
 
 
+class _RuntimeCriticalFailQualityService(_RuntimeFailQualityService):
+    def run_smoke_check(self, *_args, **_kwargs):
+        return SmokeCheckResult(
+            ok=False,
+            reason="runtime_console_error",
+            fatal_errors=["immediate_game_over_visible_text", "immediate_zero_hp_state"],
+            non_fatal_warnings=[],
+            visual_metrics={
+                "canvas_width": 1280.0,
+                "canvas_height": 720.0,
+                "luminance_std": 20.0,
+                "non_dark_ratio": 0.21,
+                "color_bucket_count": 18.0,
+                "edge_energy": 0.021,
+                "motion_delta": 0.0009,
+            },
+        )
+
+
 class _PublisherStub:
     def upload_screenshot(self, **_kwargs):
         return None
@@ -138,3 +157,14 @@ def test_qa_quality_hard_gate_blocks_release_when_enabled() -> None:
     assert after_quality["status"] == PipelineStatus.ERROR
     assert after_quality["reason"] == "qa_hard_gate_blocked"
     assert any(log.status == PipelineStatus.ERROR and log.stage.value == "qa_quality" for log in after_quality["logs"])
+
+
+def test_sentinel_runtime_critical_failure_requests_rebuild() -> None:
+    state = _base_state()
+    deps = _deps_with_quality(_RuntimeCriticalFailQualityService())
+
+    result = sentinel.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.RUNNING
+    assert result["needs_rebuild"] is True
+    assert any(log.status == PipelineStatus.RETRY and log.reason == "retry_builder" for log in result["logs"])

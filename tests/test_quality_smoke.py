@@ -129,3 +129,34 @@ def test_runtime_liveness_flags_overflow_as_warning() -> None:
 
     assert fatal == []
     assert "runtime_layout_scroll_overflow" in warnings
+
+
+def test_runtime_liveness_detects_game_over_via_visible_text() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 60.0",
+            "hp_text": "HP: 3",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "game_over_visible": True,
+            "visible_ui_text": "Game Over | Restart",
+            "timer_text": "Time: 58.7",
+            "hp_text": "HP: 0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+    )
+
+    assert "immediate_game_over_visible_text" in fatal
+    assert "immediate_zero_hp_state" in fatal
+    assert warnings == []
