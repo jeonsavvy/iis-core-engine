@@ -298,24 +298,26 @@ def evaluate_runtime_liveness(
     if not bool(after.get("boot_ok")):
         fatal_errors.append("boot_flag_missing")
 
-    if bool(after.get("overlay_visible")):
-        overlay_text = str(after.get("overlay_text", "") or "").casefold()
+    overlay_visible = bool(after.get("overlay_visible"))
+    overlay_text = str(after.get("overlay_text", "") or "").casefold()
+
+    if overlay_visible:
         if any(token in overlay_text for token in ("game over", "최종 점수", "실패", "패배")):
             fatal_errors.append("immediate_game_over_overlay")
         elif any(token in overlay_text for token in ("tap", "click", "start", "시작")):
             fatal_errors.append("manual_start_interaction_required")
         else:
             warnings.append("startup_overlay_visible")
-    if bool(after.get("game_over_visible")):
-        fatal_errors.append("immediate_game_over_visible_text")
     if bool(after.get("start_gate_visible")):
         fatal_errors.append("manual_start_interaction_required")
 
     timer_before = _extract_first_number(before.get("timer_text"))
     timer_after = _extract_first_number(after.get("timer_text"))
+    timer_static = False
     if timer_before is not None and timer_after is not None:
         timer_delta = abs(timer_after - timer_before)
         if timer_delta < 0.05:
+            timer_static = True
             if bool(after.get("overlay_visible")):
                 overlay_text = str(after.get("overlay_text", "") or "").casefold()
                 if any(token in overlay_text for token in ("tap", "click", "start", "시작")):
@@ -327,11 +329,19 @@ def evaluate_runtime_liveness(
 
     hp_before = _extract_first_number(before.get("hp_text"))
     hp_after = _extract_first_number(after.get("hp_text"))
+    immediate_zero_hp = False
     if hp_after is not None and hp_after <= 0:
         if hp_before is None or hp_before > 0:
             fatal_errors.append("immediate_zero_hp_state")
+            immediate_zero_hp = True
         else:
             warnings.append("zero_hp_state")
+
+    if bool(after.get("game_over_visible")):
+        if overlay_visible or timer_static or immediate_zero_hp:
+            fatal_errors.append("immediate_game_over_visible_text")
+        else:
+            warnings.append("game_over_text_visible_without_failure_signal")
 
     canvas_width = _to_float(after.get("canvas_width", 0))
     canvas_height = _to_float(after.get("canvas_height", 0))
