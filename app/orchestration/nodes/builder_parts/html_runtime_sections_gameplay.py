@@ -236,6 +236,7 @@ def build_runtime_update_function_js() -> str:
         state.attackCooldown = Math.max(0, state.attackCooldown - dt);
         state.dashCooldown = Math.max(0, state.dashCooldown - dt);
         state.run.spawnGraceSec = Math.max(0, Number(state.run.spawnGraceSec || 0) - dt);
+        state.run.damageCooldown = Math.max(0, Number(state.run.damageCooldown || 0) - dt);
         stepProgression(dt);
         const spawnRate = ((CONFIG.enemy_spawn_rate || 1.0) / clamp(state.run.difficultyScale, 1, 2.8))
           * Math.max(0.78, Number(state.run.synergy.spawnEase || 1));
@@ -337,13 +338,10 @@ def build_runtime_update_function_js() -> str:
                     continue;
                   }}
                   const dangerScale = e.kind === "opponent_elite" ? 2 : 1;
-                  state.hp -= dangerScale;
-                  state.formula.overtakeChain = 0;
-                  state.score = Math.max(0, state.score - 20 * dangerScale);
-                  state.run.combo = 0;
-                  state.run.shake = Math.max(state.run.shake, 0.24);
-                  playSfx("damage");
-                  burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.5, ASSET.enemy_primary, 16);
+                  if (applyPlayerDamage(dangerScale, {{ scorePenalty: 20 * dangerScale, cooldownSec: 0.72, shake: 0.24 }})) {{
+                    state.formula.overtakeChain = 0;
+                    burst(state.player.x + state.player.w / 2, state.player.y + state.player.h * 0.5, ASSET.enemy_primary, 16);
+                  }}
                 }}
                 e.z = 2;
               }}
@@ -436,22 +434,23 @@ def build_runtime_update_function_js() -> str:
                     e.z = 2;
                     continue;
                   }}
-                  state.run.shake = Math.max(state.run.shake, 0.26);
-                  state.flight.stability = Math.max(0.28, state.flight.stability - 0.2);
-                  state.score = Math.max(0, state.score - 8);
-                  playSfx("damage");
-                  burst(playerCx, playerCy, ASSET.enemy_primary, 12);
+                  if ((state.run.damageCooldown || 0) <= 0) {{
+                    state.run.damageCooldown = 0.46;
+                    state.run.shake = Math.max(state.run.shake, 0.26);
+                    state.flight.stability = Math.max(0.28, state.flight.stability - 0.2);
+                    state.score = Math.max(0, state.score - 8);
+                    playSfx("damage");
+                    burst(playerCx, playerCy, ASSET.enemy_primary, 12);
+                  }}
                 }} else {{
                   if (!collisionEnabled) {{
                     e.z = 2;
                     continue;
                   }}
-                  state.hp -= 1;
-                  state.flight.checkpointCombo = 0;
-                  state.run.combo = 0;
-                  state.score = Math.max(0, state.score - 22);
-                  playSfx("damage");
-                  burst(playerCx, playerCy, ASSET.enemy_primary, 16);
+                  if (applyPlayerDamage(1, {{ scorePenalty: 22, cooldownSec: 0.68, shake: 0.22 }})) {{
+                    state.flight.checkpointCombo = 0;
+                    burst(playerCx, playerCy, ASSET.enemy_primary, 16);
+                  }}
                 }}
                 e.z = 2;
               }}
@@ -543,11 +542,9 @@ def build_runtime_update_function_js() -> str:
                     e.z = 2;
                     continue;
                   }}
-                  state.hp -= 1;
-                  state.run.combo = 0;
-                  state.score = Math.max(0, state.score - 15);
-                  playSfx("damage");
-                  burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
+                  if (applyPlayerDamage(1, {{ scorePenalty: 15, cooldownSec: 0.62, shake: 0.21 }})) {{
+                    burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
+                  }}
                 }}
                 e.z = 2;
               }}
@@ -593,11 +590,9 @@ def build_runtime_update_function_js() -> str:
             e.x += (dx / len) * e.speed * dt * approach;
             e.y += (dy / len) * e.speed * dt;
             if (rectsOverlap(state.player, e)) {{
-              state.hp -= e.kind === "elite" ? 2 : 1;
-              state.run.combo = 0;
-              state.run.shake = 0.22;
-              playSfx("damage");
-              burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
+              if (applyPlayerDamage(e.kind === "elite" ? 2 : 1, {{ cooldownSec: 0.6, shake: 0.22 }})) {{
+                burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 14);
+              }}
               e.hp = 0;
             }}
           }}
@@ -631,16 +626,13 @@ def build_runtime_update_function_js() -> str:
             e.y += e.speed * dt;
             if (e.y > canvas.height + 40) {{
               e.y = canvas.height + 999;
-              state.hp -= 1;
-              state.run.combo = 0;
-              playSfx("damage");
+              applyPlayerDamage(1, {{ cooldownSec: 0.5, shake: 0.2 }});
             }}
             if (rectsOverlap(state.player, e)) {{
               e.y = canvas.height + 999;
-              state.hp -= 1;
-              state.run.combo = 0;
-              playSfx("damage");
-              burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 14);
+              if (applyPlayerDamage(1, {{ cooldownSec: 0.58, shake: 0.2 }})) {{
+                burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 14);
+              }}
             }}
           }}
           for (const b of state.bullets) b.y -= b.speed * dt;
@@ -680,12 +672,11 @@ def build_runtime_update_function_js() -> str:
             e.x += (dx / len) * e.speed * dt;
             e.y += (dy / len) * e.speed * dt;
             if (rectsOverlap(state.player, e)) {{
-              state.hp -= e.kind === "elite" ? 2 : 1;
-              state.run.combo = 0;
-              playSfx("damage");
-              state.player.x = clamp(state.player.x - (dx / len) * 35, 20, canvas.width - state.player.w - 20);
-              state.player.y = clamp(state.player.y - (dy / len) * 35, 60, canvas.height - state.player.h - 20);
-              burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 10);
+              if (applyPlayerDamage(e.kind === "elite" ? 2 : 1, {{ cooldownSec: 0.66, shake: 0.22 }})) {{
+                state.player.x = clamp(state.player.x - (dx / len) * 35, 20, canvas.width - state.player.w - 20);
+                state.player.y = clamp(state.player.y - (dy / len) * 35, 60, canvas.height - state.player.h - 20);
+                burst(state.player.x + state.player.w/2, state.player.y + state.player.h/2, ASSET.enemy_primary, 10);
+              }}
             }}
           }}
           state.score += dt * (CONFIG.mode === "comic_action_brawler_3d" ? 12 : 8) * (1 + state.run.combo * 0.03) * Number(state.run.synergy.scoreMul || 1);
@@ -699,9 +690,7 @@ def build_runtime_update_function_js() -> str:
           for (const e of state.enemies) {{
             e.y += e.speed * dt;
             if (rectsOverlap(state.player, e)) {{
-              state.hp -= 1;
-              state.run.combo = 0;
-              playSfx("damage");
+              applyPlayerDamage(1, {{ cooldownSec: 0.5, shake: 0.2 }});
               e.y = canvas.height + 999;
               burst(state.player.x + state.player.w / 2, state.player.y + state.player.h / 2, ASSET.enemy_primary, 8);
             }}

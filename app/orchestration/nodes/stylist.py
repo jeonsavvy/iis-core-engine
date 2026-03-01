@@ -18,8 +18,14 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
         motif = "comic-impact"
 
     detail_tier = "enhanced"
+    asset_variant_count = 4
+    min_render_layers = 4
+    min_procedural_layers = 3
     if motif in {"formula-aerodynamic", "aero-cinematic"}:
         detail_tier = "cinematic"
+        asset_variant_count = 5
+        min_render_layers = 5
+        min_procedural_layers = 4
     elif motif == "fantasy-arcane":
         detail_tier = "illustrative"
 
@@ -32,12 +38,12 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
         "external_image_generation": False,
         "required_visual_keywords": [motif, "readable_silhouette", "high_contrast_hud"],
         "forbidden_visual_tokens": ["placeholder", "temp", "debug-ui", "plain-rectangle-only"],
-        "asset_variant_count": 4,
+        "asset_variant_count": asset_variant_count,
         "asset_detail_tier": detail_tier,
         "min_image_assets": 5,
-        "min_render_layers": 4,
+        "min_render_layers": min_render_layers,
         "min_animation_hooks": 3,
-        "min_procedural_layers": 3,
+        "min_procedural_layers": min_procedural_layers,
     }
 
 

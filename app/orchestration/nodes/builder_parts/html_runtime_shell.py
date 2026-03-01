@@ -163,7 +163,7 @@ def build_runtime_document_open(
       <div class="hud-row">
         <div style="display:grid;gap:4px;min-width:0">
           <h1 class="title overflow-guard">{title}</h1>
-          <p class="sub overflow-guard">Genre: {genre} · Mode: {mode_label}</p>
+          <p class="sub overflow-guard">Mode: {mode_label}</p>
         </div>
         <span class="chip overflow-guard">{slug}</span>
       </div>

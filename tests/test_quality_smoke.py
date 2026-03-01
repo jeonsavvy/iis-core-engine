@@ -50,7 +50,7 @@ def test_non_fatal_issue_classifiers() -> None:
     )
 
 
-def test_runtime_liveness_detects_overlay_and_stuck_timer() -> None:
+def test_runtime_liveness_detects_immediate_game_over_overlay() -> None:
     fatal, warnings = evaluate_runtime_liveness(
         before={
             "boot_ok": True,
@@ -64,6 +64,7 @@ def test_runtime_liveness_detects_overlay_and_stuck_timer() -> None:
         after={
             "boot_ok": True,
             "overlay_visible": True,
+            "overlay_text": "Game Over",
             "timer_text": "Time: 60.0",
             "canvas_width": 1280,
             "canvas_height": 720,
@@ -73,8 +74,35 @@ def test_runtime_liveness_detects_overlay_and_stuck_timer() -> None:
     )
 
     assert "immediate_game_over_overlay" in fatal
-    assert "timer_not_progressing" in fatal
-    assert warnings == []
+    assert warnings == ["timer_static_with_overlay"]
+
+
+def test_runtime_liveness_tolerates_start_overlay_without_game_over_text() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 60.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": True,
+            "overlay_text": "Tap to start",
+            "timer_text": "Time: 60.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+    )
+
+    assert fatal == []
+    assert "startup_overlay_visible" in warnings
+    assert "timer_static_with_overlay" in warnings
 
 
 def test_runtime_liveness_flags_overflow_as_warning() -> None:

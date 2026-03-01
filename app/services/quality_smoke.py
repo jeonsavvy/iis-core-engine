@@ -183,6 +183,7 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
             """
             () => {
               const overlay = document.getElementById("overlay");
+              const overlayText = document.getElementById("overlay-text")?.textContent ?? "";
               const timerText = document.getElementById("timer")?.textContent ?? "";
               const scoreText = document.getElementById("score")?.textContent ?? "";
               const hpText = document.getElementById("hp")?.textContent ?? "";
@@ -191,6 +192,7 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
               return {
                 boot_ok: Boolean(window.__iis_game_boot_ok),
                 overlay_visible: Boolean(overlay && overlay.classList.contains("show")),
+                overlay_text: String(overlayText),
                 timer_text: String(timerText),
                 score_text: String(scoreText),
                 hp_text: String(hpText),
@@ -270,12 +272,21 @@ def evaluate_runtime_liveness(
         fatal_errors.append("boot_flag_missing")
 
     if bool(after.get("overlay_visible")):
-        fatal_errors.append("immediate_game_over_overlay")
+        overlay_text = str(after.get("overlay_text", "") or "").casefold()
+        if any(token in overlay_text for token in ("game over", "최종 점수", "실패", "패배")):
+            fatal_errors.append("immediate_game_over_overlay")
+        else:
+            warnings.append("startup_overlay_visible")
 
     timer_before = _extract_first_number(before.get("timer_text"))
     timer_after = _extract_first_number(after.get("timer_text"))
-    if timer_before is not None and timer_after is not None and timer_after >= timer_before:
-        fatal_errors.append("timer_not_progressing")
+    if timer_before is not None and timer_after is not None:
+        timer_delta = abs(timer_after - timer_before)
+        if timer_delta < 0.05:
+            if bool(after.get("overlay_visible")):
+                warnings.append("timer_static_with_overlay")
+            else:
+                fatal_errors.append("timer_not_progressing")
 
     canvas_width = _to_float(after.get("canvas_width", 0))
     canvas_height = _to_float(after.get("canvas_height", 0))

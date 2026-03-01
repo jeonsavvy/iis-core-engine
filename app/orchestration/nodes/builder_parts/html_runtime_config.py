@@ -63,6 +63,54 @@ def resolve_mode_config(core_loop_type: str) -> RuntimeModeConfig:
     return MODE_CONFIG_BY_LOOP[core_loop_type]
 
 
+def _coerce_int(value: Any, *, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return int(float(text))
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _coerce_float(value: Any, *, fallback: float) -> float:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return float(text)
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _normalize_mode_balance_config(*, core_loop_type: str, raw_config: dict[str, Any]) -> dict[str, Any]:
+    config = dict(raw_config)
+    if core_loop_type == "f1_formula_circuit_3d":
+        config["player_hp"] = max(2, min(6, _coerce_int(config.get("player_hp"), fallback=3)))
+        config["time_limit_sec"] = max(90, min(360, _coerce_int(config.get("time_limit_sec"), fallback=120)))
+        config["enemy_spawn_rate"] = max(0.58, min(1.8, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.86)))
+        config["player_speed"] = max(220, min(520, _coerce_int(config.get("player_speed"), fallback=320)))
+    elif core_loop_type in {"flight_sim_3d", "webgl_three_runner", "lane_dodge_racer"}:
+        config["player_hp"] = max(2, min(6, _coerce_int(config.get("player_hp"), fallback=3)))
+        config["time_limit_sec"] = max(75, min(300, _coerce_int(config.get("time_limit_sec"), fallback=95)))
+        config["enemy_spawn_rate"] = max(0.52, min(1.8, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.82)))
+    return config
+
+
 def build_runtime_config_json(
     *,
     title: str,
@@ -79,6 +127,10 @@ def build_runtime_config_json(
     asset_pack: dict[str, str],
     asset_manifest: dict[str, object] | None = None,
 ) -> str:
+    normalized_game_config = _normalize_mode_balance_config(
+        core_loop_type=core_loop_type,
+        raw_config=game_config,
+    )
     config_dict: dict[str, Any] = {
         "mode": core_loop_type,
         "title": title,
@@ -93,5 +145,5 @@ def build_runtime_config_json(
         "assetPack": asset_pack,
         "assetManifest": asset_manifest or {},
     }
-    config_dict.update(game_config)
+    config_dict.update(normalized_game_config)
     return json.dumps(config_dict, ensure_ascii=False)

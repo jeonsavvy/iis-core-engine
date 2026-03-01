@@ -50,6 +50,22 @@ def build_runtime_utility_functions_js() -> str:
         return fallback;
       }}
 
+      function applyPlayerDamage(amount, options = {{}}) {{
+        const cooldown = Math.max(0, Number(options.cooldownSec ?? 0.62));
+        if ((state.run.damageCooldown || 0) > 0) return false;
+        const hpDamage = Math.max(1, Number(amount || 1));
+        state.hp -= hpDamage;
+        const scorePenalty = Math.max(0, Number(options.scorePenalty || 0));
+        if (scorePenalty > 0) {{
+          state.score = Math.max(0, state.score - scorePenalty);
+        }}
+        state.run.combo = 0;
+        state.run.damageCooldown = cooldown;
+        state.run.shake = Math.max(state.run.shake, Math.max(0.18, Number(options.shake || 0.22)));
+        playSfx("damage");
+        return true;
+      }}
+
       function applyRelicSynergy() {{
         const upgrades = new Set(state.run.upgrades);
         const synergy = {{
