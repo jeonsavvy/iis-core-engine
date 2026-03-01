@@ -65,6 +65,11 @@ def test_infer_comic_action_mode_from_keyword() -> None:
     assert mode == "comic_action_brawler_3d"
 
 
+def test_infer_full3d_fighting_maps_to_comic_action_mode() -> None:
+    mode = _infer_core_loop_type(keyword="풀3D 격투 아레나", title="Arena Clash", genre="fighting")
+    assert mode == "comic_action_brawler_3d"
+
+
 def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> None:
     html = _build_sample_html("topdown_roguelike_shooter").lower()
     assert "assetpack" in html

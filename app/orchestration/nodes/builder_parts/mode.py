@@ -77,7 +77,24 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
         return "topdown_roguelike_shooter"
     if any(
         token in haystack
-        for token in ("코믹액션", "코믹 액션", "comic action", "beat em up", "3d 액션", "3d brawler")
+        for token in (
+            "코믹액션",
+            "코믹 액션",
+            "comic action",
+            "beat em up",
+            "3d 액션",
+            "3d brawler",
+            "풀3d 격투",
+            "풀 3d 격투",
+            "3d 격투",
+            "3d 파이터",
+            "3d fighter",
+            "3d fighting",
+            "full 3d fighting",
+            "full3d fighting",
+            "arena fighter",
+            "arena brawler",
+        )
     ):
         return "comic_action_brawler_3d"
     if any(token in haystack for token in ("레이싱", "레이스", "드리프트", "racing", "race", "car")):

@@ -47,9 +47,8 @@ def build_runtime_document_open(
       * {{ box-sizing: border-box; }}
       body {{
         margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
+        height: 100vh;
+        overflow: hidden;
         background:
           radial-gradient(800px 400px at 20% 0%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 70%),
           radial-gradient(700px 380px at 90% 0%, #8b5cf622, transparent 68%),
@@ -59,14 +58,12 @@ def build_runtime_document_open(
         font-size: max(calc(var(--min-font-size) * 1px), 14px);
       }}
       main {{
-        width: min(96vw, calc(var(--viewport-width) * 1px));
-        min-height: min(92vh, calc(var(--viewport-height) * 1px));
+        width: 100vw;
+        height: 100vh;
         padding: calc(var(--safe-area-padding) * 1px);
-        border: 1px solid #1f2937;
-        border-radius: 16px;
         background: rgba(2, 6, 23, 0.8);
         display: grid;
-        grid-template-rows: auto auto 1fr auto;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
         gap: 10px;
         overflow: hidden;
       }}
@@ -96,16 +93,6 @@ def build_runtime_document_open(
         color: color-mix(in srgb, var(--asset-hud-muted) 72%, #64748b);
         font-size: 12px;
       }}
-      .chip {{
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid {accent_color}55;
-        color: #dbeafe;
-        background: rgba(255,255,255,0.03);
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-      }}
       .stat {{
         font-weight: 700;
         font-size: 14px;
@@ -117,12 +104,12 @@ def build_runtime_document_open(
         border: 1px solid #1e293b;
         overflow: hidden;
         background: linear-gradient(180deg, #020617, #081024);
+        min-height: 0;
       }}
       canvas {{
         width: 100%;
         height: 100%;
         display: block;
-        aspect-ratio: 16 / 9;
         background: #030712;
       }}
       .overlay {{
@@ -165,7 +152,6 @@ def build_runtime_document_open(
           <h1 class="title overflow-guard">{title}</h1>
           <p class="sub overflow-guard">Mode: {mode_label}</p>
         </div>
-        <span class="chip overflow-guard">{slug}</span>
       </div>
       <div class="hud-row">
         <strong id="score" class="stat overflow-guard">Score: 0</strong>

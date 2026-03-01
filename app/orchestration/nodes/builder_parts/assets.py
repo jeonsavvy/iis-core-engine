@@ -556,6 +556,97 @@ def _build_hybrid_asset_bank(
                 f"</svg>"
             ),
         }
+    elif core_loop_type in {"comic_action_brawler_3d", "duel_brawler"}:
+        svg_map = {
+            "player.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+                f"<defs>"
+                f"<linearGradient id='pbody' x1='0' y1='0' x2='0' y2='1'>"
+                f"<stop offset='0%' stop-color='{player_primary}'/>"
+                f"<stop offset='100%' stop-color='{player_secondary}'/>"
+                f"</linearGradient>"
+                f"</defs>"
+                f"<rect width='128' height='128' fill='none'/>"
+                f"<circle cx='64' cy='24' r='12' fill='{hud_primary}'/>"
+                f"<path d='M46 40 L82 40 L88 74 L74 110 L54 110 L40 74 Z' fill='url(#pbody)'/>"
+                f"<path d='M34 52 L48 46 L52 62 L38 74 Z' fill='{player_primary}'/>"
+                f"<path d='M94 52 L80 46 L76 62 L90 74 Z' fill='{player_primary}'/>"
+                f"<rect x='50' y='92' width='12' height='26' rx='5' fill='{player_secondary}'/>"
+                f"<rect x='66' y='92' width='12' height='26' rx='5' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "enemy.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+                f"<defs>"
+                f"<linearGradient id='ebody' x1='0' y1='0' x2='0' y2='1'>"
+                f"<stop offset='0%' stop-color='{enemy_primary}'/>"
+                f"<stop offset='100%' stop-color='{enemy_elite}'/>"
+                f"</linearGradient>"
+                f"</defs>"
+                f"<rect width='128' height='128' fill='none'/>"
+                f"<circle cx='64' cy='24' r='12' fill='{hud_primary}'/>"
+                f"<path d='M44 40 L84 40 L92 76 L78 112 L50 112 L36 76 Z' fill='url(#ebody)'/>"
+                f"<path d='M30 52 L44 46 L46 62 L34 76 Z' fill='{enemy_primary}'/>"
+                f"<path d='M98 52 L84 46 L82 62 L94 76 Z' fill='{enemy_primary}'/>"
+                f"<rect x='48' y='94' width='14' height='24' rx='5' fill='{player_secondary}'/>"
+                f"<rect x='66' y='94' width='14' height='24' rx='5' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "elite.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+                f"<defs>"
+                f"<radialGradient id='eliteAura' cx='50%' cy='35%' r='60%'>"
+                f"<stop offset='0%' stop-color='{enemy_elite}'/>"
+                f"<stop offset='100%' stop-color='{enemy_primary}'/>"
+                f"</radialGradient>"
+                f"</defs>"
+                f"<rect width='128' height='128' fill='none'/>"
+                f"<circle cx='64' cy='26' r='13' fill='{hud_primary}'/>"
+                f"<path d='M42 42 L86 42 L96 80 L80 114 L48 114 L32 80 Z' fill='url(#eliteAura)'/>"
+                f"<polygon points='32,30 44,16 54,34' fill='{enemy_elite}'/>"
+                f"<polygon points='96,30 84,16 74,34' fill='{enemy_elite}'/>"
+                f"<rect x='48' y='96' width='14' height='22' rx='5' fill='{player_secondary}'/>"
+                f"<rect x='66' y='96' width='14' height='22' rx='5' fill='{player_secondary}'/>"
+                f"</svg>"
+            ),
+            "boost.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>"
+                f"<defs>"
+                f"<radialGradient id='boostCore' cx='50%' cy='50%' r='50%'>"
+                f"<stop offset='0%' stop-color='{hud_primary}'/>"
+                f"<stop offset='100%' stop-color='{boost_color}'/>"
+                f"</radialGradient>"
+                f"</defs>"
+                f"<rect width='128' height='128' fill='none'/>"
+                f"<circle cx='64' cy='64' r='34' fill='none' stroke='{boost_color}' stroke-width='12'/>"
+                f"<circle cx='64' cy='64' r='18' fill='url(#boostCore)' opacity='0.85'/>"
+                f"</svg>"
+            ),
+            "ring.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='160' height='128' viewBox='0 0 160 128'>"
+                f"<rect width='160' height='128' fill='none'/>"
+                f"<ellipse cx='80' cy='64' rx='58' ry='38' fill='none' stroke='{boost_color}' stroke-width='10'/>"
+                f"<ellipse cx='80' cy='64' rx='38' ry='22' fill='none' stroke='{hud_primary}' stroke-width='3' opacity='0.8'/>"
+                f"</svg>"
+            ),
+            "hazard.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='112' height='112' viewBox='0 0 112 112'>"
+                f"<rect width='112' height='112' fill='none'/>"
+                f"<polygon points='56,8 104,44 86,104 26,104 8,44' fill='{enemy_primary}'/>"
+                f"<path d='M56 24 L68 68 L44 68 Z' fill='{hud_primary}' opacity='0.82'/>"
+                f"<circle cx='56' cy='82' r='6' fill='{hud_primary}'/>"
+                f"</svg>"
+            ),
+            "trail.svg": (
+                f"<svg xmlns='http://www.w3.org/2000/svg' width='112' height='128' viewBox='0 0 112 128'>"
+                f"<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
+                f"<stop offset='0%' stop-color='{boost_color}' stop-opacity='0.95'/>"
+                f"<stop offset='100%' stop-color='{boost_color}' stop-opacity='0'/>"
+                f"</linearGradient></defs>"
+                f"<ellipse cx='56' cy='60' rx='30' ry='52' fill='url(#g)'/>"
+                f"</svg>"
+            ),
+        }
     svg_map.update(
         _build_decorative_svg_layers(
             bg_top=selected_bg_top,
