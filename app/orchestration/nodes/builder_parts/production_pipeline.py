@@ -447,7 +447,8 @@ def build_production_artifact(
         }
         hybrid_bundle = (fallback_files, fallback_manifest)
     if hybrid_bundle:
-        artifact_files, artifact_manifest = hybrid_bundle
+        artifact_files, extracted_manifest = hybrid_bundle
+        artifact_manifest = dict(extracted_manifest)
         artifact_manifest["genre_engine"] = core_loop_type
         artifact_manifest["asset_pack"] = asset_pack["name"]
 

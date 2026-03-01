@@ -18,10 +18,19 @@ class AssetMemoryContext:
 
 
 def _to_float(value: object, fallback: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
         return fallback
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return float(text)
+        except ValueError:
+            return fallback
+    return fallback
 
 
 def _to_str_list(value: object) -> list[str]:

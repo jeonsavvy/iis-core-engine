@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 
 def _normalize_hex_color(color: str, *, fallback: str) -> str:
@@ -21,7 +22,7 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
     )
 
 
-def _rgb_to_hex(r: int, g: int, b: int) -> str:
+def _rgb_to_hex(r: float | int, g: float | int, b: float | int) -> str:
     rc = max(0, min(255, int(r)))
     gc = max(0, min(255, int(g)))
     bc = max(0, min(255, int(b)))
@@ -37,6 +38,40 @@ def _mix_hex(color_a: str, color_b: str, ratio: float) -> str:
     return _rgb_to_hex(r, g, b)
 
 
+def _to_float(value: object, fallback: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return float(text)
+        except ValueError:
+            return fallback
+    return fallback
+
+
+def _to_int(value: object, fallback: int = 0) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            return int(float(text))
+        except ValueError:
+            return fallback
+    return fallback
+
+
 def _relative_luminance(color: str) -> float:
     r, g, b = _hex_to_rgb(color)
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
@@ -49,7 +84,7 @@ def _build_asset_variant_candidates(
     art_direction_contract: dict[str, object] | None,
 ) -> list[dict[str, object]]:
     contract = art_direction_contract if isinstance(art_direction_contract, dict) else {}
-    requested_count = int(contract.get("asset_variant_count", 3) or 3)
+    requested_count = _to_int(contract.get("asset_variant_count", 3), fallback=3)
     variant_count = max(1, min(5, requested_count))
     motif = str(contract.get("motif", "")).strip().casefold()
 
@@ -349,15 +384,13 @@ def _build_hybrid_asset_bank(
         asset_pack=asset_pack,
         art_direction_contract=art_direction_contract,
     )
-    retrieval = retrieval_profile if isinstance(retrieval_profile, dict) else {}
+    retrieval: dict[str, Any] = retrieval_profile if isinstance(retrieval_profile, dict) else {}
     preferred_variant_id = str(retrieval.get("preferred_variant_id", "")).strip()
     preferred_theme = str(retrieval.get("preferred_variant_theme", "")).strip()
-    failure_reasons = {
-        str(item).strip() for item in retrieval.get("failure_reasons", []) if str(item).strip()
-    } if isinstance(retrieval.get("failure_reasons"), list) else set()
-    failure_tokens = {
-        str(item).strip() for item in retrieval.get("failure_tokens", []) if str(item).strip()
-    } if isinstance(retrieval.get("failure_tokens"), list) else set()
+    raw_failure_reasons = retrieval.get("failure_reasons")
+    raw_failure_tokens = retrieval.get("failure_tokens")
+    failure_reasons = {str(item).strip() for item in raw_failure_reasons if str(item).strip()} if isinstance(raw_failure_reasons, list) else set()
+    failure_tokens = {str(item).strip() for item in raw_failure_tokens if str(item).strip()} if isinstance(raw_failure_tokens, list) else set()
 
     enriched_variants: list[dict[str, object]] = []
     for row in variants:
@@ -378,11 +411,11 @@ def _build_hybrid_asset_bank(
             {
                 **row,
                 "memory_bonus": round(memory_bonus, 4),
-                "composed_score": round(float(row.get("score", 0.0)) + memory_bonus, 4),
+                "composed_score": round(_to_float(row.get("score", 0.0), 0.0) + memory_bonus, 4),
             }
         )
 
-    selected_variant = max(enriched_variants, key=lambda row: float(row.get("composed_score", 0.0)))
+    selected_variant = max(enriched_variants, key=lambda row: _to_float(row.get("composed_score", 0.0), 0.0))
 
     player_primary = str(selected_variant.get("player_primary", asset_pack.get("player_primary", "#38bdf8")))
     player_secondary = str(asset_pack.get("player_secondary", "#0f172a"))
@@ -578,9 +611,9 @@ def _build_hybrid_asset_bank(
             "variant_count": len(enriched_variants),
             "selected_variant": str(selected_variant.get("id", "baseline-balanced")),
             "selected_theme": str(selected_variant.get("theme", "balanced")),
-            "selected_score": float(selected_variant.get("score", 0.0)),
-            "selected_composed_score": float(selected_variant.get("composed_score", selected_variant.get("score", 0.0))),
-            "selected_memory_bonus": float(selected_variant.get("memory_bonus", 0.0)),
+            "selected_score": _to_float(selected_variant.get("score", 0.0), 0.0),
+            "selected_composed_score": _to_float(selected_variant.get("composed_score", selected_variant.get("score", 0.0)), 0.0),
+            "selected_memory_bonus": _to_float(selected_variant.get("memory_bonus", 0.0), 0.0),
             "steps": [
                 "derive_contract",
                 "retrieve_prior_signals",
@@ -594,9 +627,9 @@ def _build_hybrid_asset_bank(
                 {
                     "id": str(row.get("id", f"variant-{index + 1}")),
                     "theme": str(row.get("theme", "balanced")),
-                    "score": float(row.get("score", 0.0)),
-                    "memory_bonus": float(row.get("memory_bonus", 0.0)),
-                    "composed_score": float(row.get("composed_score", row.get("score", 0.0))),
+                    "score": _to_float(row.get("score", 0.0), 0.0),
+                    "memory_bonus": _to_float(row.get("memory_bonus", 0.0), 0.0),
+                    "composed_score": _to_float(row.get("composed_score", row.get("score", 0.0)), 0.0),
                 }
                 for index, row in enumerate(enriched_variants)
             ],
@@ -607,7 +640,7 @@ def _build_hybrid_asset_bank(
                 "preferred_variant_theme": preferred_theme or None,
                 "failure_reasons": sorted(failure_reasons),
                 "failure_tokens": sorted(failure_tokens),
-                "sample_size": int(retrieval.get("sample_size", 0) or 0),
+                "sample_size": _to_int(retrieval.get("sample_size", 0), fallback=0),
             },
         },
         "contract": {
