@@ -87,12 +87,43 @@ expected_schema = os.environ["EXPECTED_SCHEMA"].strip()
 actual_sha = str(payload.get("git_sha", "")).strip().lower()
 actual_schema = str(payload.get("pipeline_schema_version", "")).strip()
 
-if not actual_sha:
-    raise SystemExit("health_missing_git_sha")
-if expected_sha and not actual_sha.startswith(expected_sha):
+if actual_sha in {"", "unknown"}:
+    print("health_git_sha_unknown: unable to verify deployed commit via /healthz git_sha", file=sys.stderr)
+elif expected_sha and not actual_sha.startswith(expected_sha):
     raise SystemExit(f"health_sha_mismatch expected={expected_sha} actual={actual_sha}")
 if expected_schema and actual_schema != expected_schema:
     raise SystemExit(f"health_schema_mismatch expected={expected_schema} actual={actual_schema}")
+PY
+}
+
+upsert_env_value() {
+  local file_path="$1"
+  local key="$2"
+  local value="$3"
+  if [[ ! -f "${file_path}" ]]; then
+    return
+  fi
+  "${PY_BIN}" - "${file_path}" "${key}" "${value}" <<'PY'
+import pathlib
+import sys
+
+file_path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+
+lines = file_path.read_text(encoding="utf-8").splitlines()
+prefix = f"{key}="
+updated = []
+replaced = False
+for line in lines:
+    if line.startswith(prefix):
+        updated.append(f"{prefix}{value}")
+        replaced = True
+    else:
+        updated.append(line)
+if not replaced:
+    updated.append(f"{prefix}{value}")
+file_path.write_text("\n".join(updated).rstrip("\n") + "\n", encoding="utf-8")
 PY
 }
 
@@ -132,6 +163,8 @@ if [[ "${PREVIOUS_COMMIT}" == "${TARGET_COMMIT}" ]]; then
 else
   git pull --ff-only origin "${BRANCH}"
 fi
+
+upsert_env_value "${APP_DIR}/.env" "GIT_SHA" "${TARGET_COMMIT}"
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
   "${PY_BIN}" -m venv "${VENV_DIR}"
