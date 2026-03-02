@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.core.config import Settings
 from app.services.vertex_service import VertexService
 
@@ -108,3 +110,36 @@ def test_generate_ai_review_uses_stub_when_vertex_not_configured(monkeypatch) ->
 
     assert result.meta.get("reason") == "vertex_not_configured"
     assert isinstance(result.payload.get("ai_review"), str)
+
+
+def test_is_enabled_uses_settings_credentials_path(monkeypatch, tmp_path: Path) -> None:
+    credentials_path = tmp_path / "vertex.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    service = VertexService(
+        Settings(
+            vertex_project_id="iis-vertex-prod",
+            google_application_credentials=str(credentials_path),
+            telegram_bot_token="",
+        )
+    )
+
+    assert service._is_enabled() is True
+    assert service._use_genai_sdk() is True
+
+
+def test_settings_credentials_path_populates_env(monkeypatch, tmp_path: Path) -> None:
+    credentials_path = tmp_path / "vertex.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    service = VertexService(
+        Settings(
+            vertex_project_id="iis-vertex-prod",
+            google_application_credentials=str(credentials_path),
+            telegram_bot_token="",
+        )
+    )
+
+    resolved = service._credentials_path()
+    assert resolved == str(credentials_path)
+    assert service._is_enabled() is True

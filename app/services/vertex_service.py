@@ -67,6 +67,14 @@ class VertexService:
         self._builder_llm = None
         self._genai_client = None
 
+    def _credentials_path(self) -> str:
+        configured = str(self.settings.google_application_credentials or "").strip()
+        env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        resolved = configured or env_path
+        if configured and not env_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = configured
+        return resolved
+
     def generate_gdd_bundle(self, keyword: str) -> VertexGenerationResult:
         return generate_gdd_bundle_bundle(self, keyword)
 
@@ -134,7 +142,7 @@ class VertexService:
     def _is_enabled(self) -> bool:
         if not self.settings.vertex_project_id:
             return False
-        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        credentials_path = self._credentials_path()
         if not credentials_path:
             return False
         if not os.path.exists(credentials_path):
@@ -146,7 +154,7 @@ class VertexService:
             return False
         if not self.settings.vertex_project_id:
             return False
-        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        credentials_path = self._credentials_path()
         return bool(credentials_path and os.path.exists(credentials_path))
 
     def _pro_model(self):

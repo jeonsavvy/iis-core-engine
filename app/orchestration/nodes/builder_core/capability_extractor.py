@@ -10,8 +10,16 @@ def _normalize_tokens(*values: str) -> list[str]:
     return [token for token in re.split(r"[^a-z0-9가-힣]+", merged) if token]
 
 
-def _contains(tokens: set[str], *keywords: str) -> bool:
-    return any(keyword in tokens for keyword in keywords)
+def _contains(tokens: set[str], merged_compact: str, *keywords: str) -> bool:
+    for keyword in keywords:
+        normalized_keyword = keyword.casefold().replace(" ", "")
+        if not normalized_keyword:
+            continue
+        if normalized_keyword in tokens:
+            return True
+        if normalized_keyword in merged_compact:
+            return True
+    return False
 
 
 def extract_capability_profile(
@@ -24,6 +32,8 @@ def extract_capability_profile(
     plan_contract: dict[str, Any] | None = None,
     design_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    merged_text = " ".join(value for value in (keyword, title, genre, core_loop_type) if value).casefold()
+    merged_compact = re.sub(r"[^a-z0-9가-힣]+", "", merged_text)
     tokens = _normalize_tokens(keyword, title, genre, core_loop_type)
     token_set = set(tokens)
     vehicle_keywords = {
@@ -58,27 +68,27 @@ def extract_capability_profile(
     ranged_keywords = {"fps", "shooter", "shoot", "사격", "슈팅", "총", "gun", "rifle"}
 
     camera_model = "third_person"
-    if _contains(token_set, "fps", "first", "1인칭", "cockpit"):
+    if _contains(token_set, merged_compact, "fps", "first", "1인칭", "cockpit"):
         camera_model = "first_person"
-    elif _contains(token_set, "topdown", "탑다운", "탑뷰"):
+    elif _contains(token_set, merged_compact, "topdown", "탑다운", "탑뷰"):
         camera_model = "top_down"
-    elif _contains(token_set, *flight_keywords):
+    elif _contains(token_set, merged_compact, *flight_keywords):
         camera_model = "chase"
 
     locomotion_model = "on_foot"
-    if _contains(token_set, *vehicle_keywords):
+    if _contains(token_set, merged_compact, *vehicle_keywords):
         locomotion_model = "vehicle"
-    elif _contains(token_set, *flight_keywords):
+    elif _contains(token_set, merged_compact, *flight_keywords):
         locomotion_model = "flight"
     if locomotion_model == "vehicle" and camera_model == "third_person":
         camera_model = "chase"
 
     interaction_model = "action"
     combat_model = "none"
-    if _contains(token_set, *melee_keywords):
+    if _contains(token_set, merged_compact, *melee_keywords):
         interaction_model = "melee_combat"
         combat_model = "melee"
-    elif _contains(token_set, *ranged_keywords):
+    elif _contains(token_set, merged_compact, *ranged_keywords):
         interaction_model = "ranged_combat"
         combat_model = "ranged"
     elif locomotion_model in {"vehicle", "flight"}:
@@ -93,7 +103,7 @@ def extract_capability_profile(
         world_topology = "zone_map"
 
     progression_model = "objective_chain"
-    if _contains(token_set, "roguelike", "로그라이크", "survival", "생존"):
+    if _contains(token_set, merged_compact, "roguelike", "로그라이크", "survival", "생존"):
         progression_model = "run_escalation"
     elif locomotion_model == "vehicle":
         progression_model = "checkpoint_lap"
@@ -104,7 +114,7 @@ def extract_capability_profile(
 
     request_hash = hashlib.sha256(f"{keyword}|{title}|{genre}|{core_loop_type}".encode("utf-8")).hexdigest()[:12]
     complexity_tier = "standard"
-    if len(token_set) >= 12 or _contains(token_set, "openworld", "sandbox", "멀티", "procedural"):
+    if len(token_set) >= 12 or _contains(token_set, merged_compact, "openworld", "sandbox", "멀티", "procedural"):
         complexity_tier = "high"
 
     capability_tags = sorted(
@@ -118,7 +128,7 @@ def extract_capability_profile(
             f"fail_state:{fail_state_model}",
         }
     )
-    if _contains(token_set, "3d", "webgl", "voxel", "first", "third", "입체", "fps", "tps"):
+    if _contains(token_set, merged_compact, "3d", "webgl", "voxel", "first", "third", "입체", "fps", "tps"):
         capability_tags.append("render:3d")
     else:
         capability_tags.append("render:2d")

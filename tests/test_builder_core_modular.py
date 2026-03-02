@@ -119,6 +119,24 @@ def test_build_modular_artifact_resolves_vehicle_capability_for_korean_car_promp
     assert "Objective: engage and clear" not in result.artifact_html
 
 
+def test_build_modular_artifact_resolves_vehicle_capability_for_compact_korean_prompt() -> None:
+    result = build_modular_artifact(
+        keyword="자동차조종시뮬레이터",
+        title="자동차조종시뮬레이터 Infinite",
+        genre="arcade",
+        slug="car-sim-compact",
+        accent_color="#38BDF8",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=20,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type="arcade",
+        rqc_version="rqc-1",
+    )
+    assert result.capability_profile["locomotion_model"] == "vehicle"
+    assert result.capability_profile["interaction_model"] == "navigation"
+
+
 def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
     deps = SimpleNamespace(
         vertex_service=SimpleNamespace(

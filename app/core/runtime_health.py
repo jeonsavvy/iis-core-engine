@@ -57,6 +57,7 @@ def verify_pipeline_schema_signature(settings: Settings) -> None:
 
 def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
     resolved = settings or get_settings()
+    credentials_path = str(resolved.google_application_credentials or "").strip()
     return {
         "status": "ok",
         "service": "ForgeMind",
@@ -66,4 +67,7 @@ def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
         "gen_core_mode": resolved.gen_core_mode,
         "rqc_version": resolved.rqc_version,
         "module_signature": default_module_signature(),
+        "builder_codegen_enabled": "true" if resolved.builder_codegen_enabled else "false",
+        "vertex_project_configured": "true" if bool(resolved.vertex_project_id) else "false",
+        "vertex_credentials_path_configured": "true" if bool(credentials_path) else "false",
     }

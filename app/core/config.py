@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     vertex_project_id: str | None = None
     vertex_location: str = "us-central1"
+    google_application_credentials: str | None = None
     gemini_pro_model: str = "gemini-2.5-pro"
     gemini_flash_model: str = "gemini-2.5-flash"
 

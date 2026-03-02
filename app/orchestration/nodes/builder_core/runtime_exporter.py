@@ -32,7 +32,6 @@ def export_runtime_artifact(
     world_topology = str(capability_profile.get("world_topology", "arena"))
     progression_model = str(capability_profile.get("progression_model", "objective_chain"))
     profile_id = str(capability_profile.get("profile_id", "cp-unknown"))
-    contract_summary = str(contract_bundle.get("summary", "")).strip()
     objective_lines = contract_bundle.get("deliverables", {}).get("plan") if isinstance(contract_bundle.get("deliverables"), dict) else []
     objective_text = " / ".join(str(item) for item in objective_lines[:2]) if isinstance(objective_lines, list) else ""
     objective_seed = "Engage hostiles and secure interactives"
@@ -156,16 +155,6 @@ def export_runtime_artifact(
         color: #cbd5e1;
         opacity: 0.96;
       }}
-      .sr-only {{
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        border: 0;
-        padding: 0;
-        clip: rect(0 0 0 0);
-        overflow: hidden;
-      }}
     </style>
   </head>
   <body data-overflow-policy="{text_overflow_policy}">
@@ -198,7 +187,6 @@ def export_runtime_artifact(
         {control_guide}
       </footer>
     </div>
-    <span class="sr-only">{contract_summary}</span>
     <script>
       window.__iis_game_boot_ok = true;
       window.IISLeaderboard = window.IISLeaderboard || {{
@@ -286,6 +274,12 @@ def export_runtime_artifact(
           yaw: 0,
           speedBase: 11,
         }},
+        vehicle: {{
+          throttle: 0.72,
+          speed: 9,
+          baseSpeed: 8.5,
+          yaw: 0,
+        }},
       }};
 
       function drawWebglBackdrop(t) {{
@@ -362,6 +356,9 @@ def export_runtime_artifact(
         state.flight.pitch = 0;
         state.flight.roll = 0;
         state.flight.yaw = 0;
+        state.vehicle.throttle = 0.72;
+        state.vehicle.speed = 9;
+        state.vehicle.yaw = 0;
         runtimeModules.scene_world?.buildWorld(state);
         overlay.classList.remove("show");
         overlay.setAttribute("aria-hidden", "true");

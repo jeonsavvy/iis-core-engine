@@ -71,6 +71,21 @@ runtimeModules.controller_stack = {
       state.player.y = Math.max(-4.5, Math.min(9.5, state.player.y));
       return;
     }
+    if (locomotion === "vehicle") {
+      const steer = (state.input.right ? 1 : 0) - (state.input.left ? 1 : 0);
+      const throttleAxis = (state.input.up ? 1 : 0) - (state.input.down ? 1 : 0);
+      state.vehicle.throttle = Math.max(0, Math.min(1.9, state.vehicle.throttle + throttleAxis * dt * 1.45));
+      const targetSpeed = state.vehicle.baseSpeed + (state.vehicle.throttle * 15) + (state.input.sprint ? 8 : 0);
+      state.vehicle.speed += (targetSpeed - state.vehicle.speed) * Math.min(1, dt * 3.6);
+      state.vehicle.yaw += steer * dt * (1.25 + (state.vehicle.speed * 0.03));
+      state.player.vx = Math.sin(state.vehicle.yaw) * state.vehicle.speed;
+      state.player.vz = Math.cos(state.vehicle.yaw) * state.vehicle.speed;
+      state.player.x += state.player.vx * dt;
+      state.player.z += state.player.vz * dt;
+      state.player.x = Math.max(-13, Math.min(13, state.player.x));
+      state.player.z = Math.max(2, state.player.z);
+      return;
+    }
 
     const axisX = (state.input.right ? 1 : 0) - (state.input.left ? 1 : 0);
     const axisY = (state.input.up ? 1 : 0) - (state.input.down ? 1 : 0);
@@ -152,6 +167,33 @@ runtimeModules.progression_stack = {
       state.checkpoints = state.checkpoints.filter((checkpoint) => !checkpoint.passed);
       return;
     }
+    if (state.runtimeProfile.locomotionModel === "vehicle") {
+      if (state.progress.waveTimer >= 1.1) {
+        state.progress.waveTimer = 0;
+        state.checkpoints.push({
+          x: (Math.random() - 0.5) * 20,
+          y: 0,
+          z: state.player.z + 26 + Math.random() * 34,
+          radius: 1.8 + Math.random() * 1.1,
+          reward: 65,
+          kind: "checkpoint",
+        });
+      }
+      state.checkpoints = state.checkpoints.filter((checkpoint) => checkpoint.z > state.player.z - 14);
+      for (const checkpoint of state.checkpoints) {
+        const dx = checkpoint.x - state.player.x;
+        const dz = checkpoint.z - state.player.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq <= (checkpoint.radius * checkpoint.radius) * 1.4) {
+          checkpoint.passed = true;
+          state.score += checkpoint.reward;
+          state.timeLeft = Math.min(120, state.timeLeft + 1.4);
+          state.progress.objective = "체크포인트 통과! 레이싱 라인을 유지하세요.";
+        }
+      }
+      state.checkpoints = state.checkpoints.filter((checkpoint) => !checkpoint.passed);
+      return;
+    }
     if (state.progress.waveTimer >= state.progress.spawnCadence) {
       state.progress.waveTimer = 0;
       state.enemies.push({
@@ -195,9 +237,13 @@ runtimeModules.hud_stack = {
   render(state, scoreEl, timerEl, hpEl, objectiveEl) {
     scoreEl.textContent = `Score: ${Math.floor(state.score)} · Combo x${state.player.combo.toFixed(1)}`;
     timerEl.textContent = `Time: ${Math.max(0, state.timeLeft).toFixed(1)}s`;
-    hpEl.textContent = state.runtimeProfile.locomotionModel === "flight"
-      ? `Stability: ${Math.max(0, Math.round(state.flight.throttle * 100))}%`
-      : `HP: ${Math.max(0, state.hp)}`;
+    if (state.runtimeProfile.locomotionModel === "flight") {
+      hpEl.textContent = `Stability: ${Math.max(0, Math.round(state.flight.throttle * 100))}%`;
+    } else if (state.runtimeProfile.locomotionModel === "vehicle") {
+      hpEl.textContent = `Speed: ${Math.max(0, Math.round(state.vehicle.speed * 6.2))} km/h`;
+    } else {
+      hpEl.textContent = `HP: ${Math.max(0, state.hp)}`;
+    }
     objectiveEl.textContent = state.progress.objective;
   },
 };
