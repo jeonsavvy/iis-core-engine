@@ -342,6 +342,11 @@ def evaluate_runtime_liveness(
             warnings.append("game_over_visible_with_runtime_signal")
         else:
             warnings.append("game_over_text_visible_without_failure_signal")
+    if overlay_visible and any(token in overlay_text for token in ("game over", "최종 점수", "실패", "패배")):
+        if timer_before is not None and timer_after is not None:
+            elapsed_estimate = max(0.0, timer_before - timer_after)
+            if elapsed_estimate <= 8.0:
+                warnings.append("early_session_game_over")
 
     hud_text = " ".join(
         [

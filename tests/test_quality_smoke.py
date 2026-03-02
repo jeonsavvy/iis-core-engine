@@ -76,6 +76,7 @@ def test_runtime_liveness_flags_game_over_overlay_as_warning() -> None:
     assert fatal == []
     assert "overlay_game_over_visible" in warnings
     assert "timer_static_with_overlay" in warnings
+    assert "early_session_game_over" in warnings
 
 
 def test_runtime_liveness_flags_manual_start_overlay_as_warning() -> None:
@@ -221,3 +222,31 @@ def test_runtime_liveness_flags_hud_jargon_as_warning() -> None:
 
     assert fatal == []
     assert "hud_jargon_visible" in warnings
+
+
+def test_runtime_liveness_does_not_flag_early_session_game_over_after_long_play() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 240.0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": True,
+            "overlay_text": "Game Over",
+            "timer_text": "Time: 210.2",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+    )
+
+    assert fatal == []
+    assert "overlay_game_over_visible" in warnings
+    assert "early_session_game_over" not in warnings

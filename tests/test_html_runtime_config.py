@@ -42,7 +42,7 @@ def test_build_runtime_config_json_merges_payload_and_defaults() -> None:
 
     assert payload["mode"] == "webgl_three_runner"
     assert payload["title"] == "override-allowed"
-    assert payload["player_hp"] == 3
+    assert payload["player_hp"] == 5
     assert payload["assetPack"]["bg_top"] == "#111"
     assert payload["assetManifest"] == {}
 
@@ -71,7 +71,7 @@ def test_build_runtime_config_json_enforces_f1_runtime_safety_floor() -> None:
         )
     )
 
-    assert payload["player_hp"] == 2
+    assert payload["player_hp"] == 4
     assert payload["time_limit_sec"] == 90
-    assert payload["enemy_spawn_rate"] == 0.58
+    assert payload["enemy_spawn_rate"] == 0.38
     assert payload["player_speed"] == 520

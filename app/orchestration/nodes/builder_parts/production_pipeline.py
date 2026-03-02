@@ -178,6 +178,7 @@ def _critical_runtime_warning_codes(warnings: list[str] | None) -> list[str]:
         "manual_start_interaction_required",
         "runtime_layout_scroll_overflow",
         "hud_jargon_visible",
+        "early_session_game_over",
     }
     normalized = [str(item).strip().casefold() for item in warnings if str(item).strip()]
     return [code for code in normalized if code in critical_tokens]
@@ -196,6 +197,7 @@ def _runtime_warning_penalty(warnings: list[str] | None) -> float:
         "manual_start_interaction_required": 8.0,
         "runtime_layout_scroll_overflow": 6.0,
         "hud_jargon_visible": 8.0,
+        "early_session_game_over": 14.0,
     }
     score = 0.0
     for token in warnings:
@@ -456,11 +458,16 @@ def build_production_artifact(
         and int(state.get("build_iteration", 0)) > 1
     )
     configured_codegen_passes = int(deps.vertex_service.settings.builder_codegen_passes)
+    runtime_mutation_enabled = bool(
+        getattr(deps.vertex_service.settings, "builder_runtime_mutation_enabled", False)
+    )
     codegen_pass_budget = _resolve_codegen_pass_budget(
         configured_passes=configured_codegen_passes,
         has_feedback_hint=bool(combined_feedback_hint),
         build_iteration=int(state.get("build_iteration", 0)),
     )
+    if not runtime_mutation_enabled:
+        codegen_pass_budget = 0
 
     append_log(
         state,
@@ -488,6 +495,7 @@ def build_production_artifact(
             "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
             "configured_codegen_passes": configured_codegen_passes,
             "effective_codegen_pass_budget": codegen_pass_budget,
+            "runtime_mutation_enabled": runtime_mutation_enabled,
         },
     )
 
@@ -530,6 +538,15 @@ def build_production_artifact(
                     "generation_source": "previous_artifact_seed",
                     "model": None,
                     "reason": "feedback_refinement_seed",
+                }
+            )
+        if not runtime_mutation_enabled:
+            codegen_meta_rows.append(
+                {
+                    "pass": 0,
+                    "generation_source": "template_baseline",
+                    "model": None,
+                    "reason": "runtime_mutation_disabled",
                 }
             )
         for pass_index in range(codegen_pass_budget):
@@ -713,13 +730,22 @@ def build_production_artifact(
         slug=slug,
     )
 
-    polish_result = deps.vertex_service.polish_hybrid_artifact(
-        keyword=state["keyword"],
-        title=title,
-        genre=genre,
-        html_content=selected_html,
-    )
-    polished_html = str(polish_result.payload.get("artifact_html", "")).strip() or selected_html
+    if runtime_mutation_enabled:
+        polish_result = deps.vertex_service.polish_hybrid_artifact(
+            keyword=state["keyword"],
+            title=title,
+            genre=genre,
+            html_content=selected_html,
+        )
+        polished_html = str(polish_result.payload.get("artifact_html", "")).strip() or selected_html
+        polish_meta: dict[str, Any] = dict(polish_result.meta or {})
+    else:
+        polished_html = selected_html
+        polish_meta = {
+            "generation_source": "template_baseline",
+            "model": None,
+            "reason": "runtime_mutation_disabled",
+        }
     polished_assessment = _assess_artifact_quality(
         deps=deps,
         html_content=polished_html,
@@ -1102,6 +1128,7 @@ def build_production_artifact(
         "codegen_enabled": bool(deps.vertex_service.settings.builder_codegen_enabled),
         "codegen_passes_per_candidate": configured_codegen_passes,
         "effective_codegen_passes_per_candidate": codegen_pass_budget,
+        "runtime_mutation_enabled": runtime_mutation_enabled,
         "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
         "selected_candidate_index": int(best_candidate["index"]),
         "selected_candidate_score": selected_composite,
@@ -1139,9 +1166,9 @@ def build_production_artifact(
         "refinement_rounds_executed": refinement_rounds_executed,
         "playability_refinement_round_limit": playability_refinement_round_limit,
         "playability_refinement_rounds_executed": playability_refinement_rounds_executed,
-        "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
-        "polish_model": polish_result.meta.get("model"),
-        "polish_reason": polish_result.meta.get("reason"),
+        "polish_generation_source": polish_meta.get("generation_source", "stub"),
+        "polish_model": polish_meta.get("model"),
+        "polish_reason": polish_meta.get("reason"),
         "runtime_guard": runtime_guard_result,
         "candidate_scoreboard": candidate_scoreboard,
         "substrate_id": substrate_profile.substrate_id,

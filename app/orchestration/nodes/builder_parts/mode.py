@@ -277,6 +277,17 @@ def _synthesize_genre_profile(
 
     profile_label = str(genre).strip() or "hybrid"
     profile_id = _slugify(f"{profile_label}-{core_loop_type}-{world_style}")
+    confidence_raw = profile.get("confidence", 0.45)
+    confidence = 0.45
+    if isinstance(confidence_raw, (int, float)):
+        confidence = float(confidence_raw)
+    elif isinstance(confidence_raw, str):
+        text = confidence_raw.strip()
+        if text:
+            try:
+                confidence = float(text)
+            except Exception:
+                confidence = 0.45
     return {
         "profile_id": profile_id,
         "core_loop_type": core_loop_type,
@@ -285,7 +296,7 @@ def _synthesize_genre_profile(
         "world_style": world_style,
         "pillars": pillars[:6],
         "non_negotiables": non_negotiables[:8],
-        "confidence": float(profile.get("confidence", 0.45)),
+        "confidence": confidence,
     }
 
 

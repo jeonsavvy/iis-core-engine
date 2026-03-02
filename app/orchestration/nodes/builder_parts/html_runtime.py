@@ -142,7 +142,8 @@ def _build_hybrid_engine_html(
         engagement: {{
           inputActivated: false,
           firstInteractionAt: 0,
-          guardSeconds: 2.8,
+          guardSeconds: 4.2,
+          minPlayableSeconds: 12,
         }},
         player: {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }},
         enemies: [],
@@ -254,7 +255,8 @@ def _build_hybrid_engine_html(
         state.engagement = {{
           inputActivated: false,
           firstInteractionAt: 0,
-          guardSeconds: 2.8,
+          guardSeconds: 4.2,
+          minPlayableSeconds: 12,
         }};
         state.player = {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }};
         state.enemies = [];

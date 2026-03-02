@@ -729,11 +729,15 @@ def build_runtime_update_function_js() -> str:
         }}
         state.particles = state.particles.filter((p) => p.t < p.life);
 
-        const engagementUnlocked = state.engagement.inputActivated || state.runtimeSec >= Number(state.engagement.guardSeconds || 2.8);
+        const engagementUnlocked = state.engagement.inputActivated || state.runtimeSec >= Number(state.engagement.guardSeconds || 4.2);
+        const survivalUnlocked = state.runtimeSec >= Number(state.engagement.minPlayableSeconds || 12);
         if (!engagementUnlocked && state.hp <= 0) {{
           state.hp = 1;
         }}
-        if (engagementUnlocked && (state.timeLeft <= 0 || state.hp <= 0)) {{
+        if (!survivalUnlocked && state.hp <= 0) {{
+          state.hp = 1;
+        }}
+        if (engagementUnlocked && survivalUnlocked && (state.timeLeft <= 0 || state.hp <= 0)) {{
           endGame();
         }}
         updateHud();
