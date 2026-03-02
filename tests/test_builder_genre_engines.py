@@ -5,6 +5,8 @@ from app.orchestration.nodes.builder import (
     _build_hybrid_asset_bank,
     _build_hybrid_engine_html,
     _extract_hybrid_bundle_from_inline_html,
+    _build_request_capability_hint,
+    _infer_core_loop_profile,
     _infer_core_loop_type,
     _resolve_asset_pack,
 )
@@ -68,6 +70,27 @@ def test_infer_comic_action_mode_from_keyword() -> None:
 def test_infer_full3d_fighting_maps_to_comic_action_mode() -> None:
     mode = _infer_core_loop_type(keyword="풀3D 격투 아레나", title="Arena Clash", genre="fighting")
     assert mode == "comic_action_brawler_3d"
+
+
+def test_infer_core_loop_profile_uses_capability_routing_for_unusual_3d_combat_prompt() -> None:
+    profile = _infer_core_loop_profile(
+        keyword="사이버펑크 풀3D 근접 격투 + 이동기 콤보",
+        title="Neon Vanguard",
+        genre="experimental",
+    )
+    assert profile["core_loop_type"] == "comic_action_brawler_3d"
+    assert profile["reason"] in {"explicit_3d_brawler_tokens", "capability_routing"}
+    assert float(profile["confidence"]) >= 0.65
+
+
+def test_request_capability_hint_keeps_original_intent_text() -> None:
+    hint = _build_request_capability_hint(
+        keyword="특이한 장르 실험형 1인칭 퍼즐 슈팅",
+        title="Odd Signal",
+        genre="hybrid",
+    )
+    assert "Requested intent: 특이한 장르 실험형 1인칭 퍼즐 슈팅." in hint
+    assert "Detected capability flags" in hint
 
 
 def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> None:

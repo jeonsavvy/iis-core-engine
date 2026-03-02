@@ -12,98 +12,192 @@ def _is_safe_slug(value: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value))
 
 
-def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
+def _contains_any(haystack: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in haystack for token in tokens)
+
+
+def _infer_core_loop_profile(*, keyword: str, title: str, genre: str) -> dict[str, object]:
     haystack = " ".join([keyword, title, genre]).casefold()
-    if any(
-        token in haystack
-        for token in (
-            "f1",
-            "formula 1",
-            "formula-one",
-            "포뮬러",
-            "formula",
-            "grand prix",
-            "그랑프리",
-            "circuit race",
-            "circuit racing",
-            "formula racing",
-        )
-    ):
-        return "f1_formula_circuit_3d"
-    if any(
-        token in haystack
-        for token in (
-            "비행기",
-            "비행 시뮬",
-            "항공기",
-            "flight sim",
-            "flight simulator",
-            "aircraft",
-            "pilot",
-            "cockpit",
-            "dogfight",
-        )
-    ):
-        return "flight_sim_3d"
-    if any(
-        token in haystack
-        for token in (
-            "webgl",
-            "three.js",
-            "threejs",
-            "3d 레이싱",
-            "3d 드리프트",
-            "3d racing",
-            "3d drift",
-            "outrun",
-            "아웃런",
-            "voxel race",
-        )
-    ):
-        return "webgl_three_runner"
-    if any(
-        token in haystack
-        for token in (
-            "탑뷰",
-            "탑다운",
-            "로그라이크",
-            "roguelike",
-            "top-down",
-            "topdown",
-            "dungeon",
-            "판타지 슈팅",
-        )
-    ):
-        return "topdown_roguelike_shooter"
-    if any(
-        token in haystack
-        for token in (
-            "코믹액션",
-            "코믹 액션",
-            "comic action",
-            "beat em up",
-            "3d 액션",
-            "3d brawler",
-            "풀3d 격투",
-            "풀 3d 격투",
-            "3d 격투",
-            "3d 파이터",
-            "3d fighter",
-            "3d fighting",
-            "full 3d fighting",
-            "full3d fighting",
-            "arena fighter",
-            "arena brawler",
-        )
-    ):
-        return "comic_action_brawler_3d"
-    if any(token in haystack for token in ("레이싱", "레이스", "드리프트", "racing", "race", "car")):
-        return "lane_dodge_racer"
-    if any(token in haystack for token in ("슈팅", "사격", "총", "shooter", "shoot", "bullet")):
-        return "arena_shooter"
-    if any(token in haystack for token in ("격투", "파이터", "권투", "복싱", "스모", "fight", "fighting", "brawler", "brawl", "boxing", "sumo")):
-        return "duel_brawler"
-    return "arcade_generic"
+    explicit_rules: tuple[tuple[str, tuple[str, ...], str], ...] = (
+        (
+            "f1_formula_circuit_3d",
+            (
+                "f1",
+                "formula 1",
+                "formula-one",
+                "포뮬러",
+                "grand prix",
+                "그랑프리",
+                "circuit race",
+                "circuit racing",
+                "formula racing",
+            ),
+            "explicit_formula_tokens",
+        ),
+        (
+            "flight_sim_3d",
+            (
+                "비행기",
+                "비행 시뮬",
+                "항공기",
+                "flight sim",
+                "flight simulator",
+                "aircraft",
+                "pilot",
+                "cockpit",
+                "dogfight",
+            ),
+            "explicit_flight_tokens",
+        ),
+        (
+            "topdown_roguelike_shooter",
+            (
+                "탑뷰",
+                "탑다운",
+                "로그라이크",
+                "roguelike",
+                "top-down",
+                "topdown",
+                "dungeon",
+                "판타지 슈팅",
+            ),
+            "explicit_topdown_tokens",
+        ),
+        (
+            "comic_action_brawler_3d",
+            (
+                "코믹액션",
+                "코믹 액션",
+                "comic action",
+                "beat em up",
+                "3d 액션",
+                "3d brawler",
+                "풀3d 격투",
+                "풀 3d 격투",
+                "3d 격투",
+                "3d 파이터",
+                "3d fighter",
+                "3d fighting",
+                "full 3d fighting",
+                "full3d fighting",
+                "arena fighter",
+                "arena brawler",
+            ),
+            "explicit_3d_brawler_tokens",
+        ),
+        (
+            "webgl_three_runner",
+            (
+                "webgl",
+                "three.js",
+                "threejs",
+                "3d 레이싱",
+                "3d 드리프트",
+                "3d racing",
+                "3d drift",
+                "outrun",
+                "아웃런",
+                "voxel race",
+            ),
+            "explicit_webgl_tokens",
+        ),
+    )
+    for core_loop_type, tokens, reason in explicit_rules:
+        if _contains_any(haystack, tokens):
+            return {
+                "core_loop_type": core_loop_type,
+                "confidence": 0.99,
+                "reason": reason,
+            }
+
+    capability_tokens: dict[str, tuple[str, ...]] = {
+        "is_3d": ("3d", "풀3d", "풀 3d", "입체", "first-person", "first person", "fps", "tps", "3인칭", "third person"),
+        "is_racing": ("레이싱", "레이스", "드리프트", "racing", "race", "car", "circuit", "lap"),
+        "is_flight": ("flight", "비행", "pilot", "aircraft", "cockpit", "dogfight"),
+        "is_shooter": ("슈팅", "사격", "총", "shooter", "shoot", "bullet", "fps"),
+        "is_brawler": ("격투", "파이터", "권투", "복싱", "fight", "fighting", "brawler", "brawl", "boxing", "sumo", "근접"),
+        "is_topdown": ("탑뷰", "탑다운", "top-down", "topdown"),
+        "is_roguelike": ("로그라이크", "roguelike", "dungeon"),
+        "is_runner": ("runner", "outrun", "질주", "sprint"),
+    }
+    capabilities: dict[str, bool] = {
+        key: _contains_any(haystack, tokens)
+        for key, tokens in capability_tokens.items()
+    }
+
+    scores: dict[str, float] = {
+        "f1_formula_circuit_3d": 0.0,
+        "flight_sim_3d": 0.0,
+        "webgl_three_runner": 0.0,
+        "topdown_roguelike_shooter": 0.0,
+        "comic_action_brawler_3d": 0.0,
+        "lane_dodge_racer": 0.0,
+        "arena_shooter": 0.0,
+        "duel_brawler": 0.0,
+        "arcade_generic": 0.5,
+    }
+    if capabilities["is_racing"]:
+        scores["lane_dodge_racer"] += 2.2
+        scores["webgl_three_runner"] += 2.0
+    if capabilities["is_flight"]:
+        scores["flight_sim_3d"] += 3.6
+    if capabilities["is_shooter"]:
+        scores["arena_shooter"] += 2.8
+        scores["topdown_roguelike_shooter"] += 1.2
+    if capabilities["is_brawler"]:
+        scores["duel_brawler"] += 2.6
+        scores["comic_action_brawler_3d"] += 1.8
+    if capabilities["is_topdown"]:
+        scores["topdown_roguelike_shooter"] += 2.8
+    if capabilities["is_roguelike"]:
+        scores["topdown_roguelike_shooter"] += 1.8
+    if capabilities["is_runner"]:
+        scores["webgl_three_runner"] += 1.2
+        scores["lane_dodge_racer"] += 0.8
+    if capabilities["is_3d"]:
+        scores["flight_sim_3d"] += 0.8
+        scores["webgl_three_runner"] += 1.4
+        scores["comic_action_brawler_3d"] += 2.0
+        scores["lane_dodge_racer"] -= 0.3
+        scores["duel_brawler"] -= 0.4
+
+    ranked = sorted(scores.items(), key=lambda row: row[1], reverse=True)
+    selected_loop, selected_score = ranked[0]
+    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+    score_gap = max(0.0, selected_score - second_score)
+    confidence = min(0.95, max(0.35, 0.45 + (score_gap * 0.15)))
+
+    if selected_loop in {"lane_dodge_racer", "duel_brawler"} and capabilities["is_3d"]:
+        selected_loop = "webgl_three_runner" if selected_loop == "lane_dodge_racer" else "comic_action_brawler_3d"
+        confidence = max(confidence, 0.72)
+
+    return {
+        "core_loop_type": selected_loop,
+        "confidence": round(confidence, 2),
+        "reason": "capability_routing",
+        "capabilities": capabilities,
+    }
+
+
+def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
+    profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
+    return str(profile.get("core_loop_type", "arcade_generic"))
+
+
+def _build_request_capability_hint(*, keyword: str, title: str, genre: str) -> str:
+    profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
+    capabilities = profile.get("capabilities")
+    active_flags: list[str] = []
+    if isinstance(capabilities, dict):
+        for key, value in capabilities.items():
+            if bool(value):
+                active_flags.append(key)
+    active = ", ".join(active_flags[:8]) if active_flags else "no-explicit-capability-token"
+    return (
+        f"Requested intent: {keyword}. "
+        f"Detected capability flags: {active}. "
+        "If the exact genre stack is unsupported, preserve requested fantasy and camera/interaction intent instead of collapsing to simple rectangles."
+    )
 
 
 def _detect_unsupported_scope(*, keyword: str, title: str, genre: str) -> str | None:

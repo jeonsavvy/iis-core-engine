@@ -279,6 +279,7 @@ def build_production_artifact(
     runtime_asset_manifest: dict[str, Any],
     memory_hint: str = "",
     memory_tokens: list[str] | None = None,
+    request_capability_hint: str = "",
 ) -> ProductionBuildResult:
     configured_candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     candidate_count = 1
@@ -300,10 +301,18 @@ def build_production_artifact(
             )
 
     normalized_memory_hint = memory_hint.strip()
+    normalized_request_capability_hint = request_capability_hint.strip()
     memory_feedback_tokens = [str(item).strip() for item in (memory_tokens or []) if str(item).strip()]
 
     combined_feedback_hint = " ".join(
-        chunk for chunk in (rebuild_feedback_hint, visual_feedback_hint, normalized_memory_hint) if chunk
+        chunk
+        for chunk in (
+            rebuild_feedback_hint,
+            visual_feedback_hint,
+            normalized_request_capability_hint,
+            normalized_memory_hint,
+        )
+        if chunk
     ).strip()
     previous_artifact_html = str(state["outputs"].get("artifact_html", "")).strip()
     reuse_previous_artifact_seed = bool(
@@ -335,6 +344,7 @@ def build_production_artifact(
             "visual_feedback_hint_applied": bool(visual_feedback_hint),
             "visual_feedback_failed_checks": visual_feedback_failed_checks,
             "memory_hint_applied": bool(normalized_memory_hint),
+            "request_capability_hint_applied": bool(normalized_request_capability_hint),
             "memory_feedback_tokens": memory_feedback_tokens,
             "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
             "configured_codegen_passes": configured_codegen_passes,
@@ -798,6 +808,7 @@ def build_production_artifact(
         "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
         "rebuild_feedback_tokens": rebuild_feedback_tokens,
         "memory_hint_applied": bool(normalized_memory_hint),
+        "request_capability_hint_applied": bool(normalized_request_capability_hint),
         "memory_tokens": memory_feedback_tokens,
         "polish_applied": use_polished,
         "final_variant_label": preferred_label,

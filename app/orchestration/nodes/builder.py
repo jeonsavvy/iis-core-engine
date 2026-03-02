@@ -8,7 +8,9 @@ from app.orchestration.nodes.builder_parts.assets import _build_hybrid_asset_ban
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.mode import (
+    _build_request_capability_hint,
     _detect_unsupported_scope,
+    _infer_core_loop_profile,
     _infer_core_loop_type,
     _is_safe_slug,
     _slugify,
@@ -25,6 +27,8 @@ __all__ = [
     "_resolve_asset_pack",
     "_extract_hybrid_bundle_from_inline_html",
     "_build_hybrid_engine_html",
+    "_build_request_capability_hint",
+    "_infer_core_loop_profile",
     "_infer_core_loop_type",
 ]
 
@@ -207,7 +211,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     palette = design_spec.palette
     accent_color = str(palette[0]) if palette else "#22C55E"
-    core_loop_type = _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)
+    core_loop_profile = _infer_core_loop_profile(keyword=state["keyword"], title=title, genre=genre)
+    core_loop_type = str(core_loop_profile.get("core_loop_type", _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)))
+    request_capability_hint = _build_request_capability_hint(keyword=state["keyword"], title=title, genre=genre)
     unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
     if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
         state["status"] = PipelineStatus.ERROR
@@ -221,11 +227,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             agent_name=PipelineAgentName.DEVELOPER,
             message="빌드 중단: 현재 파이프라인 범위를 초과한 요청입니다.",
             reason=unsupported_scope_reason,
-            metadata={
-                "keyword": state["keyword"],
-                "title": title,
-                "genre": genre,
-                "supported_modes": [
+        metadata={
+            "keyword": state["keyword"],
+            "title": title,
+            "genre": genre,
+            "supported_modes": [
                     "f1_formula_circuit_3d",
                     "flight_sim_3d",
                     "webgl_three_runner",
@@ -258,6 +264,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         message="Asset memory retriever composed prior successes/failures.",
         metadata={
             "core_loop_type": core_loop_type,
+            "core_loop_profile": core_loop_profile,
+            "request_capability_hint_applied": bool(request_capability_hint),
             "asset_memory_hint_applied": bool(asset_memory_context.hint),
             "asset_memory_profile": asset_memory_context.retrieval_profile,
             "asset_memory_snapshot": asset_memory_context.registry_snapshot,
@@ -326,6 +334,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         runtime_asset_manifest=runtime_asset_manifest,
         memory_hint=asset_memory_context.hint,
         memory_tokens=asset_memory_context.recurring_failures,
+        request_capability_hint=request_capability_hint,
     )
     build_artifact = production_result.build_artifact
 
