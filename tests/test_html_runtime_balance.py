@@ -18,6 +18,7 @@ def test_balance_tables_cover_known_modes() -> None:
         "arena_shooter",
         "comic_action_brawler_3d",
         "duel_brawler",
+        "request_faithful_generic",
         "arcade_generic",
     }
     assert expected_modes.issubset(CONTROL_PRESETS.keys())
@@ -34,5 +35,5 @@ def test_runtime_balance_block_contains_required_js_symbols() -> None:
     assert "const CONTROL_PRESETS =" in block
     assert "const DEPTH_PACKS =" in block
     assert "const RELIC_SYNERGY_RULES =" in block
-    assert "const CONTROL = CONTROL_PRESETS[CONFIG.mode] || CONTROL_PRESETS.arcade_generic;" in block
-    assert "const ACTIVE_DEPTH_PACK = DEPTH_PACKS[CONFIG.mode] || DEPTH_PACKS.arcade_generic;" in block
+    assert "const CONTROL = CONTROL_PRESETS[CONFIG.mode] || CONTROL_PRESETS.request_faithful_generic || CONTROL_PRESETS.arcade_generic;" in block
+    assert "const ACTIVE_DEPTH_PACK = DEPTH_PACKS[CONFIG.mode] || DEPTH_PACKS.request_faithful_generic || DEPTH_PACKS.arcade_generic;" in block

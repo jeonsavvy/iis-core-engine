@@ -51,16 +51,16 @@ MODE_CONFIG_BY_LOOP: dict[str, RuntimeModeConfig] = {
         "objective": "근접전으로 적의 체력을 먼저 깎아 승리하세요.",
         "controls": "← → ↑ ↓ 이동 / Space 공격 / R 재시작",
     },
-    "arcade_generic": {
-        "label": "Arcade",
-        "objective": "움직이며 위험 요소를 피하고 점수를 올리세요.",
+    "request_faithful_generic": {
+        "label": "Adaptive Action",
+        "objective": "요청한 게임 판타지를 유지하며 핵심 상호작용을 익혀 목표를 달성하세요.",
         "controls": "← → ↑ ↓ 이동 / R 재시작",
     },
 }
 
 
 def resolve_mode_config(core_loop_type: str) -> RuntimeModeConfig:
-    return MODE_CONFIG_BY_LOOP[core_loop_type]
+    return MODE_CONFIG_BY_LOOP.get(core_loop_type, MODE_CONFIG_BY_LOOP["request_faithful_generic"])
 
 
 def _coerce_int(value: Any, *, fallback: int) -> int:

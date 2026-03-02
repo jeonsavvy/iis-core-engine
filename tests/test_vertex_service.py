@@ -59,7 +59,7 @@ def test_builder_prompt_mentions_formula_guidance() -> None:
     lowered = prompt.casefold()
     assert "formula/f1/circuit racing" in lowered
     assert "braking windows" in lowered
-    assert "multi-minute runs" in lowered
+    assert "requested pacing and fantasy" in lowered
 
 
 def test_generate_marketing_copy_uses_stub_when_vertex_not_configured(monkeypatch) -> None:

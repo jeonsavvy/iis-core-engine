@@ -80,6 +80,9 @@ CONTROL_PRESETS: dict[str, dict[str, Any]] = {
         "move_speed": 220,
         "dash_multiplier": 1.75,
     },
+    "request_faithful_generic": {
+        "move_speed": 240,
+    },
     "arcade_generic": {
         "move_speed": 240,
     },
@@ -134,6 +137,12 @@ DEPTH_PACKS: dict[str, dict[str, Any]] = {
         "wave_modifiers": [1.0, 1.1, 1.22, 1.32],
         "pattern": [["grunt", 0.72], ["elite", 0.28]],
     },
+    "request_faithful_generic": {
+        "wave_interval_sec": 9.0,
+        "miniboss_interval_sec": 28.0,
+        "wave_modifiers": [1.0, 1.08, 1.16, 1.24],
+        "pattern": [["grunt", 0.82], ["elite", 0.18]],
+    },
     "arcade_generic": {
         "wave_interval_sec": 9.0,
         "miniboss_interval_sec": 28.0,
@@ -168,7 +177,7 @@ def build_runtime_balance_block_js() -> str:
             _format_js_const("CONTROL_PRESETS", CONTROL_PRESETS),
             _format_js_const("DEPTH_PACKS", DEPTH_PACKS),
             _format_js_const("RELIC_SYNERGY_RULES", RELIC_SYNERGY_RULES),
-            "      const CONTROL = CONTROL_PRESETS[CONFIG.mode] || CONTROL_PRESETS.arcade_generic;",
-            "      const ACTIVE_DEPTH_PACK = DEPTH_PACKS[CONFIG.mode] || DEPTH_PACKS.arcade_generic;",
+            "      const CONTROL = CONTROL_PRESETS[CONFIG.mode] || CONTROL_PRESETS.request_faithful_generic || CONTROL_PRESETS.arcade_generic;",
+            "      const ACTIVE_DEPTH_PACK = DEPTH_PACKS[CONFIG.mode] || DEPTH_PACKS.request_faithful_generic || DEPTH_PACKS.arcade_generic;",
         ]
     )

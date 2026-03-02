@@ -134,7 +134,7 @@ def _infer_core_loop_profile(*, keyword: str, title: str, genre: str) -> dict[st
         "lane_dodge_racer": 0.0,
         "arena_shooter": 0.0,
         "duel_brawler": 0.0,
-        "arcade_generic": 0.5,
+        "request_faithful_generic": 0.55,
     }
     if capabilities["is_racing"]:
         scores["lane_dodge_racer"] += 2.2
@@ -181,7 +181,7 @@ def _infer_core_loop_profile(*, keyword: str, title: str, genre: str) -> dict[st
 
 def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
-    return str(profile.get("core_loop_type", "arcade_generic"))
+    return str(profile.get("core_loop_type", "request_faithful_generic"))
 
 
 def _build_request_capability_hint(*, keyword: str, title: str, genre: str) -> str:
@@ -208,7 +208,7 @@ def _synthesize_genre_profile(
     core_loop_profile: dict[str, object] | None = None,
 ) -> dict[str, object]:
     profile = core_loop_profile if isinstance(core_loop_profile, dict) else _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
-    core_loop_type = str(profile.get("core_loop_type", "arcade_generic"))
+    core_loop_type = str(profile.get("core_loop_type", "request_faithful_generic"))
     capabilities = profile.get("capabilities")
     typed_capabilities = capabilities if isinstance(capabilities, dict) else {}
     haystack = " ".join([keyword, title, genre]).casefold()
@@ -221,7 +221,7 @@ def _synthesize_genre_profile(
     elif core_loop_type == "flight_sim_3d":
         camera_model = "cockpit_or_chase"
 
-    interaction_model = "arcade_action"
+    interaction_model = "request_driven_action"
     if bool(typed_capabilities.get("is_racing")):
         interaction_model = "vehicle_control"
     elif bool(typed_capabilities.get("is_flight")):
@@ -233,7 +233,7 @@ def _synthesize_genre_profile(
     elif bool(typed_capabilities.get("is_brawler")):
         interaction_model = "melee_combat"
 
-    world_style = "arcade"
+    world_style = "request_native"
     if _contains_any(haystack, ("cyber", "사이버", "네온", "neon", "sci-fi", "sf")):
         world_style = "sci_fi_neon"
     elif _contains_any(haystack, ("fantasy", "판타지", "마법")):
@@ -304,8 +304,8 @@ def _build_generated_genre_directive(
     return (
         f"Auto-generated genre profile ({profile.get('profile_id', 'dynamic-profile')}): "
         f"camera={profile.get('camera_model', 'third_person')}, "
-        f"interaction={profile.get('interaction_model', 'arcade_action')}, "
-        f"style={profile.get('world_style', 'arcade')}. "
+        f"interaction={profile.get('interaction_model', 'request_driven_action')}, "
+        f"style={profile.get('world_style', 'request_native')}. "
         f"Gameplay pillars: {', '.join(typed_pillars[:4]) if typed_pillars else 'core_loop_clarity'}. "
         f"Non-negotiables: {', '.join(typed_rules[:5]) if typed_rules else 'stable_runtime'}. "
         "If exact genre implementation is unavailable, synthesize the closest playable interpretation while preserving requested fantasy and control identity."
@@ -339,17 +339,17 @@ def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> 
             "Variant B: high-altitude storm run with turbulence dodges and aggressive speed-management.",
             "Variant C: relay checkpoint sprint emphasizing roll control, near-miss bonuses, and route optimization.",
             "Variant D: endurance flight with escalating hazard density and careful stall-risk handling.",
-            "Variant E: arcade sim blend prioritizing believable handling while keeping short-session replayability.",
+            "Variant E: simulation-forward blend prioritizing believable handling and progressive mastery depth.",
         ],
         "webgl_three_runner": [
             "Variant A: ultra-fast neon sprint with aggressive traffic and boost-chain risk/reward.",
             "Variant B: technical drift line with sharper corner pressure and stricter recovery windows.",
             "Variant C: endurance outrun loop with escalating depth speed and combo streak scoring.",
             "Variant D: cinematic sunset highway run with moderate pace and dense late-wave threats.",
-            "Variant E: arcade sprint with high readability, low randomness, and skill expression focus.",
+            "Variant E: precision sprint with high readability, low randomness, and skill expression focus.",
         ],
         "topdown_roguelike_shooter": [
-            "Variant A: high-mobility dash shooter with aggressive close-range swarms and fast loop resets.",
+            "Variant A: high-mobility dash shooter with aggressive close-range swarms and fast tactical resets.",
             "Variant B: methodical dungeon skirmish with elite enemy telegraphs and tactical spacing.",
             "Variant C: combo survival loop where kill streaks accelerate rewards and enemy pressure.",
             "Variant D: relic-run pacing with periodic power spikes and escalating arena threats.",
@@ -360,7 +360,7 @@ def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> 
             "Variant B: heavier enemy archetypes with slower cadence and dramatic counter windows.",
             "Variant C: tempo-driven arena brawl with burst waves and score multipliers.",
             "Variant D: endurance showdown with mini-boss style spikes and survival pressure.",
-            "Variant E: flashy arcade beat-em-up loop prioritizing readable impact feedback.",
+            "Variant E: flashy cinematic beat-em-up loop prioritizing readable impact feedback.",
         ],
         "lane_dodge_racer": [
             "Variant A: high-speed drift pressure with frequent boost pickups and tighter lane windows.",
@@ -383,15 +383,15 @@ def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> 
             "Variant D: high-risk burst mode where attack openings are rare but decisive.",
             "Variant E: attrition duel with resilient enemies and clutch comeback flow.",
         ],
-        "arcade_generic": [
-            "Variant A: fast pressure loop with high movement speed and dense hazards.",
-            "Variant B: strategic loop with clearer telegraphs and slower threat escalation.",
-            "Variant C: combo loop with reward multipliers for consecutive clean actions.",
-            "Variant D: survival endurance with stronger late-game pacing spikes.",
-            "Variant E: balanced loop with readability-first but escalating risk windows.",
+        "request_faithful_generic": [
+            "Variant A: request-faithful action loop with high responsiveness and clear visual intent.",
+            "Variant B: request-faithful tactical loop with stronger telegraphs and deliberate pacing.",
+            "Variant C: request-faithful progression loop with reward multipliers for execution mastery.",
+            "Variant D: request-faithful endurance loop with escalating pressure and adaptation windows.",
+            "Variant E: request-faithful balanced loop prioritizing readability while preserving fantasy identity.",
         ],
     }
-    hints = list(presets.get(core_loop_type, presets["arcade_generic"]))
+    hints = list(presets.get(core_loop_type, presets["request_faithful_generic"]))
     if candidate_count <= len(hints):
         return hints[:candidate_count]
 

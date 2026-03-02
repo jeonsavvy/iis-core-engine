@@ -41,8 +41,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     slug = state["outputs"].get("game_slug", "unknown-game")
     game_name = state["outputs"].get("game_name", slug)
-    genre = state["outputs"].get("game_genre", "arcade")
-    genre_engine = str(state["outputs"].get("genre_engine", "arcade_generic"))
+    genre = state["outputs"].get("game_genre", "action")
+    genre_engine = str(state["outputs"].get("genre_engine", "request_faithful_generic"))
     keyword = state.get("keyword", "unknown")
     objective = ""
     gdd_payload = state["outputs"].get("gdd")
@@ -111,7 +111,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             keyword=keyword,
             game_name=game_name,
             genre=genre,
-            objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
+            objective=objective or "요청한 콘셉트를 플레이어가 명확히 체감할 수 있는 핵심 플레이 루프",
             evidence=grounded_evidence,
         )
     else:
@@ -119,7 +119,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             keyword=keyword,
             game_name=game_name,
             genre=genre,
-            objective=objective or "플레이어가 즉시 이해하고 반복 도전할 수 있는 아케이드 루프",
+            objective=objective or "요청한 콘셉트를 플레이어가 명확히 체감할 수 있는 핵심 플레이 루프",
         )
     ai_review_text = str(review_result.payload.get("ai_review", "")).strip()
     if not ai_review_text:

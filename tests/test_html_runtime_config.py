@@ -12,13 +12,10 @@ def test_resolve_mode_config_returns_expected_values() -> None:
     assert "W/S" in resolved["controls"]
 
 
-def test_resolve_mode_config_raises_key_error_for_unknown_mode() -> None:
-    try:
-        resolve_mode_config("unsupported_mode")
-    except KeyError as exc:
-        assert exc.args[0] == "unsupported_mode"
-    else:
-        raise AssertionError("expected KeyError for unsupported mode")
+def test_resolve_mode_config_falls_back_to_request_faithful_mode_for_unknown_mode() -> None:
+    resolved = resolve_mode_config("unsupported_mode")
+    assert resolved["label"] == "Adaptive Action"
+    assert "요청한 게임 판타지" in resolved["objective"]
 
 
 def test_build_runtime_config_json_merges_payload_and_defaults() -> None:

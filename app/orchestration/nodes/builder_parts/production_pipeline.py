@@ -552,7 +552,12 @@ def build_production_artifact(
             quality_ok=candidate_assessment.quality.ok,
             gameplay_ok=candidate_assessment.gameplay.ok,
         )
-        if base_composite_score > composite_score:
+        codegen_regressed = (
+            base_composite_score > composite_score
+            or (base_assessment.builder_score - candidate_assessment.builder_score) >= 1.0
+            or (bool(candidate_assessment.runtime_warning_codes) and not bool(base_assessment.runtime_warning_codes))
+        )
+        if codegen_regressed:
             candidate_html = base_candidate_html
             candidate_assessment = base_assessment
             composite_score = base_composite_score
@@ -563,6 +568,7 @@ def build_production_artifact(
                     "model": None,
                     "reason": "codegen_regression_guard",
                     "baseline_composite_score": base_composite_score,
+                    "baseline_builder_score": base_assessment.builder_score,
                 }
             )
 

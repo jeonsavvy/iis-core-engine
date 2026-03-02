@@ -247,7 +247,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "keyword": state["keyword"],
             "title": title,
             "genre": genre,
-            "supported_modes": [
+                "supported_modes": [
                     "f1_formula_circuit_3d",
                     "flight_sim_3d",
                     "webgl_three_runner",
@@ -256,7 +256,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "lane_dodge_racer",
                     "arena_shooter",
                     "duel_brawler",
-                    "arcade_generic",
+                    "request_faithful_generic",
                 ],
             },
         )

@@ -63,13 +63,13 @@ def build_design_contract_prompt(
 
 def build_gdd_prompt(keyword: str) -> str:
     return (
-        "You are a principal game designer for a viral browser arcade studio. "
+        "You are a principal game designer for high-quality browser games. "
         "Return JSON only.\n"
         "Create a compact but production-usable GDD for an AI-generated browser game.\n"
         f"Keyword: {keyword}\n"
         "Constraints:\n"
         "- genre should be a concise free-form tag that matches gameplay fantasy (e.g., formula-racing-3d, arena-shooter)\n"
-        "- objective must define an actionable session target; allowed range is 90~360 seconds when fantasy requires depth\n"
+        "- objective must define an actionable session target; allowed range is 120~1200 seconds when fantasy requires depth\n"
         "- visual_style should be concise (e.g., neon-minimal, pixel-retro)\n"
         "- references should be 3 short reference ideas (strings)\n"
         "- research_intent should explain what references target\n"
@@ -80,14 +80,15 @@ def build_gdd_prompt(keyword: str) -> str:
         "Design quality bar:\n"
         "- The player must have a meaningful verb loop (move/aim/attack/evade/collect)\n"
         "- The fantasy implied by the keyword should be visible in the core loop\n"
-        "- The game should be understandable within 5 seconds and replayable with depth for multiple 2~6 minute runs\n"
+        "- The game should be understandable quickly, then sustain depth across requested pacing (do not force short-session arcade cadence)\n"
+        "- If keyword implies simulation/strategy/story/immersive pacing, keep that pacing instead of converting to twitch-arcade loop\n"
         "- If keyword implies Formula/F1/circuit racing, include lap/checkpoint/overtake/braking-line fantasy explicitly\n"
     )
 
 
 def build_design_prompt(*, keyword: str, visual_style: str, genre: str) -> str:
     return (
-        "You are a senior game UI/UX and visual direction stylist for web arcade games. "
+        "You are a senior game UI/UX and visual direction stylist for web games. "
         "Return JSON only.\n"
         f"Keyword: {keyword}\n"
         f"Genre: {genre}\n"
@@ -126,7 +127,7 @@ def build_builder_prompt(
             "Apply this variation to pacing/risk/reward so that candidates are meaningfully different.\n"
         )
     return (
-        "You are a master game balancer and level designer for arcade games. "
+        "You are a master game balancer and level designer for high-quality web games. "
         "Return JSON only.\n"
         f"Keyword: {keyword}\n"
         f"Title: {title}\n"
@@ -155,7 +156,7 @@ def build_builder_prompt(
         "- Preserve analog control headroom (no quantized one-step movement assumptions).\n"
         "- Prefer procedural scene layering (parallax/depth/particles) over bitmap dependency.\n"
         "- Ensure wave escalation + miniboss cadence + relic synergy potential can emerge from numeric tuning.\n"
-        "- Ensure values provide a fair but challenging experience suitable for repeated multi-minute runs."
+        "- Ensure values provide a fair but challenging experience aligned with the requested pacing and fantasy (not forced arcade rhythm)."
     )
 
 
@@ -231,6 +232,7 @@ def build_codegen_prompt(
         "- Keep safe-area / overflow-readability guard behavior.\n"
         "- Keep keyboard controls and restart flow.\n"
         "- Implement the requested core loop mode faithfully.\n"
+        "- Preserve requested fantasy and pacing; do not collapse to generic arcade wave-survival if request asks otherwise.\n"
         "- Asset policy is procedural_threejs_first: prefer procedural visuals (geometry/gradients/particles/shader-like effects) and internal vector sprites only.\n"
         "- Do not rely on external image generation services or remote image URLs.\n"
         "- Do not regress to flat placeholder rectangle-only visuals.\n"
@@ -270,6 +272,7 @@ def build_polish_prompt(*, keyword: str, title: str, genre: str, html_content: s
         "- Preserve all existing gameplay rules and controls.\n"
         "- Preserve leaderboard contract and `window.__iis_game_boot_ok`.\n"
         "- Keep responsive/safe-area/readability rules.\n"
+        "- Preserve requested genre fantasy and pacing; do not simplify into generic arcade loop during polish.\n"
         "- Keep procedural_threejs_first asset policy: improve via procedural rendering layers, not external generated image dependencies.\n"
         "- Keep primitive fillRect-only rendering under 35% of total draw operations; add path/gradient/sprite richness.\n"
         "- Preserve at least 3 visual layers and 4 distinct gameplay silhouettes after polish.\n"
