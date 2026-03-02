@@ -51,6 +51,27 @@ runtimeModules.camera_stack = {
         return """
 runtimeModules.controller_stack = {
   update(state, dt) {
+    const locomotion = state.runtimeProfile.locomotionModel;
+    if (locomotion === "flight") {
+      const pitchInput = (state.input.pitchUp ? 1 : 0) - (state.input.pitchDown ? 1 : 0);
+      const rollInput = (state.input.rollRight ? 1 : 0) - (state.input.rollLeft ? 1 : 0);
+      const yawInput = (state.input.yawRight ? 1 : 0) - (state.input.yawLeft ? 1 : 0);
+      const throttleInput = (state.input.throttleUp ? 1 : 0) - (state.input.throttleDown ? 1 : 0);
+      state.flight.throttle = Math.max(0.35, Math.min(1.85, state.flight.throttle + throttleInput * dt * 0.65));
+      state.flight.pitch = Math.max(-1.2, Math.min(1.2, state.flight.pitch + pitchInput * dt * 2.1));
+      state.flight.roll = Math.max(-1.3, Math.min(1.3, state.flight.roll + rollInput * dt * 2.2));
+      state.flight.yaw += yawInput * dt * 1.6;
+      state.player.vx += (Math.sin(state.flight.yaw) * state.flight.throttle * 12 - state.player.vx * 1.8) * dt;
+      state.player.vy += (state.flight.pitch * state.flight.throttle * 8 - state.player.vy * 2.2) * dt;
+      state.player.vz = Math.max(6, (state.flight.speedBase + (state.flight.throttle * 22)) * (state.input.sprint ? 1.15 : 1.0));
+      state.player.x += state.player.vx * dt;
+      state.player.y += state.player.vy * dt;
+      state.player.z += state.player.vz * dt;
+      state.player.x = Math.max(-16, Math.min(16, state.player.x));
+      state.player.y = Math.max(-4.5, Math.min(9.5, state.player.y));
+      return;
+    }
+
     const axisX = (state.input.right ? 1 : 0) - (state.input.left ? 1 : 0);
     const axisY = (state.input.up ? 1 : 0) - (state.input.down ? 1 : 0);
     const sprint = state.input.sprint ? 1.5 : 1.0;
@@ -72,6 +93,9 @@ runtimeModules.controller_stack = {
         return """
 runtimeModules.combat_stack = {
   update(state, dt) {
+    if (state.runtimeProfile.interactionModel === "navigation") {
+      return;
+    }
     state.player.attackCooldown = Math.max(0, state.player.attackCooldown - dt);
     if (state.input.attack && state.player.attackCooldown <= 0) {
       state.player.attackCooldown = 0.24;
@@ -100,6 +124,34 @@ runtimeModules.progression_stack = {
   update(state, dt) {
     state.progress.time += dt;
     state.progress.waveTimer += dt;
+    if (state.runtimeProfile.locomotionModel === "flight") {
+      if (state.progress.waveTimer >= 1.15) {
+        state.progress.waveTimer = 0;
+        state.checkpoints.push({
+          x: (Math.random() - 0.5) * 18,
+          y: -1.2 + Math.random() * 8.2,
+          z: state.player.z + 30 + Math.random() * 22,
+          radius: 1.4 + Math.random() * 1.2,
+          reward: 45,
+          kind: "checkpoint",
+        });
+      }
+      state.checkpoints = state.checkpoints.filter((checkpoint) => checkpoint.z > state.player.z - 6);
+      for (const checkpoint of state.checkpoints) {
+        const dx = checkpoint.x - state.player.x;
+        const dy = checkpoint.y - state.player.y;
+        const dz = checkpoint.z - state.player.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq <= (checkpoint.radius * checkpoint.radius) * 1.3) {
+          checkpoint.passed = true;
+          state.score += checkpoint.reward;
+          state.timeLeft = Math.min(120, state.timeLeft + 1.8);
+          state.progress.objective = "Waypoints linked. Keep stable vector.";
+        }
+      }
+      state.checkpoints = state.checkpoints.filter((checkpoint) => !checkpoint.passed);
+      return;
+    }
     if (state.progress.waveTimer >= state.progress.spawnCadence) {
       state.progress.waveTimer = 0;
       state.enemies.push({
@@ -143,7 +195,9 @@ runtimeModules.hud_stack = {
   render(state, scoreEl, timerEl, hpEl, objectiveEl) {
     scoreEl.textContent = `Score: ${Math.floor(state.score)} · Combo x${state.player.combo.toFixed(1)}`;
     timerEl.textContent = `Time: ${Math.max(0, state.timeLeft).toFixed(1)}s`;
-    hpEl.textContent = `HP: ${Math.max(0, state.hp)}`;
+    hpEl.textContent = state.runtimeProfile.locomotionModel === "flight"
+      ? `Stability: ${Math.max(0, Math.round(state.flight.throttle * 100))}%`
+      : `HP: ${Math.max(0, state.hp)}`;
     objectiveEl.textContent = state.progress.objective;
   },
 };

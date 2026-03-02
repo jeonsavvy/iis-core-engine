@@ -35,6 +35,17 @@ def export_runtime_artifact(
     contract_summary = str(contract_bundle.get("summary", "")).strip()
     objective_lines = contract_bundle.get("deliverables", {}).get("plan") if isinstance(contract_bundle.get("deliverables"), dict) else []
     objective_text = " / ".join(str(item) for item in objective_lines[:2]) if isinstance(objective_lines, list) else ""
+    objective_seed = "Engage hostiles and secure interactives"
+    control_guide = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 상호작용: E · 모드전환: C · 재시작: R"
+    if locomotion_model == "flight":
+        objective_seed = "Navigate waypoints and maintain stable vector"
+        control_guide = "자세 제어: W/S 피치 · A/D 롤 · Q/E 요 · 속도 제어: ↑/↓ 스로틀 · Shift 부스트 · 재시작: R"
+    elif locomotion_model == "vehicle":
+        objective_seed = "Hold racing line and clear checkpoints"
+        control_guide = "조향: A/D 또는 ←/→ · 가속/감속: W/S 또는 ↑/↓ · Shift 부스트 · C 모드전환 · 재시작: R"
+    elif interaction_model == "ranged_combat":
+        objective_seed = "Maintain angle and neutralize hostiles"
+        control_guide = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 상호작용: E · 모드전환: C · 재시작: R"
 
     return f"""<!doctype html>
 <html lang="ko">
@@ -184,7 +195,7 @@ def export_runtime_artifact(
       </main>
 
       <footer class="guide">
-        이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 상호작용: E · 모드전환: Q · 재시작: R
+        {control_guide}
       </footer>
     </div>
     <span class="sr-only">{contract_summary}</span>
@@ -237,10 +248,17 @@ def export_runtime_artifact(
         input: {{
           left: false, right: false, up: false, down: false,
           attack: false, sprint: false, interact: false, altAction: false,
+          pitchUp: false, pitchDown: false, rollLeft: false, rollRight: false,
+          yawLeft: false, yawRight: false, throttleUp: false, throttleDown: false,
           toggleMode: false,
         }},
+        runtimeProfile: {{
+          cameraModel: CONFIG.cameraModel,
+          locomotionModel: CONFIG.locomotionModel,
+          interactionModel: CONFIG.interactionModel,
+        }},
         player: {{
-          x: 0, y: 0, z: 4, vx: 0, vz: 0, combo: 1, attackCooldown: 0, mode: "precision",
+          x: 0, y: 0, z: 4, vx: 0, vy: 0, vz: 0, combo: 1, attackCooldown: 0, mode: "precision",
         }},
         camera: {{
           x: 0, y: 2.2, z: -2.8, focal: 760,
@@ -252,14 +270,22 @@ def export_runtime_artifact(
           wave: 1,
           waveTimer: 0,
           spawnCadence: 1.35,
-          objective: "Engage hostiles and secure interactives",
+          objective: "{objective_seed}",
           time: 0,
         }},
         enemies: [],
         projectiles: [],
         interactives: [],
+        checkpoints: [],
         worldObjects: [],
         statusMachine: "explore",
+        flight: {{
+          throttle: 0.85,
+          pitch: 0,
+          roll: 0,
+          yaw: 0,
+          speedBase: 11,
+        }},
       }};
 
       function drawWebglBackdrop(t) {{
@@ -278,10 +304,18 @@ def export_runtime_artifact(
         if (key === "d" || key === "arrowright") state.input.right = pressed;
         if (key === "w" || key === "arrowup") state.input.up = pressed;
         if (key === "s" || key === "arrowdown") state.input.down = pressed;
+        if (key === "w") state.input.pitchUp = pressed;
+        if (key === "s") state.input.pitchDown = pressed;
+        if (key === "a") state.input.rollLeft = pressed;
+        if (key === "d") state.input.rollRight = pressed;
+        if (key === "q") state.input.yawLeft = pressed;
+        if (key === "e") state.input.yawRight = pressed;
+        if (key === "arrowup") state.input.throttleUp = pressed;
+        if (key === "arrowdown") state.input.throttleDown = pressed;
         if (key === " ") state.input.attack = pressed;
         if (key === "shift") state.input.sprint = pressed;
         if (key === "e") state.input.interact = pressed;
-        if (key === "q" && pressed) state.input.toggleMode = true;
+        if (key === "c" && pressed) state.input.toggleMode = true;
       }}
 
       document.addEventListener("keydown", (event) => {{
@@ -313,15 +347,21 @@ def export_runtime_artifact(
         state.player.x = 0;
         state.player.z = 4;
         state.player.vx = 0;
+        state.player.vy = 0;
         state.player.vz = 0;
         state.player.combo = 1;
         state.progress.wave = 1;
         state.progress.waveTimer = 0;
         state.progress.time = 0;
-        state.progress.objective = "Engage hostiles and secure interactives";
+        state.progress.objective = "{objective_seed}";
         state.enemies = [];
         state.projectiles = [];
         state.interactives = [];
+        state.checkpoints = [];
+        state.flight.throttle = 0.85;
+        state.flight.pitch = 0;
+        state.flight.roll = 0;
+        state.flight.yaw = 0;
         runtimeModules.scene_world?.buildWorld(state);
         overlay.classList.remove("show");
         overlay.setAttribute("aria-hidden", "true");
@@ -349,6 +389,9 @@ def export_runtime_artifact(
       }}
 
       function updateEnemies(dt) {{
+        if (state.runtimeProfile.locomotionModel === "flight" || state.runtimeProfile.locomotionModel === "vehicle") {{
+          return;
+        }}
         for (const enemy of state.enemies) {{
           const dx = state.player.x - enemy.x;
           const dz = state.player.z - enemy.z;
@@ -415,6 +458,12 @@ def export_runtime_artifact(
           ctx.beginPath();
           ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
           ctx.fill();
+        }} else if (kind === "checkpoint") {{
+          ctx.strokeStyle = "rgba(34, 211, 238, 0.95)";
+          ctx.lineWidth = Math.max(2, radius * 0.15);
+          ctx.beginPath();
+          ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+          ctx.stroke();
         }} else if (kind === "player") {{
           ctx.fillStyle = "#38bdf8";
           ctx.fillRect(-radius * 0.42, -radius * 0.72, radius * 0.84, radius * 1.44);
@@ -428,6 +477,23 @@ def export_runtime_artifact(
       }}
 
       function drawGround() {{
+        if (state.runtimeProfile.locomotionModel === "flight") {{
+          ctx.save();
+          const horizonY = canvas.height * 0.58;
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+          gradient.addColorStop(0, "rgba(30, 64, 175, 0.35)");
+          gradient.addColorStop(0.58, "rgba(15, 23, 42, 0.12)");
+          gradient.addColorStop(1, "rgba(2, 6, 23, 0.75)");
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.strokeStyle = "rgba(125, 211, 252, 0.28)";
+          ctx.beginPath();
+          ctx.moveTo(0, horizonY);
+          ctx.lineTo(canvas.width, horizonY);
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }}
         ctx.save();
         ctx.strokeStyle = "rgba(56, 189, 248, 0.18)";
         ctx.lineWidth = 1;
@@ -456,6 +522,7 @@ def export_runtime_artifact(
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawGround();
         for (const obj of state.worldObjects) drawObject(obj, obj.kind, 0.8);
+        for (const checkpoint of state.checkpoints) drawObject(checkpoint, "checkpoint", 1.0);
         for (const item of state.interactives) drawObject(item, "interactive", 1.0);
         for (const enemy of state.enemies) drawObject(enemy, enemy.kind, 1.1);
         for (const bullet of state.projectiles) drawObject(bullet, "interactive", 0.5);
