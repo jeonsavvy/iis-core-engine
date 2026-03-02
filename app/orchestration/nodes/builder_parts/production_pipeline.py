@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.orchestration.graph.state import PipelineState
+from app.orchestration.nodes.builder_core import build_modular_artifact
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.html_runtime_config import MODE_CONFIG_BY_LOOP
@@ -396,6 +397,211 @@ def _resolve_codegen_pass_budget(
     return base_passes
 
 
+def _build_modular_production_artifact(
+    *,
+    state: PipelineState,
+    deps: NodeDependencies,
+    gdd: GDDPayload,
+    design_spec: DesignSpecPayload,
+    title: str,
+    genre: str,
+    slug: str,
+    accent_color: str,
+    core_loop_type: str,
+    asset_pack: dict[str, Any],
+    asset_bank_files: list[dict[str, str]],
+    runtime_asset_manifest: dict[str, Any],
+) -> ProductionBuildResult:
+    analyze_contract = state["outputs"].get("analyze_contract")
+    plan_contract = state["outputs"].get("plan_contract")
+    design_contract = state["outputs"].get("design_contract")
+    builder_core_result = build_modular_artifact(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        slug=slug,
+        accent_color=accent_color,
+        viewport_width=design_spec.viewport_width,
+        viewport_height=design_spec.viewport_height,
+        safe_area_padding=design_spec.safe_area_padding,
+        text_overflow_policy=design_spec.text_overflow_policy,
+        core_loop_type=core_loop_type,
+        analyze_contract=analyze_contract if isinstance(analyze_contract, dict) else None,
+        plan_contract=plan_contract if isinstance(plan_contract, dict) else None,
+        design_contract=design_contract if isinstance(design_contract, dict) else None,
+        rqc_version=str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
+    )
+
+    append_log(
+        state,
+        stage=PipelineStage.BUILD,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.DEVELOPER,
+        message="Builder core contract compiled.",
+        metadata={
+            "event_type": "contract_compile",
+            "capability_profile": builder_core_result.capability_profile,
+            "contract_summary": builder_core_result.contract_bundle.get("summary"),
+        },
+    )
+    append_log(
+        state,
+        stage=PipelineStage.BUILD,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.DEVELOPER,
+        message="Builder core module assembly completed.",
+        metadata={
+            "event_type": "module_assemble",
+            "module_plan": builder_core_result.module_plan,
+            "module_signature": builder_core_result.module_signature,
+            "runtime_modules": builder_core_result.runtime_modules,
+        },
+    )
+    append_log(
+        state,
+        stage=PipelineStage.BUILD,
+        status=PipelineStatus.RUNNING,
+        agent_name=PipelineAgentName.DEVELOPER,
+        message="Builder selfcheck completed.",
+        metadata={
+            "event_type": "selfcheck",
+            "selfcheck_result": builder_core_result.selfcheck_result,
+            "rqc_passed": bool(builder_core_result.selfcheck_result.get("passed")),
+        },
+    )
+
+    design_spec_dump = design_spec.model_dump()
+    assessment = _assess_artifact_quality(
+        deps=deps,
+        html_content=builder_core_result.artifact_html,
+        design_spec=design_spec_dump,
+        genre=genre,
+        core_loop_type=core_loop_type,
+        keyword=state["keyword"],
+        artifact_files=asset_bank_files,
+        slug=slug,
+    )
+    quality_floor_enforced = True
+    selfcheck_passed = bool(builder_core_result.selfcheck_result.get("passed"))
+    playability_passed = bool(assessment.playability.ok) and bool(assessment.smoke.ok)
+    quality_floor_fail_reasons: list[str] = []
+    if not selfcheck_passed:
+        quality_floor_fail_reasons.extend(
+            [str(item).strip() for item in builder_core_result.selfcheck_result.get("failed_reasons", []) if str(item).strip()]
+        )
+        quality_floor_fail_reasons.append("rqc_contract_unmet")
+    if not assessment.playability.ok:
+        quality_floor_fail_reasons.extend(assessment.playability.fail_reasons)
+        quality_floor_fail_reasons.append("builder_playability_unmet")
+    if not assessment.smoke.ok and assessment.smoke.reason:
+        quality_floor_fail_reasons.append(str(assessment.smoke.reason))
+    quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
+    quality_floor_passed = len(quality_floor_fail_reasons) == 0
+
+    artifact_files: list[dict[str, str]] | None = None
+    artifact_manifest: dict[str, object] | None = None
+    hybrid_bundle = _extract_hybrid_bundle_from_inline_html(
+        slug=slug,
+        inline_html=builder_core_result.artifact_html,
+        asset_bank_files=asset_bank_files,
+        runtime_asset_manifest=runtime_asset_manifest,
+    )
+    if hybrid_bundle:
+        artifact_files, artifact_manifest = hybrid_bundle
+    if artifact_manifest is None:
+        artifact_manifest = {
+            "schema_version": 1,
+            "bundle_kind": "modular_builder_core",
+            "entrypoint": f"games/{slug}/index.html",
+            "files": [f"games/{slug}/index.html"],
+        }
+        artifact_files = [
+            {
+                "path": f"games/{slug}/index.html",
+                "content": builder_core_result.artifact_html,
+                "content_type": "text/html; charset=utf-8",
+            }
+        ]
+    artifact_manifest["genre_engine"] = core_loop_type
+    artifact_manifest["asset_pack"] = asset_pack["name"]
+    artifact_manifest["module_signature"] = builder_core_result.module_signature
+    artifact_manifest["module_plan"] = builder_core_result.module_plan
+
+    build_artifact = BuildArtifactPayload(
+        game_slug=slug,
+        game_name=title,
+        game_genre=genre,
+        artifact_path=f"games/{slug}/index.html",
+        artifact_html=builder_core_result.artifact_html,
+        entrypoint_path=f"games/{slug}/index.html",
+        artifact_files=artifact_files,
+        artifact_manifest=artifact_manifest,
+    )
+
+    metadata: dict[str, Any] = {
+        "event_type": "publish",
+        "builder_strategy": "builder_core_modular_v1",
+        "rebuild_source": "builder_core",
+        "gen_core_mode": "modular",
+        "rqc_version": str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
+        "rqc_passed": selfcheck_passed,
+        "capability_profile": builder_core_result.capability_profile,
+        "module_plan": builder_core_result.module_plan,
+        "runtime_modules": builder_core_result.runtime_modules,
+        "module_signature": builder_core_result.module_signature,
+        "selfcheck_result": builder_core_result.selfcheck_result,
+        "contract_bundle": builder_core_result.contract_bundle,
+        "artifact_file_count": len(build_artifact.artifact_files or []),
+        "candidate_count": 1,
+        "configured_candidate_count": 1,
+        "selected_candidate_index": 1,
+        "selected_candidate_score": float(assessment.builder_score),
+        "final_quality_score": assessment.quality.score,
+        "final_gameplay_score": assessment.gameplay.score,
+        "playability_score": assessment.playability.score,
+        "playability_passed": playability_passed,
+        "playability_fail_reasons": assessment.playability.fail_reasons,
+        "final_visual_score": assessment.visual.score,
+        "final_builder_quality_score": assessment.builder_score,
+        "final_placeholder_heavy": assessment.placeholder_heavy,
+        "final_placeholder_score": assessment.placeholder_score,
+        "final_runtime_warning_penalty": assessment.runtime_warning_penalty,
+        "final_runtime_warning_codes": assessment.runtime_warning_codes,
+        "quality_floor_enforced": quality_floor_enforced,
+        "quality_floor_basis": "builder_selfcheck",
+        "quality_floor_score": int(builder_core_result.selfcheck_result.get("score", 0)),
+        "quality_floor_passed": quality_floor_passed,
+        "quality_floor_fail_reasons": quality_floor_fail_reasons,
+        "runtime_guard": {
+            "chosen": "builder_core",
+            "reason": assessment.smoke.reason,
+            "probes": [
+                {
+                    "smoke_ok": assessment.smoke.ok,
+                    "smoke_reason": assessment.smoke.reason,
+                    "playability_ok": assessment.playability.ok,
+                    "playability_fail_reasons": assessment.playability.fail_reasons,
+                }
+            ],
+        },
+        "final_smoke_ok": assessment.smoke.ok,
+        "final_smoke_reason": assessment.smoke.reason,
+        "substrate_id": str(builder_core_result.capability_profile.get("locomotion_model", "on_foot")),
+        "camera_model": str(builder_core_result.capability_profile.get("camera_model", "third_person")),
+        "interaction_model": str(builder_core_result.capability_profile.get("interaction_model", "action")),
+    }
+
+    return ProductionBuildResult(
+        build_artifact=build_artifact,
+        selected_generation_meta={
+            "generation_source": "builder_core",
+            "model": "deterministic-modular",
+            "reason": "modular_assembly",
+        },
+        metadata=metadata,
+    )
+
+
 def build_production_artifact(
     *,
     state: PipelineState,
@@ -415,6 +621,23 @@ def build_production_artifact(
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
 ) -> ProductionBuildResult:
+    gen_core_mode = str(getattr(deps.vertex_service.settings, "gen_core_mode", "legacy")).strip().lower()
+    if gen_core_mode == "modular":
+        return _build_modular_production_artifact(
+            state=state,
+            deps=deps,
+            gdd=gdd,
+            design_spec=design_spec,
+            title=title,
+            genre=genre,
+            slug=slug,
+            accent_color=accent_color,
+            core_loop_type=core_loop_type,
+            asset_pack=asset_pack,
+            asset_bank_files=asset_bank_files,
+            runtime_asset_manifest=runtime_asset_manifest,
+        )
+
     configured_candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     candidate_count = 1
     substrate_profile = resolve_substrate_profile(core_loop_type)

@@ -6,7 +6,8 @@ from functools import lru_cache
 
 from supabase import create_client
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
+from app.orchestration.nodes.builder_core.module_registry import default_module_signature
 from app.schemas.pipeline import PipelineAgentName
 
 
@@ -54,11 +55,15 @@ def verify_pipeline_schema_signature(settings: Settings) -> None:
         raise RuntimeError(f"pipeline_schema_mismatch: {detail}")
 
 
-def healthz_payload() -> dict[str, str]:
+def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
+    resolved = settings or get_settings()
     return {
         "status": "ok",
         "service": "ForgeMind",
         "git_sha": resolve_git_sha(),
         "pipeline_schema_version": PIPELINE_SCHEMA_VERSION,
         "pipeline_agent_enum_signature": pipeline_agent_enum_signature(),
+        "gen_core_mode": resolved.gen_core_mode,
+        "rqc_version": resolved.rqc_version,
+        "module_signature": default_module_signature(),
     }

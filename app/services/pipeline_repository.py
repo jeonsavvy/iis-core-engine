@@ -71,6 +71,9 @@ class PipelineRepository:
         self._memory_logs: dict[str, list[dict[str, Any]]] = {}
         self._memory_asset_registry: dict[str, dict[str, Any]] = {}
         self._memory_qa_improvements: list[dict[str, Any]] = []
+        self._memory_runtime_module_registry: dict[str, dict[str, Any]] = {}
+        self._memory_builder_contract_reports: list[dict[str, Any]] = []
+        self._memory_capability_profiles: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PipelineRepository":
@@ -462,6 +465,77 @@ class PipelineRepository:
             rows = [dict(row) for row in self._memory_qa_improvements if str(row.get("core_loop_type", "")).strip() == normalized]
             rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
             return rows[:limit]
+
+    def upsert_runtime_module_registry_entry(self, payload: dict[str, Any]) -> None:
+        module_id = str(payload.get("module_id", "")).strip()
+        if not module_id:
+            return
+        row = {
+            "module_id": module_id,
+            "capability_tags": payload.get("capability_tags") if isinstance(payload.get("capability_tags"), list) else [],
+            "version": str(payload.get("version", "1.0.0")).strip() or "1.0.0",
+            "stability_score": float(payload.get("stability_score", 0) or 0),
+            "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        }
+        if self.client:
+            try:
+                self.client.table("runtime_module_registry").upsert(row, on_conflict="module_id").execute()
+            except Exception as exc:
+                logger.warning("Failed to upsert runtime_module_registry entry (continuing): %s", exc)
+            return
+
+        with self._lock:
+            row["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._memory_runtime_module_registry[module_id] = row
+
+    def insert_builder_contract_report(self, payload: dict[str, Any]) -> None:
+        pipeline_id = str(payload.get("pipeline_id", "")).strip()
+        if not pipeline_id:
+            return
+        row = {
+            "pipeline_id": pipeline_id,
+            "rqc_version": str(payload.get("rqc_version", "rqc-1")).strip() or "rqc-1",
+            "checks": payload.get("checks") if isinstance(payload.get("checks"), dict) else {},
+            "failed_reasons": payload.get("failed_reasons") if isinstance(payload.get("failed_reasons"), list) else [],
+            "module_signature": str(payload.get("module_signature", "unknown")).strip() or "unknown",
+            "score": int(payload.get("score", 0) or 0),
+        }
+        if self.client:
+            try:
+                self.client.table("builder_contract_reports").insert(row).execute()
+            except Exception as exc:
+                logger.warning("Failed to insert builder_contract_reports row (continuing): %s", exc)
+            return
+
+        with self._lock:
+            row["created_at"] = datetime.now(timezone.utc).isoformat()
+            self._memory_builder_contract_reports.append(row)
+            self._memory_builder_contract_reports = self._memory_builder_contract_reports[-500:]
+
+    def upsert_capability_profile_entry(self, payload: dict[str, Any]) -> None:
+        pipeline_id = str(payload.get("pipeline_id", "")).strip()
+        if not pipeline_id:
+            return
+        row = {
+            "pipeline_id": pipeline_id,
+            "game_slug": str(payload.get("game_slug", "")).strip(),
+            "keyword": str(payload.get("keyword", "")).strip(),
+            "core_loop_type": str(payload.get("core_loop_type", "")).strip(),
+            "profile_id": str(payload.get("profile_id", "")).strip() or f"cp-{pipeline_id[:8]}",
+            "capability_profile": payload.get("capability_profile") if isinstance(payload.get("capability_profile"), dict) else {},
+            "module_plan": payload.get("module_plan") if isinstance(payload.get("module_plan"), dict) else {},
+            "module_signature": str(payload.get("module_signature", "unknown")).strip() or "unknown",
+        }
+        if self.client:
+            try:
+                self.client.table("capability_profiles").upsert(row, on_conflict="pipeline_id").execute()
+            except Exception as exc:
+                logger.warning("Failed to upsert capability_profiles entry (continuing): %s", exc)
+            return
+
+        with self._lock:
+            row["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._memory_capability_profiles[pipeline_id] = row
 
     def claim_next_queued_pipeline(self) -> PipelineJob | None:
         if self.client:

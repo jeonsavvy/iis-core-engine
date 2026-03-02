@@ -421,9 +421,70 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["playability_fail_reasons"] = production_result.metadata.get("playability_fail_reasons", [])
     state["outputs"]["substrate_id"] = production_result.metadata.get("substrate_id")
     state["outputs"]["camera_model"] = production_result.metadata.get("camera_model")
+    state["outputs"]["capability_profile"] = production_result.metadata.get("capability_profile")
+    state["outputs"]["module_plan"] = production_result.metadata.get("module_plan")
+    state["outputs"]["selfcheck_result"] = production_result.metadata.get("selfcheck_result")
+    state["outputs"]["rqc_passed"] = production_result.metadata.get("rqc_passed")
+    state["outputs"]["module_signature"] = production_result.metadata.get("module_signature")
+    state["outputs"]["rebuild_source"] = production_result.metadata.get("rebuild_source")
     runtime_guard = production_result.metadata.get("runtime_guard")
     if isinstance(runtime_guard, dict):
         state["outputs"]["builder_runtime_guard"] = runtime_guard
+
+    try:
+        capability_profile = production_result.metadata.get("capability_profile")
+        if isinstance(capability_profile, dict):
+            deps.repository.upsert_capability_profile_entry(
+                {
+                    "pipeline_id": str(state["pipeline_id"]),
+                    "game_slug": slug,
+                    "keyword": state["keyword"],
+                    "core_loop_type": core_loop_type,
+                    "profile_id": str(capability_profile.get("profile_id", "")).strip() or f"cp-{slug}",
+                    "capability_profile": capability_profile,
+                    "module_plan": production_result.metadata.get("module_plan")
+                    if isinstance(production_result.metadata.get("module_plan"), dict)
+                    else {},
+                    "module_signature": str(production_result.metadata.get("module_signature", "")) or None,
+                }
+            )
+        runtime_modules = production_result.metadata.get("runtime_modules")
+        if isinstance(runtime_modules, list):
+            for module_row in runtime_modules:
+                if not isinstance(module_row, dict):
+                    continue
+                module_id = str(module_row.get("module_id", "")).strip()
+                if not module_id:
+                    continue
+                deps.repository.upsert_runtime_module_registry_entry(
+                    {
+                        "module_id": module_id,
+                        "capability_tags": module_row.get("capability_tags") if isinstance(module_row.get("capability_tags"), list) else [],
+                        "version": str(module_row.get("version", "1.0.0")).strip() or "1.0.0",
+                        "stability_score": float(module_row.get("stability_score", 0) or 0),
+                        "metadata": {
+                            "layer": module_row.get("layer"),
+                            "description": module_row.get("description"),
+                        },
+                    }
+                )
+        selfcheck_result = production_result.metadata.get("selfcheck_result")
+        if isinstance(selfcheck_result, dict):
+            deps.repository.insert_builder_contract_report(
+                {
+                    "pipeline_id": str(state["pipeline_id"]),
+                    "rqc_version": str(production_result.metadata.get("rqc_version", "rqc-1")),
+                    "checks": selfcheck_result.get("checks") if isinstance(selfcheck_result.get("checks"), dict) else {},
+                    "failed_reasons": selfcheck_result.get("failed_reasons")
+                    if isinstance(selfcheck_result.get("failed_reasons"), list)
+                    else [],
+                    "module_signature": str(production_result.metadata.get("module_signature", "")).strip() or "unknown",
+                    "score": int(selfcheck_result.get("score", 0) or 0),
+                }
+            )
+    except Exception:
+        # repository side persistence is best-effort and must not block build completion.
+        pass
 
     selected_generation_meta = production_result.selected_generation_meta
     return append_log(
@@ -434,6 +495,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         message=f"Production V2 artifact selected and polished (iteration={state['build_iteration']}).",
         metadata={
             "artifact": state["outputs"]["artifact_path"],
+            "game_slug": slug,
             "genre": genre,
             "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
             "generation_source": selected_generation_meta.get("generation_source", "stub"),
