@@ -12,6 +12,9 @@ def run_builder_selfcheck(
     rqc_version: str,
 ) -> dict[str, Any]:
     lowered = html_content.casefold()
+    locomotion = str(capability_profile.get("locomotion_model", "on_foot"))
+    interaction = str(capability_profile.get("interaction_model", "action"))
+    original_html = html_content
     required_primary = [
         "scene_world",
         "camera_stack",
@@ -44,11 +47,30 @@ def run_builder_selfcheck(
         "object_variety": object_coverage >= 4,
         "feedback_variety": feedback_coverage >= 3,
         "progression_loop": "objective" in lowered and "wave" in lowered and "score" in lowered,
+        "dynamic_spawn_loop": "state.enemies.push" in lowered or "state.checkpoints.push" in lowered,
+        "runtime_render_loop": "renderframe()" in lowered and "requestanimationframe(step)" in lowered,
         "no_start_gate": "tap to start" not in lowered and "click to start" not in lowered and "press start" not in lowered,
         "no_hud_jargon": not bool(jargon_pattern.search(lowered)),
         "overflow_guard": "overflow: hidden" in lowered and "overflow-guard" in lowered,
         "required_modules_present": all(module_id in all_modules for module_id in required_primary),
     }
+    if locomotion == "flight":
+        checks["flight_control_scheme_consistent"] = (
+            "자세 제어: W/S 피치 · A/D 롤 · Q/E 요" in original_html
+            and "이동: W/A/S/D 또는 방향키" not in original_html
+        )
+        checks["flight_objective_consistent"] = (
+            ("waypoint" in lowered or "vector" in lowered or "airspace" in lowered)
+            and "engage hostiles" not in lowered
+        )
+        checks["flight_checkpoint_loop"] = "state.checkpoints.push" in lowered and "checkpoint" in lowered
+    if locomotion == "vehicle":
+        checks["vehicle_control_scheme_consistent"] = (
+            "조향:" in original_html and "피치" not in original_html
+        )
+    if interaction in {"melee_combat", "ranged_combat"}:
+        checks["combat_interaction_present"] = "state.projectiles.push" in lowered or "performattack" in lowered
+
     failed_reasons = [name for name, passed in checks.items() if not passed]
     score = int(round((sum(1 for passed in checks.values() if passed) / max(1, len(checks))) * 100))
     return {
