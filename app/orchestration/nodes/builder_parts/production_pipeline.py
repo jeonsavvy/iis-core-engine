@@ -859,10 +859,13 @@ def build_production_artifact(
         quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
 
     runtime_structure_signature = _runtime_structure_signature(html_content=artifact_html)
+    runtime_signature_guard_enabled = bool(
+        getattr(deps.vertex_service.settings, "builder_runtime_signature_guard", True)
+    )
     duplicate_runtime_signature = False
     repository = getattr(deps, "repository", None)
     list_registry = getattr(repository, "list_asset_registry", None)
-    if callable(list_registry):
+    if runtime_signature_guard_enabled and callable(list_registry):
         try:
             recent_rows: list[dict[str, Any]] = []
             for loop_key in MODE_CONFIG_BY_LOOP.keys():
@@ -984,6 +987,7 @@ def build_production_artifact(
         "final_runtime_warning_codes": final_runtime_warning_codes,
         "runtime_structure_signature": runtime_structure_signature,
         "duplicate_runtime_signature": duplicate_runtime_signature,
+        "runtime_signature_guard_enabled": runtime_signature_guard_enabled,
         "final_smoke_ok": preferred_assessment.smoke.ok,
         "final_smoke_reason": preferred_assessment.smoke.reason,
         "final_composite_score": final_composite_score,
