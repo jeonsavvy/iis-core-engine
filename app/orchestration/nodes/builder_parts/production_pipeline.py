@@ -177,6 +177,7 @@ def _critical_runtime_warning_codes(warnings: list[str] | None) -> list[str]:
         "start_gate_visible",
         "manual_start_interaction_required",
         "runtime_layout_scroll_overflow",
+        "hud_jargon_visible",
     }
     normalized = [str(item).strip().casefold() for item in warnings if str(item).strip()]
     return [code for code in normalized if code in critical_tokens]
@@ -194,6 +195,7 @@ def _runtime_warning_penalty(warnings: list[str] | None) -> float:
         "start_gate_visible": 8.0,
         "manual_start_interaction_required": 8.0,
         "runtime_layout_scroll_overflow": 6.0,
+        "hud_jargon_visible": 8.0,
     }
     score = 0.0
     for token in warnings:

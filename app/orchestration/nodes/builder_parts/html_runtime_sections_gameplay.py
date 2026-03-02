@@ -275,6 +275,7 @@ def build_runtime_update_function_js() -> str:
           if (brake) state.racer.speed -= Number(CONTROL.brake_rate || 400) * dt;
           if (!accel && !brake) state.racer.speed -= Number(CONTROL.drag_rate || 116) * dt;
           state.racer.speed = clamp(state.racer.speed, Number(CONTROL.speed_min || 210), Number(CONTROL.speed_max || 620));
+          state.racer.topSpeed = Math.max(state.racer.topSpeed || state.racer.speed, state.racer.speed);
 
           if (keys.has("Shift") && consumeDash()) {{
             state.racer.boostTimer = Math.max(state.racer.boostTimer, 1.2 + Number(state.run.synergy.boostBonus || 0));
@@ -299,7 +300,11 @@ def build_runtime_update_function_js() -> str:
 
           const curvePx = state.racer.roadCurve * canvas.width * 0.2;
           const laneNormalized = state.player.lane - 1;
-          const laneX = canvas.width * 0.5 + curvePx * 0.2 + laneNormalized * (canvas.width * 0.3);
+          const playerDepth = 0.92;
+          const roadTop = canvas.width * 0.26;
+          const roadBottom = canvas.width * 0.88;
+          const playerRoadHalf = roadTop + (roadBottom - roadTop) * (playerDepth * playerDepth);
+          const laneX = canvas.width * 0.5 + curvePx * (1 - playerDepth) + laneNormalized * (playerRoadHalf * 0.72);
           state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * Number(CONTROL.lane_lerp || 11));
           state.player.y = canvas.height * 0.79;
 
@@ -505,6 +510,7 @@ def build_runtime_update_function_js() -> str:
           if (brake) state.racer.speed -= brakeRate * dt;
           if (!accel && !brake) state.racer.speed -= drag * dt;
           state.racer.speed = clamp(state.racer.speed, Number(CONTROL.speed_min || 180), Number(CONTROL.speed_max || 520));
+          state.racer.topSpeed = Math.max(state.racer.topSpeed || state.racer.speed, state.racer.speed);
 
           state.racer.curveTimer -= dt;
           if (state.racer.curveTimer <= 0) {{
@@ -527,7 +533,11 @@ def build_runtime_update_function_js() -> str:
 
           const curvePx = state.racer.roadCurve * canvas.width * 0.16;
           const laneNormalized = state.player.lane - 1;
-          const laneX = canvas.width * 0.5 + curvePx * 0.15 + laneNormalized * (canvas.width * 0.22);
+          const playerDepth = 0.9;
+          const roadTop = canvas.width * 0.2;
+          const roadBottom = canvas.width * 0.78;
+          const playerRoadHalf = roadTop + (roadBottom - roadTop) * (playerDepth * playerDepth);
+          const laneX = canvas.width * 0.5 + curvePx * (1 - playerDepth) + laneNormalized * (playerRoadHalf * 0.54);
           state.player.x += (laneX - state.player.w / 2 - state.player.x) * Math.min(1, dt * Number(CONTROL.lane_lerp || 12));
           state.player.y = canvas.height * 0.78;
 

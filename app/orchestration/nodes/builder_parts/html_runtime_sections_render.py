@@ -246,9 +246,10 @@ def build_runtime_render_functions_js() -> str:
             const eh = (e.h || 50) * scale;
             const ex = cx + laneOffset - ew / 2;
             const ey = y - eh;
+            const allowRunnerSprite = MODE_IS_FORMULA_CIRCUIT;
 
             if (e.kind === "boost") {{
-              if (drawSprite("boost", ex, ey, ew, eh, 0.96)) continue;
+              if (allowRunnerSprite && drawSprite("boost", ex, ey, ew, eh, 0.96)) continue;
               ctx.save();
               ctx.translate(ex + ew / 2, ey + eh / 2);
               ctx.rotate((state.racer.roadScroll * 0.05) % (Math.PI * 2));
@@ -264,7 +265,7 @@ def build_runtime_render_functions_js() -> str:
               ctx.fill();
               ctx.restore();
             }} else if (MODE_IS_FORMULA_CIRCUIT && e.kind === "checkpoint") {{
-              if (drawSprite("ring", ex, ey, ew * 1.18, eh * 0.82, 0.98)) continue;
+              if (allowRunnerSprite && drawSprite("ring", ex, ey, ew * 1.18, eh * 0.82, 0.98)) continue;
               ctx.strokeStyle = ASSET.boost_color;
               ctx.lineWidth = Math.max(3, ew * 0.08);
               ctx.shadowBlur = 16;
@@ -272,13 +273,23 @@ def build_runtime_render_functions_js() -> str:
               ctx.strokeRect(ex - ew * 0.06, ey + eh * 0.08, ew * 1.12, eh * 0.7);
             }} else {{
               const eliteRender = e.kind === "elite" || e.kind === "opponent_elite" || e.miniBoss || (e.hp || 0) > 1;
-              if (drawSprite(eliteRender ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
-              ctx.fillStyle = ASSET.enemy_primary;
-              ctx.shadowBlur = 14;
-              ctx.shadowColor = ASSET.enemy_primary;
-              ctx.fillRect(ex, ey, ew, eh);
+              if (allowRunnerSprite && drawSprite(eliteRender ? "elite" : "enemy", ex, ey, ew, eh, 0.97)) continue;
+              const bodyColor = eliteRender ? ASSET.enemy_elite : ASSET.enemy_primary;
+              ctx.fillStyle = bodyColor;
+              ctx.shadowBlur = eliteRender ? 16 : 12;
+              ctx.shadowColor = bodyColor;
+              ctx.beginPath();
+              ctx.moveTo(ex + ew * 0.16, ey + eh * 0.14);
+              ctx.lineTo(ex + ew * 0.84, ey + eh * 0.14);
+              ctx.lineTo(ex + ew * 0.96, ey + eh * 0.82);
+              ctx.lineTo(ex + ew * 0.04, ey + eh * 0.82);
+              ctx.closePath();
+              ctx.fill();
               ctx.fillStyle = ASSET.track;
-              ctx.fillRect(ex + ew * 0.1, ey + eh * 0.16, ew * 0.8, eh * 0.28);
+              ctx.fillRect(ex + ew * 0.18, ey + eh * 0.26, ew * 0.64, eh * 0.22);
+              ctx.fillStyle = "rgba(241,245,249,0.9)";
+              ctx.fillRect(ex + ew * 0.14, ey + eh * 0.74, ew * 0.22, eh * 0.12);
+              ctx.fillRect(ex + ew * 0.64, ey + eh * 0.74, ew * 0.22, eh * 0.12);
             }}
           }}
         }} else {{
@@ -386,7 +397,8 @@ def build_runtime_render_functions_js() -> str:
           const py = state.player.y;
           const pw = state.player.w;
           const ph = state.player.h;
-          if (drawSprite("player", px - 2, py - 6, pw + 4, ph + 10, 0.98)) {{
+          const allowRunnerSprite = MODE_IS_FORMULA_CIRCUIT;
+          if (allowRunnerSprite && drawSprite("player", px - 2, py - 6, pw + 4, ph + 10, 0.98)) {{
             if (state.racer.boostTimer > 0) {{
               drawSprite("trail", px + pw * 0.34, py + ph * 0.9, pw * 0.32, ph * 0.62, 0.74);
             }}
@@ -411,21 +423,20 @@ def build_runtime_render_functions_js() -> str:
           }} else {{
             ctx.fillStyle = ASSET.player_primary;
             ctx.beginPath();
-            ctx.moveTo(px + pw * 0.5, py - ph * 0.08);
-            ctx.lineTo(px + pw * 0.9, py + ph * 0.3);
-            ctx.lineTo(px + pw * 0.78, py + ph * 0.95);
-            ctx.lineTo(px + pw * 0.22, py + ph * 0.95);
-            ctx.lineTo(px + pw * 0.1, py + ph * 0.3);
+            ctx.moveTo(px + pw * 0.18, py + ph * 0.15);
+            ctx.lineTo(px + pw * 0.82, py + ph * 0.15);
+            ctx.lineTo(px + pw * 0.94, py + ph * 0.82);
+            ctx.lineTo(px + pw * 0.06, py + ph * 0.82);
             ctx.closePath();
             ctx.fill();
             ctx.fillStyle = ASSET.player_secondary;
-            ctx.fillRect(px + pw * 0.2, py + ph * 0.25, pw * 0.6, ph * 0.26);
+            ctx.fillRect(px + pw * 0.24, py + ph * 0.28, pw * 0.52, ph * 0.22);
             ctx.fillStyle = ASSET.track;
-            ctx.fillRect(px + pw * 0.02, py + ph * 0.62, pw * 0.18, ph * 0.2);
-            ctx.fillRect(px + pw * 0.8, py + ph * 0.62, pw * 0.18, ph * 0.2);
+            ctx.fillRect(px + pw * 0.12, py + ph * 0.7, pw * 0.2, ph * 0.14);
+            ctx.fillRect(px + pw * 0.68, py + ph * 0.7, pw * 0.2, ph * 0.14);
             if (state.racer.boostTimer > 0) {{
               ctx.fillStyle = ASSET.boost_color;
-              ctx.fillRect(px + pw * 0.4, py + ph * 0.95, pw * 0.2, ph * 0.35);
+              ctx.fillRect(px + pw * 0.44, py + ph * 0.86, pw * 0.12, ph * 0.28);
             }}
           }}
           }}
@@ -478,28 +489,43 @@ def build_runtime_render_functions_js() -> str:
 
 def build_runtime_hud_functions_js() -> str:
     return _normalize_escaped_braces(r"""      function updateHud() {{
-        scoreEl.textContent = `Score: ${{Math.floor(state.score)}} · Combo: x${{Math.max(1, state.run.combo.toFixed(1))}}`;
+        const showCombo = MODE_IS_BRAWLER || MODE_IS_SHOOTER;
+        scoreEl.textContent = showCombo
+          ? `Score: ${{Math.floor(state.score)}} · Combo: x${{Math.max(1, state.run.combo.toFixed(1))}}`
+          : `Score: ${{Math.floor(state.score)}}`;
         if (MODE_IS_FLIGHT_SIM) {{
-          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · THR ${{Math.round(state.flight.throttle * 100)}}%`;
-          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · CKP ${{state.flight.checkpointCombo}}`;
+          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Speed ${{Math.round(state.flight.speed)}}`;
+          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Alt ${{Math.round(state.flight.altitude * 100)}}%`;
           return;
         }}
         if (MODE_IS_FORMULA_CIRCUIT) {{
           const bestLapText = state.formula.bestLap < 998 ? `${{state.formula.bestLap.toFixed(1)}}s` : "--";
           timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lap ${{state.formula.lap}} · CKP ${{state.formula.checkpoints}}/${{state.formula.checkpointsPerLap}} · Best ${{bestLapText}}`;
-          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Speed ${{Math.round(state.racer.speed)}} · OVT ${{Math.floor(state.formula.overtakeChain)}}`;
+          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Speed ${{Math.round(state.racer.speed)}}`;
           return;
         }}
-        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Lv.${{state.run.level}} · W${{state.run.waveIndex + 1}} · XP ${{Math.floor(state.run.xp)}}/${{state.run.nextXp}}`;
-        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Relic: ${{state.run.relics.length}} · Syn:${{state.run.synergy.active.length}}`;
+        if (MODE_IS_3D_RUNNER) {{
+          timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}} · Speed ${{Math.round(state.racer.speed)}}`;
+          hpEl.textContent = `HP: ${{Math.max(0, state.hp)}} · Boost ${{state.racer.boostTimer > 0 ? "ON" : "OFF"}}`;
+          return;
+        }}
+        timerEl.textContent = `Time: ${{state.timeLeft.toFixed(1)}}`;
+        hpEl.textContent = `HP: ${{Math.max(0, state.hp)}}`;
       }}
 
       function endGame() {{
         if (!state.running) return;
         state.running = false;
-        const buildSummary = state.run.upgrades.slice(-3).join(", ") || "none";
-        const synergySummary = state.run.synergy.active.slice(0, 2).join("+") || "none";
-        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 콤보 x${{Math.max(1, state.run.combo.toFixed(1))}} · 웨이브 ${{state.run.waveIndex + 1}} · 시너지(${{synergySummary}}) · 빌드(${{buildSummary}}) · R 재시작`;
+        const playedSec = Math.max(0, Number((CONFIG.time_limit_sec || 60) - state.timeLeft));
+        if (MODE_IS_FORMULA_CIRCUIT) {{
+          overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 랩 ${{state.formula.lap}} · 최고속도 ${{Math.round(state.racer.topSpeed || state.racer.speed)}} · R 재시작`;
+        }} else if (MODE_IS_3D_RUNNER) {{
+          overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 주행 ${{playedSec.toFixed(1)}}초 · 최고속도 ${{Math.round(state.racer.topSpeed || state.racer.speed)}} · R 재시작`;
+        }} else if (MODE_IS_FLIGHT_SIM) {{
+          overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 비행 ${{playedSec.toFixed(1)}}초 · 고도 ${{Math.round(state.flight.altitude * 100)}}% · R 재시작`;
+        }} else {{
+          overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 플레이 ${{playedSec.toFixed(1)}}초 · R 재시작`;
+        }}
         playSfx("gameover");
         overlay.classList.add("show");
       }}

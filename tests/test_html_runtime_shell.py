@@ -26,7 +26,8 @@ def test_runtime_document_open_contains_expected_shell_tokens() -> None:
     )
     assert html.startswith("<!doctype html>")
     assert "<title>Sample</title>" in html
-    assert ">Arcade</p>" in html
+    assert ">Arrow keys</p>" in html
+    assert ">Arcade</p>" not in html
     assert "sample-game" not in html
     assert "aspect-ratio: 16 / 9;" not in html
     assert "<canvas id=\"game\" width=\"1280\" height=\"720\"></canvas>" in html

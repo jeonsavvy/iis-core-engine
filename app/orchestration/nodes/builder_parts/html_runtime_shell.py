@@ -170,7 +170,6 @@ def build_runtime_document_open(
         <div class="stage-hud">
           <div class="stage-hud-card" style="display:grid;gap:4px;min-width:0">
             <h1 class="title overflow-guard">{title}</h1>
-            <p class="sub overflow-guard">{mode_label}</p>
           </div>
           <div class="stage-hud-card stat-row">
             <strong id="score" class="stat overflow-guard">Score: 0</strong>
@@ -187,7 +186,7 @@ def build_runtime_document_open(
           </div>
         </div>
       </div>
-      <p class="hint overflow-guard">{mode_objective} / {mode_controls}</p>
+      <p class="hint overflow-guard">{mode_controls}</p>
       <!-- leaderboard contract exposed as window.IISLeaderboard.submitScore -->
     </main>
     <script>

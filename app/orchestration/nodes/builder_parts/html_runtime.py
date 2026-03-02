@@ -295,6 +295,7 @@ def _build_hybrid_engine_html(
         }};
         state.racer = {{
           speed: 280,
+          topSpeed: 280,
           boostTimer: 0,
           laneFloat: 1,
           steerVelocity: 0,

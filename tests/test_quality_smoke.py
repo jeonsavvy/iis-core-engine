@@ -191,3 +191,33 @@ def test_runtime_liveness_treats_game_over_text_only_as_warning() -> None:
 
     assert fatal == []
     assert "game_over_text_visible_without_failure_signal" in warnings
+
+
+def test_runtime_liveness_flags_hud_jargon_as_warning() -> None:
+    fatal, warnings = evaluate_runtime_liveness(
+        before={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 60.0",
+            "hp_text": "HP: 3",
+            "score_text": "Score: 0",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+        after={
+            "boot_ok": True,
+            "overlay_visible": False,
+            "timer_text": "Time: 58.4 · Lv.1 · W1 · XP 20/100",
+            "hp_text": "HP: 3 · Relic: 0 · Syn:0",
+            "score_text": "Score: 120",
+            "canvas_width": 1280,
+            "canvas_height": 720,
+            "scroll_height": 720,
+            "client_height": 720,
+        },
+    )
+
+    assert fatal == []
+    assert "hud_jargon_visible" in warnings

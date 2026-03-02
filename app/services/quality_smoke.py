@@ -343,6 +343,18 @@ def evaluate_runtime_liveness(
         else:
             warnings.append("game_over_text_visible_without_failure_signal")
 
+    hud_text = " ".join(
+        [
+            str(after.get("score_text", "") or ""),
+            str(after.get("timer_text", "") or ""),
+            str(after.get("hp_text", "") or ""),
+            str(after.get("overlay_text", "") or ""),
+        ]
+    ).casefold()
+    hud_jargon_tokens = ("relic", "syn", "synergy", "build(", "lv.", "xp ", "웨이브", "시너지(", "빌드(")
+    if any(token in hud_text for token in hud_jargon_tokens):
+        warnings.append("hud_jargon_visible")
+
     canvas_width = _to_float(after.get("canvas_width", 0))
     canvas_height = _to_float(after.get("canvas_height", 0))
 
