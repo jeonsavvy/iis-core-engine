@@ -434,6 +434,17 @@ def _build_modular_production_artifact(
     )
     design_spec_dump = design_spec.model_dump()
     artifact_html = builder_core_result.artifact_html
+    selfcheck_result = dict(builder_core_result.selfcheck_result)
+    assessment = _assess_artifact_quality(
+        deps=deps,
+        html_content=artifact_html,
+        design_spec=design_spec_dump,
+        genre=genre,
+        core_loop_type=core_loop_type,
+        keyword=state["keyword"],
+        artifact_files=asset_bank_files,
+        slug=slug,
+    )
     modular_codegen_meta: list[dict[str, Any]] = []
     configured_codegen_enabled = bool(getattr(deps.vertex_service.settings, "builder_codegen_enabled", False))
     configured_codegen_passes = int(getattr(deps.vertex_service.settings, "builder_codegen_passes", 0))
@@ -485,6 +496,7 @@ def _build_modular_production_artifact(
         if not base_variation_hint:
             base_variation_hint = f"modular profile: {builder_core_result.capability_profile.get('profile_id', 'unknown')}"
         for pass_index in range(modular_codegen_pass_budget):
+            baseline_score = float(assessment.builder_score)
             codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
                 keyword=state["keyword"],
                 title=title,
@@ -497,14 +509,58 @@ def _build_modular_production_artifact(
                 html_content=artifact_html,
             )
             generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
+            accepted = False
+            candidate_assessment: _ArtifactAssessment | None = None
+            candidate_selfcheck: dict[str, Any] | None = None
             if generated_html:
-                artifact_html = generated_html
+                candidate_assessment = _assess_artifact_quality(
+                    deps=deps,
+                    html_content=generated_html,
+                    design_spec=design_spec_dump,
+                    genre=genre,
+                    core_loop_type=core_loop_type,
+                    keyword=state["keyword"],
+                    artifact_files=asset_bank_files,
+                    slug=slug,
+                )
+                candidate_selfcheck = run_builder_selfcheck(
+                    html_content=generated_html,
+                    capability_profile=builder_core_result.capability_profile,
+                    module_plan=builder_core_result.module_plan,
+                    rqc_version=str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
+                )
+                candidate_gate_pass = (
+                    bool(candidate_selfcheck.get("passed"))
+                    and bool(candidate_assessment.playability.ok)
+                    and bool(candidate_assessment.smoke.ok)
+                )
+                current_gate_pass = (
+                    bool(selfcheck_result.get("passed"))
+                    and bool(assessment.playability.ok)
+                    and bool(assessment.smoke.ok)
+                )
+                if candidate_gate_pass and (
+                    not current_gate_pass
+                    or float(candidate_assessment.builder_score) >= (baseline_score - 1.5)
+                ):
+                    artifact_html = generated_html
+                    assessment = candidate_assessment
+                    selfcheck_result = candidate_selfcheck
+                    accepted = True
             modular_codegen_meta.append(
                 {
                     "pass": pass_index + 1,
                     "generation_source": codegen_result.meta.get("generation_source", "stub"),
                     "model": codegen_result.meta.get("model"),
                     "reason": codegen_result.meta.get("reason"),
+                    "accepted": accepted,
+                    "candidate_score": float(candidate_assessment.builder_score) if candidate_assessment else None,
+                    "baseline_score": baseline_score,
+                    "candidate_gate_pass": (
+                        bool(candidate_selfcheck.get("passed")) and bool(candidate_assessment.playability.ok) and bool(candidate_assessment.smoke.ok)
+                    )
+                    if candidate_assessment and candidate_selfcheck
+                    else None,
                 }
             )
         append_log(
@@ -519,16 +575,6 @@ def _build_modular_production_artifact(
                 "codegen_meta": modular_codegen_meta,
             },
         )
-    selfcheck_result = (
-        run_builder_selfcheck(
-            html_content=artifact_html,
-            capability_profile=builder_core_result.capability_profile,
-            module_plan=builder_core_result.module_plan,
-            rqc_version=str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
-        )
-        if artifact_html != builder_core_result.artifact_html
-        else builder_core_result.selfcheck_result
-    )
     append_log(
         state,
         stage=PipelineStage.BUILD,
@@ -541,17 +587,6 @@ def _build_modular_production_artifact(
             "rqc_passed": bool(selfcheck_result.get("passed")),
             "modular_codegen_passes": modular_codegen_pass_budget,
         },
-    )
-
-    assessment = _assess_artifact_quality(
-        deps=deps,
-        html_content=artifact_html,
-        design_spec=design_spec_dump,
-        genre=genre,
-        core_loop_type=core_loop_type,
-        keyword=state["keyword"],
-        artifact_files=asset_bank_files,
-        slug=slug,
     )
     quality_floor_enforced = True
     selfcheck_passed = bool(selfcheck_result.get("passed"))
