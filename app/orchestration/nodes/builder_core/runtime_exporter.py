@@ -179,7 +179,7 @@ def export_runtime_artifact(
           <span id="score">Score: 0</span>
           <span id="timer">Time: 90.0s</span>
           <span id="hp">HP: 3</span>
-          <span id="objective">Objective: engage and clear</span>
+          <span id="objective">Objective: {objective_seed}</span>
         </div>
       </header>
 

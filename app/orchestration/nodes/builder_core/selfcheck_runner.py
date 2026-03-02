@@ -68,6 +68,10 @@ def run_builder_selfcheck(
         checks["vehicle_control_scheme_consistent"] = (
             "조향:" in original_html and "피치" not in original_html
         )
+        checks["vehicle_objective_consistent"] = (
+            ("checkpoint" in lowered or "lap" in lowered or "racing line" in lowered)
+            and "engage hostiles" not in lowered
+        )
     if interaction in {"melee_combat", "ranged_combat"}:
         checks["combat_interaction_present"] = "state.projectiles.push" in lowered or "performattack" in lowered
 

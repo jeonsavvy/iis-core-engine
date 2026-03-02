@@ -7,6 +7,7 @@ from typing import Any
 
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_core import build_modular_artifact
+from app.orchestration.nodes.builder_core.selfcheck_runner import run_builder_selfcheck
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.html_runtime_config import MODE_CONFIG_BY_LOOP
@@ -431,6 +432,16 @@ def _build_modular_production_artifact(
         design_contract=design_contract if isinstance(design_contract, dict) else None,
         rqc_version=str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
     )
+    design_spec_dump = design_spec.model_dump()
+    artifact_html = builder_core_result.artifact_html
+    modular_codegen_meta: list[dict[str, Any]] = []
+    configured_codegen_enabled = bool(getattr(deps.vertex_service.settings, "builder_codegen_enabled", False))
+    configured_codegen_passes = int(getattr(deps.vertex_service.settings, "builder_codegen_passes", 0))
+    modular_codegen_pass_budget = _resolve_codegen_pass_budget(
+        configured_passes=configured_codegen_passes if configured_codegen_enabled else 0,
+        has_feedback_hint=False,
+        build_iteration=int(state.get("build_iteration", 0)),
+    )
 
     append_log(
         state,
@@ -457,6 +468,67 @@ def _build_modular_production_artifact(
             "runtime_modules": builder_core_result.runtime_modules,
         },
     )
+    if modular_codegen_pass_budget > 0:
+        append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message=f"Builder core refinement started (passes={modular_codegen_pass_budget}).",
+            metadata={
+                "event_type": "module_refine",
+                "passes": modular_codegen_pass_budget,
+                "builder_codegen_enabled": configured_codegen_enabled,
+            },
+        )
+        base_variation_hint = str(builder_core_result.contract_bundle.get("summary", "")).strip()
+        if not base_variation_hint:
+            base_variation_hint = f"modular profile: {builder_core_result.capability_profile.get('profile_id', 'unknown')}"
+        for pass_index in range(modular_codegen_pass_budget):
+            codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                objective=gdd.objective,
+                core_loop_type=core_loop_type,
+                variation_hint=f"modular_refinement_pass_{pass_index + 1} | {base_variation_hint}",
+                design_spec=design_spec_dump,
+                asset_pack=asset_pack,
+                html_content=artifact_html,
+            )
+            generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
+            if generated_html:
+                artifact_html = generated_html
+            modular_codegen_meta.append(
+                {
+                    "pass": pass_index + 1,
+                    "generation_source": codegen_result.meta.get("generation_source", "stub"),
+                    "model": codegen_result.meta.get("model"),
+                    "reason": codegen_result.meta.get("reason"),
+                }
+            )
+        append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="Builder core refinement completed.",
+            metadata={
+                "event_type": "module_refine",
+                "passes": modular_codegen_pass_budget,
+                "codegen_meta": modular_codegen_meta,
+            },
+        )
+    selfcheck_result = (
+        run_builder_selfcheck(
+            html_content=artifact_html,
+            capability_profile=builder_core_result.capability_profile,
+            module_plan=builder_core_result.module_plan,
+            rqc_version=str(getattr(deps.vertex_service.settings, "rqc_version", "rqc-1")).strip() or "rqc-1",
+        )
+        if artifact_html != builder_core_result.artifact_html
+        else builder_core_result.selfcheck_result
+    )
     append_log(
         state,
         stage=PipelineStage.BUILD,
@@ -465,15 +537,15 @@ def _build_modular_production_artifact(
         message="Builder selfcheck completed.",
         metadata={
             "event_type": "selfcheck",
-            "selfcheck_result": builder_core_result.selfcheck_result,
-            "rqc_passed": bool(builder_core_result.selfcheck_result.get("passed")),
+            "selfcheck_result": selfcheck_result,
+            "rqc_passed": bool(selfcheck_result.get("passed")),
+            "modular_codegen_passes": modular_codegen_pass_budget,
         },
     )
 
-    design_spec_dump = design_spec.model_dump()
     assessment = _assess_artifact_quality(
         deps=deps,
-        html_content=builder_core_result.artifact_html,
+        html_content=artifact_html,
         design_spec=design_spec_dump,
         genre=genre,
         core_loop_type=core_loop_type,
@@ -482,12 +554,12 @@ def _build_modular_production_artifact(
         slug=slug,
     )
     quality_floor_enforced = True
-    selfcheck_passed = bool(builder_core_result.selfcheck_result.get("passed"))
+    selfcheck_passed = bool(selfcheck_result.get("passed"))
     playability_passed = bool(assessment.playability.ok) and bool(assessment.smoke.ok)
     quality_floor_fail_reasons: list[str] = []
     if not selfcheck_passed:
         quality_floor_fail_reasons.extend(
-            [str(item).strip() for item in builder_core_result.selfcheck_result.get("failed_reasons", []) if str(item).strip()]
+            [str(item).strip() for item in selfcheck_result.get("failed_reasons", []) if str(item).strip()]
         )
         quality_floor_fail_reasons.append("rqc_contract_unmet")
     if not assessment.playability.ok:
@@ -502,7 +574,7 @@ def _build_modular_production_artifact(
     artifact_manifest: dict[str, object] | None = None
     hybrid_bundle = _extract_hybrid_bundle_from_inline_html(
         slug=slug,
-        inline_html=builder_core_result.artifact_html,
+        inline_html=artifact_html,
         asset_bank_files=asset_bank_files,
         runtime_asset_manifest=runtime_asset_manifest,
     )
@@ -518,7 +590,7 @@ def _build_modular_production_artifact(
         artifact_files = [
             {
                 "path": f"games/{slug}/index.html",
-                "content": builder_core_result.artifact_html,
+                "content": artifact_html,
                 "content_type": "text/html; charset=utf-8",
             }
         ]
@@ -532,7 +604,7 @@ def _build_modular_production_artifact(
         game_name=title,
         game_genre=genre,
         artifact_path=f"games/{slug}/index.html",
-        artifact_html=builder_core_result.artifact_html,
+        artifact_html=artifact_html,
         entrypoint_path=f"games/{slug}/index.html",
         artifact_files=artifact_files,
         artifact_manifest=artifact_manifest,
@@ -549,7 +621,9 @@ def _build_modular_production_artifact(
         "module_plan": builder_core_result.module_plan,
         "runtime_modules": builder_core_result.runtime_modules,
         "module_signature": builder_core_result.module_signature,
-        "selfcheck_result": builder_core_result.selfcheck_result,
+        "selfcheck_result": selfcheck_result,
+        "modular_codegen_passes": modular_codegen_pass_budget,
+        "modular_codegen_meta": modular_codegen_meta,
         "contract_bundle": builder_core_result.contract_bundle,
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "candidate_count": 1,
@@ -569,7 +643,7 @@ def _build_modular_production_artifact(
         "final_runtime_warning_codes": assessment.runtime_warning_codes,
         "quality_floor_enforced": quality_floor_enforced,
         "quality_floor_basis": "builder_selfcheck",
-        "quality_floor_score": int(builder_core_result.selfcheck_result.get("score", 0)),
+        "quality_floor_score": int(selfcheck_result.get("score", 0)),
         "quality_floor_passed": quality_floor_passed,
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
         "runtime_guard": {
@@ -593,11 +667,15 @@ def _build_modular_production_artifact(
 
     return ProductionBuildResult(
         build_artifact=build_artifact,
-        selected_generation_meta={
-            "generation_source": "builder_core",
-            "model": "deterministic-modular",
-            "reason": "modular_assembly",
-        },
+        selected_generation_meta=(
+            modular_codegen_meta[-1]
+            if modular_codegen_meta
+            else {
+                "generation_source": "builder_core",
+                "model": "deterministic-modular",
+                "reason": "modular_assembly",
+            }
+        ),
         metadata=metadata,
     )
 

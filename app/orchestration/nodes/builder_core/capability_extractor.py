@@ -26,30 +26,62 @@ def extract_capability_profile(
 ) -> dict[str, Any]:
     tokens = _normalize_tokens(keyword, title, genre, core_loop_type)
     token_set = set(tokens)
+    vehicle_keywords = {
+        "car",
+        "cars",
+        "auto",
+        "automobile",
+        "vehicle",
+        "vehicles",
+        "truck",
+        "trucks",
+        "driving",
+        "drive",
+        "driver",
+        "racing",
+        "race",
+        "drift",
+        "formula",
+        "f1",
+        "레이싱",
+        "자동차",
+        "차량",
+        "트럭",
+        "운전",
+        "드라이브",
+        "주행",
+        "카레이싱",
+        "조향",
+    }
+    flight_keywords = {"flight", "비행", "pilot", "aircraft", "flightsim", "조종", "항공", "파일럿"}
+    melee_keywords = {"fighter", "격투", "brawler", "boxing", "fight", "duel", "combat", "근접"}
+    ranged_keywords = {"fps", "shooter", "shoot", "사격", "슈팅", "총", "gun", "rifle"}
 
     camera_model = "third_person"
     if _contains(token_set, "fps", "first", "1인칭", "cockpit"):
         camera_model = "first_person"
     elif _contains(token_set, "topdown", "탑다운", "탑뷰"):
         camera_model = "top_down"
-    elif _contains(token_set, "flight", "비행"):
+    elif _contains(token_set, *flight_keywords):
         camera_model = "chase"
 
     locomotion_model = "on_foot"
-    if _contains(token_set, "racing", "race", "레이싱", "drift", "f1", "formula"):
+    if _contains(token_set, *vehicle_keywords):
         locomotion_model = "vehicle"
-    elif _contains(token_set, "flight", "비행", "pilot", "aircraft"):
+    elif _contains(token_set, *flight_keywords):
         locomotion_model = "flight"
+    if locomotion_model == "vehicle" and camera_model == "third_person":
+        camera_model = "chase"
 
     interaction_model = "action"
     combat_model = "none"
-    if _contains(token_set, "fighter", "격투", "brawler", "boxing", "fight", "duel"):
+    if _contains(token_set, *melee_keywords):
         interaction_model = "melee_combat"
         combat_model = "melee"
-    elif _contains(token_set, "fps", "shooter", "shoot", "사격", "슈팅", "총"):
+    elif _contains(token_set, *ranged_keywords):
         interaction_model = "ranged_combat"
         combat_model = "ranged"
-    elif _contains(token_set, "racing", "race", "레이싱", "flight", "비행"):
+    elif locomotion_model in {"vehicle", "flight"}:
         interaction_model = "navigation"
 
     world_topology = "arena"

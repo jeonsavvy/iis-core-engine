@@ -44,6 +44,37 @@ class _QualityService:
         return SmokeCheckResult(ok=True, reason="smoke_ok", non_fatal_warnings=[])
 
 
+class _VertexServiceWithCodegen:
+    def __init__(self) -> None:
+        self.settings = SimpleNamespace(
+            gen_core_mode="modular",
+            rqc_version="rqc-1",
+            builder_codegen_enabled=True,
+            builder_codegen_passes=1,
+        )
+        self.calls = 0
+
+    def generate_codegen_candidate_artifact(
+        self,
+        *,
+        keyword: str,
+        title: str,
+        genre: str,
+        objective: str,
+        core_loop_type: str,
+        variation_hint: str,
+        design_spec: dict[str, Any],
+        asset_pack: dict[str, Any],
+        html_content: str,
+    ) -> Any:
+        self.calls += 1
+        refined_html = f"{html_content}\n<!-- codegen-refined -->"
+        return SimpleNamespace(
+            payload={"artifact_html": refined_html},
+            meta={"generation_source": "vertex", "model": "stub-model", "reason": "test"},
+        )
+
+
 def test_build_modular_artifact_produces_rqc_ready_runtime() -> None:
     result = build_modular_artifact(
         keyword="풀3d 격투 게임",
@@ -65,6 +96,27 @@ def test_build_modular_artifact_produces_rqc_ready_runtime() -> None:
     assert result.selfcheck_result["passed"] is True
     assert result.module_signature
     assert result.module_plan["primary_modules"]
+
+
+def test_build_modular_artifact_resolves_vehicle_capability_for_korean_car_prompt() -> None:
+    result = build_modular_artifact(
+        keyword="자동차 조종 시뮬레이터",
+        title="AeroFront: Flight Simulator",
+        genre="arcade",
+        slug="car-sim",
+        accent_color="#38BDF8",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=20,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type="arcade",
+        rqc_version="rqc-1",
+    )
+    assert result.capability_profile["locomotion_model"] == "vehicle"
+    assert result.capability_profile["interaction_model"] == "navigation"
+    assert result.capability_profile["camera_model"] == "chase"
+    assert "조향:" in result.artifact_html
+    assert "Objective: engage and clear" not in result.artifact_html
 
 
 def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
@@ -106,3 +158,38 @@ def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
     assert result.metadata["module_signature"]
     assert result.build_artifact.artifact_manifest is not None
     assert result.build_artifact.artifact_manifest["bundle_kind"] in {"modular_builder_core", "hybrid_engine"}
+
+
+def test_build_production_artifact_applies_modular_codegen_refinement() -> None:
+    vertex_service = _VertexServiceWithCodegen()
+    deps = SimpleNamespace(
+        vertex_service=vertex_service,
+        quality_service=_QualityService(),
+    )
+    result = build_production_artifact(
+        state=_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Arena Clash", genre="action", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E"],
+            hud="score/time/hp",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Arena Clash",
+        genre="action",
+        slug="arena-clash",
+        accent_color="#22C55E",
+        core_loop_type="comic_action_brawler_3d",
+        asset_pack={"name": "modular-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+    assert vertex_service.calls == 1
+    assert result.metadata["modular_codegen_passes"] == 1
+    assert result.selected_generation_meta["generation_source"] == "vertex"
+    assert "<!-- codegen-refined -->" in result.build_artifact.artifact_html
