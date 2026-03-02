@@ -105,9 +105,16 @@ def _normalize_mode_balance_config(*, core_loop_type: str, raw_config: dict[str,
         config["enemy_spawn_rate"] = max(0.58, min(1.8, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.86)))
         config["player_speed"] = max(220, min(520, _coerce_int(config.get("player_speed"), fallback=320)))
     elif core_loop_type in {"flight_sim_3d", "webgl_three_runner", "lane_dodge_racer"}:
-        config["player_hp"] = max(2, min(6, _coerce_int(config.get("player_hp"), fallback=3)))
+        config["player_hp"] = max(2, min(8, _coerce_int(config.get("player_hp"), fallback=5)))
         config["time_limit_sec"] = max(75, min(300, _coerce_int(config.get("time_limit_sec"), fallback=95)))
-        config["enemy_spawn_rate"] = max(0.52, min(1.8, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.82)))
+        config["enemy_spawn_rate"] = max(0.42, min(1.55, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.68)))
+    elif core_loop_type in {"comic_action_brawler_3d", "duel_brawler"}:
+        config["player_hp"] = max(5, min(10, _coerce_int(config.get("player_hp"), fallback=7)))
+        config["time_limit_sec"] = max(80, min(260, _coerce_int(config.get("time_limit_sec"), fallback=120)))
+        config["enemy_spawn_rate"] = max(0.35, min(1.45, _coerce_float(config.get("enemy_spawn_rate"), fallback=0.6)))
+        config["enemy_speed_min"] = max(55, min(180, _coerce_int(config.get("enemy_speed_min"), fallback=80)))
+        config["enemy_speed_max"] = max(95, min(260, _coerce_int(config.get("enemy_speed_max"), fallback=155)))
+        config["player_attack_cooldown"] = max(0.22, min(0.8, _coerce_float(config.get("player_attack_cooldown"), fallback=0.34)))
     return config
 
 

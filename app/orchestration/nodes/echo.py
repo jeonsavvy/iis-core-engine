@@ -223,6 +223,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "metadata": {
                         "resolved_public_url": resolved_public_url,
                         "review_generation_source": review_result.meta.get("generation_source"),
+                        "runtime_structure_signature": build_metadata.get("runtime_structure_signature"),
+                        "final_runtime_warning_codes": build_metadata.get("final_runtime_warning_codes"),
+                        "final_runtime_warning_penalty": build_metadata.get("final_runtime_warning_penalty"),
+                        "duplicate_runtime_signature": build_metadata.get("duplicate_runtime_signature"),
                     },
                 }
             )

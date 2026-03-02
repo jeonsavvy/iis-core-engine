@@ -90,6 +90,15 @@ class _LowQualityService(_FakeQualityService):
         return GameplayGateResult(ok=False, score=32, threshold=55, failed_checks=["gameplay_depth_low"], checks={"gameplay": False})
 
 
+class _WarningQualityService(_FakeQualityService):
+    def run_smoke_check(self, html: str, **_kwargs):
+        return SmokeCheckResult(
+            ok=True,
+            reason="smoke_ok",
+            non_fatal_warnings=["overlay_game_over_visible", "timer_static_with_overlay"],
+        )
+
+
 def _patch_runtime_builders(monkeypatch) -> None:
     def _build_hybrid_engine_html(**_kwargs) -> str:
         return "<!doctype html><html><body>BASELINE LOOP RUNTIME HTML PAYLOAD FOR TESTS</body></html>"
@@ -492,3 +501,88 @@ def test_build_production_artifact_reports_quality_floor_fail_metadata(monkeypat
     assert result.metadata["quality_floor_enforced"] is True
     assert result.metadata["quality_floor_passed"] is False
     assert "builder_quality_floor_unmet" in result.metadata["quality_floor_fail_reasons"]
+
+
+def test_build_production_artifact_flags_runtime_liveness_warnings_in_quality_floor(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_WarningQualityService(smoke_ok=True),
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["quality_floor_passed"] is False
+    assert "runtime_liveness_warnings_detected" in result.metadata["quality_floor_fail_reasons"]
+    assert "overlay_game_over_visible" in result.metadata["final_runtime_warning_codes"]
+
+
+def test_build_production_artifact_flags_duplicate_runtime_signature(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    signature = production_pipeline._runtime_structure_signature(
+        html_content="<!doctype html><html><body>BASELINE LOOP RUNTIME HTML PAYLOAD FOR TESTS</body></html>"
+    )
+    repository = SimpleNamespace(
+        list_asset_registry=lambda **_kwargs: [
+            {
+                "game_slug": "old-neon-racer",
+                "metadata": {"runtime_structure_signature": signature},
+            }
+        ]
+    )
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_FakeQualityService(smoke_ok=False),
+        repository=repository,
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert "runtime_structure_duplicate" in result.metadata["quality_floor_fail_reasons"]
+    assert result.metadata["duplicate_runtime_signature"] is True

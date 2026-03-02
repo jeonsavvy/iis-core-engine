@@ -142,18 +142,30 @@ def build_runtime_spawn_combat_functions_js() -> str:
           return;
         }}
         if (MODE_IS_BRAWLER) {{
-          const maxWave = CONFIG.mode === "comic_action_brawler_3d" ? 3 : 1;
+          const maxWave = CONFIG.mode === "comic_action_brawler_3d"
+            ? Math.min(4, 2 + Math.floor((state.run.level || 1) / 2))
+            : 2;
           if (state.enemies.length < maxWave) {{
-            const spawnX = rand(canvas.width * 0.25, canvas.width * 0.82);
-            const spawnY = rand(canvas.height * 0.2, canvas.height * 0.72);
+            let spawnX = rand(canvas.width * 0.12, canvas.width * 0.88);
+            let spawnY = rand(canvas.height * 0.12, canvas.height * 0.82);
+            let guard = 0;
+            while (guard < 8) {{
+              const dx = spawnX - state.player.x;
+              const dy = spawnY - state.player.y;
+              if (Math.hypot(dx, dy) >= Math.max(120, canvas.height * 0.22)) break;
+              const side = Math.random() < 0.5 ? -1 : 1;
+              spawnX = clamp(state.player.x + side * rand(canvas.width * 0.28, canvas.width * 0.42), 28, canvas.width - 72);
+              spawnY = clamp(state.player.y + (Math.random() < 0.5 ? -1 : 1) * rand(canvas.height * 0.18, canvas.height * 0.26), 18, canvas.height - 92);
+              guard += 1;
+            }}
             const enemyKind = pickWeighted(weightedPattern, "grunt");
             state.enemies.push({{
               x: spawnX,
               y: spawnY,
-              w: CONFIG.mode === "comic_action_brawler_3d" ? 42 : 46,
-              h: CONFIG.mode === "comic_action_brawler_3d" ? 64 : 72,
-              hp: Math.max(1, Math.floor(state.enemyHp * (CONFIG.mode === "comic_action_brawler_3d" ? 0.55 : 1) * (enemyKind === "elite" ? 1.5 : 1))),
-              speed: spdMin * (0.6 + difficultyScale * 0.26),
+              w: CONFIG.mode === "comic_action_brawler_3d" ? 48 : 44,
+              h: CONFIG.mode === "comic_action_brawler_3d" ? 70 : 68,
+              hp: Math.max(1, Math.floor(state.enemyHp * (CONFIG.mode === "comic_action_brawler_3d" ? 0.48 : 0.82) * (enemyKind === "elite" ? 1.35 : 1))),
+              speed: spdMin * (0.48 + difficultyScale * 0.2),
               kind: enemyKind,
             }});
           }}

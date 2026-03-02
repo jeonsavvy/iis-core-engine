@@ -47,7 +47,9 @@ def build_runtime_document_open(
       * {{ box-sizing: border-box; }}
       body {{
         margin: 0;
-        height: 100vh;
+        width: 100%;
+        height: 100%;
+        min-height: 100vh;
         overflow: hidden;
         background:
           radial-gradient(800px 400px at 20% 0%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 70%),
@@ -58,20 +60,15 @@ def build_runtime_document_open(
         font-size: max(calc(var(--min-font-size) * 1px), 14px);
       }}
       main {{
-        width: 100vw;
-        height: 100vh;
-        padding: calc(var(--safe-area-padding) * 1px);
+        width: 100%;
+        height: 100%;
+        min-height: 100vh;
+        padding: clamp(8px, 1.8vw, calc(var(--safe-area-padding) * 1px));
         background: rgba(2, 6, 23, 0.8);
-        display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr) auto;
-        gap: 10px;
-        overflow: hidden;
-      }}
-      .hud-row {{
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        flex-direction: column;
         gap: 8px;
+        overflow: hidden;
       }}
       .overflow-guard {{
         overflow: hidden;
@@ -100,11 +97,33 @@ def build_runtime_document_open(
       }}
       .stage {{
         position: relative;
+        flex: 1 1 auto;
         border-radius: 14px;
         border: 1px solid #1e293b;
         overflow: hidden;
         background: linear-gradient(180deg, #020617, #081024);
         min-height: 0;
+      }}
+      .stage-hud {{
+        position: absolute;
+        inset: 8px 10px auto 10px;
+        display: grid;
+        gap: 8px;
+        z-index: 2;
+        pointer-events: none;
+      }}
+      .stage-hud-card {{
+        border-radius: 10px;
+        border: 1px solid rgba(51, 65, 85, 0.7);
+        background: rgba(15, 23, 42, 0.74);
+        backdrop-filter: blur(3px);
+        padding: 8px 10px;
+      }}
+      .stat-row {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 14px;
       }}
       canvas {{
         width: 100%;
@@ -147,18 +166,18 @@ def build_runtime_document_open(
   </head>
   <body>
     <main data-overflow-policy="{text_overflow_policy}">
-      <div class="hud-row">
-        <div style="display:grid;gap:4px;min-width:0">
-          <h1 class="title overflow-guard">{title}</h1>
-          <p class="sub overflow-guard">Mode: {mode_label}</p>
-        </div>
-      </div>
-      <div class="hud-row">
-        <strong id="score" class="stat overflow-guard">Score: 0</strong>
-        <strong id="timer" class="stat overflow-guard">Time: 60.0</strong>
-        <strong id="hp" class="stat overflow-guard">HP: 3</strong>
-      </div>
       <div class="stage">
+        <div class="stage-hud">
+          <div class="stage-hud-card" style="display:grid;gap:4px;min-width:0">
+            <h1 class="title overflow-guard">{title}</h1>
+            <p class="sub overflow-guard">Mode: {mode_label}</p>
+          </div>
+          <div class="stage-hud-card stat-row">
+            <strong id="score" class="stat overflow-guard">Score: 0</strong>
+            <strong id="timer" class="stat overflow-guard">Time: 60.0</strong>
+            <strong id="hp" class="stat overflow-guard">HP: 3</strong>
+          </div>
+        </div>
         <canvas id="game" width="{viewport_width}" height="{viewport_height}"></canvas>
         <div id="overlay" class="overlay">
           <div class="overlay-card">

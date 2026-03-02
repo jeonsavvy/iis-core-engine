@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
+from app.orchestration.nodes.builder_parts.html_runtime_config import MODE_CONFIG_BY_LOOP
 from app.orchestration.nodes.builder_parts.mode import _candidate_composite_score, _candidate_variation_hints
 from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
@@ -32,6 +34,8 @@ class _ArtifactAssessment:
     builder_score: float
     placeholder_heavy: bool
     placeholder_score: float
+    runtime_warning_penalty: float
+    runtime_warning_codes: list[str]
 
 
 def _coerce_float(value: object, *, fallback: float) -> float:
@@ -97,11 +101,13 @@ def _compose_builder_score(
     visual_score: int,
     smoke_ok: bool,
     placeholder_score: float,
+    runtime_warning_penalty: float,
 ) -> float:
     score = (quality_score * 0.32) + (gameplay_score * 0.46) + (visual_score * 0.22)
     if not smoke_ok:
         score -= 22.0
     score -= min(24.0, placeholder_score * 24.0)
+    score -= runtime_warning_penalty
     return round(max(0.0, score), 2)
 
 
@@ -133,6 +139,56 @@ def _estimate_placeholder_risk(html_content: str) -> tuple[bool, float]:
         heavy = True
         raw_risk = max(raw_risk, 0.85)
     return heavy, round(max(0.0, min(raw_risk, 1.0)), 3)
+
+
+def _critical_runtime_warning_codes(warnings: list[str] | None) -> list[str]:
+    if not warnings:
+        return []
+    critical_tokens = {
+        "overlay_game_over_visible",
+        "immediate_zero_hp_state",
+        "zero_hp_state",
+        "timer_static_with_overlay",
+        "timer_not_progressing",
+        "start_gate_visible",
+        "manual_start_interaction_required",
+        "runtime_layout_scroll_overflow",
+    }
+    normalized = [str(item).strip().casefold() for item in warnings if str(item).strip()]
+    return [code for code in normalized if code in critical_tokens]
+
+
+def _runtime_warning_penalty(warnings: list[str] | None) -> float:
+    if not warnings:
+        return 0.0
+    penalties = {
+        "overlay_game_over_visible": 14.0,
+        "immediate_zero_hp_state": 16.0,
+        "zero_hp_state": 10.0,
+        "timer_static_with_overlay": 12.0,
+        "timer_not_progressing": 9.0,
+        "start_gate_visible": 8.0,
+        "manual_start_interaction_required": 8.0,
+        "runtime_layout_scroll_overflow": 6.0,
+    }
+    score = 0.0
+    for token in warnings:
+        code = str(token).strip().casefold()
+        score += penalties.get(code, 0.0)
+    return round(min(28.0, score), 2)
+
+
+def _runtime_structure_signature(*, html_content: str) -> str:
+    lowered = html_content.casefold()
+    script_start = lowered.find("<script>")
+    script_end = lowered.rfind("</script>")
+    if script_start >= 0 and script_end > script_start:
+        lowered = lowered[script_start + len("<script>"):script_end]
+    lowered = re.sub(r"\"[^\"]*\"|'[^']*'", "\"s\"", lowered)
+    lowered = re.sub(r"\b\d+(?:\.\d+)?\b", "0", lowered)
+    lowered = re.sub(r"\s+", "", lowered)
+    digest = hashlib.sha256(lowered.encode("utf-8")).hexdigest()
+    return digest[:24]
 
 
 def _build_builder_refinement_hint(
@@ -191,6 +247,8 @@ def _assess_artifact_quality(
         visual_metrics=smoke.visual_metrics,
         core_loop_type=core_loop_type,
     )
+    runtime_warning_codes = _critical_runtime_warning_codes(smoke.non_fatal_warnings)
+    runtime_warning_penalty = _runtime_warning_penalty(runtime_warning_codes)
     placeholder_heavy, placeholder_score = _estimate_placeholder_risk(html_content)
     score = _compose_builder_score(
         quality_score=quality.score,
@@ -198,6 +256,7 @@ def _assess_artifact_quality(
         visual_score=visual.score,
         smoke_ok=smoke.ok,
         placeholder_score=placeholder_score,
+        runtime_warning_penalty=runtime_warning_penalty,
     )
     return _ArtifactAssessment(
         html=html_content,
@@ -208,6 +267,8 @@ def _assess_artifact_quality(
         builder_score=score,
         placeholder_heavy=placeholder_heavy,
         placeholder_score=placeholder_score,
+        runtime_warning_penalty=runtime_warning_penalty,
+        runtime_warning_codes=runtime_warning_codes,
     )
 
 
@@ -523,6 +584,8 @@ def build_production_artifact(
             "builder_quality_score": candidate_assessment.builder_score,
             "placeholder_heavy": candidate_assessment.placeholder_heavy,
             "placeholder_score": candidate_assessment.placeholder_score,
+            "runtime_warning_penalty": candidate_assessment.runtime_warning_penalty,
+            "runtime_warning_codes": candidate_assessment.runtime_warning_codes,
             "composite_score": composite_score,
             "asset_pack": asset_pack["name"],
             "codegen_passes": codegen_meta_rows,
@@ -545,6 +608,8 @@ def build_production_artifact(
                 "builder_quality_score": candidate_assessment.builder_score,
                 "placeholder_heavy": candidate_assessment.placeholder_heavy,
                 "placeholder_score": candidate_assessment.placeholder_score,
+                "runtime_warning_penalty": candidate_assessment.runtime_warning_penalty,
+                "runtime_warning_codes": candidate_assessment.runtime_warning_codes,
                 "composite_score": composite_score,
                 "generation_source": generated_config.meta.get("generation_source", "stub"),
                 "model": generated_config.meta.get("model"),
@@ -641,6 +706,8 @@ def build_production_artifact(
                 "builder_quality_score": assessment.builder_score,
                 "placeholder_heavy": assessment.placeholder_heavy,
                 "placeholder_score": assessment.placeholder_score,
+                "runtime_warning_penalty": assessment.runtime_warning_penalty,
+                "runtime_warning_codes": assessment.runtime_warning_codes,
             }
         )
         if assessment.smoke.ok and (
@@ -713,6 +780,8 @@ def build_production_artifact(
                     "builder_quality_score": refined_assessment.builder_score,
                     "placeholder_heavy": refined_assessment.placeholder_heavy,
                     "placeholder_score": refined_assessment.placeholder_score,
+                    "runtime_warning_penalty": refined_assessment.runtime_warning_penalty,
+                    "runtime_warning_codes": refined_assessment.runtime_warning_codes,
                     "smoke_ok": refined_assessment.smoke.ok,
                     "smoke_reason": refined_assessment.smoke.reason,
                     "generation_source": refinement_result.meta.get("generation_source", "stub"),
@@ -735,6 +804,8 @@ def build_production_artifact(
     final_builder_quality_score = preferred_assessment.builder_score
     final_placeholder_heavy = preferred_assessment.placeholder_heavy
     final_placeholder_score = preferred_assessment.placeholder_score
+    final_runtime_warning_penalty = preferred_assessment.runtime_warning_penalty
+    final_runtime_warning_codes = list(preferred_assessment.runtime_warning_codes)
     final_composite_score = _candidate_composite_score(
         quality_score=final_quality_score,
         gameplay_score=final_gameplay_score,
@@ -756,6 +827,8 @@ def build_production_artifact(
             "builder_quality_score": float(row.get("builder_quality_score", 0.0)),
             "placeholder_heavy": bool(row.get("placeholder_heavy", False)),
             "placeholder_score": float(row.get("placeholder_score", 0.0)),
+            "runtime_warning_penalty": float(row.get("runtime_warning_penalty", 0.0)),
+            "runtime_warning_codes": [str(item) for item in row.get("runtime_warning_codes", []) if str(item).strip()],
             "composite_score": float(row["composite_score"]),
             "quality_ok": bool(row["quality_ok"]),
             "gameplay_ok": bool(row["gameplay_ok"]),
@@ -782,6 +855,37 @@ def build_production_artifact(
         quality_floor_fail_reasons.append("builder_quality_floor_unmet")
     if final_placeholder_heavy:
         quality_floor_fail_reasons.append("placeholder_visual_detected")
+    if final_runtime_warning_codes:
+        quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
+
+    runtime_structure_signature = _runtime_structure_signature(html_content=artifact_html)
+    duplicate_runtime_signature = False
+    repository = getattr(deps, "repository", None)
+    list_registry = getattr(repository, "list_asset_registry", None)
+    if callable(list_registry):
+        try:
+            recent_rows: list[dict[str, Any]] = []
+            for loop_key in MODE_CONFIG_BY_LOOP.keys():
+                rows = list_registry(core_loop_type=str(loop_key), limit=12)
+                if isinstance(rows, list):
+                    recent_rows.extend([row for row in rows if isinstance(row, dict)])
+        except Exception:
+            recent_rows = []
+        for row in recent_rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("game_slug", "")).strip() == slug:
+                continue
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            signature = str(metadata.get("runtime_structure_signature", "")).strip()
+            if signature and signature == runtime_structure_signature:
+                duplicate_runtime_signature = True
+                break
+    if duplicate_runtime_signature:
+        quality_floor_fail_reasons.append("runtime_structure_duplicate")
+
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
 
     artifact_files: list[dict[str, str]] | None = None
@@ -876,6 +980,10 @@ def build_production_artifact(
         "final_builder_quality_score": final_builder_quality_score,
         "final_placeholder_heavy": final_placeholder_heavy,
         "final_placeholder_score": final_placeholder_score,
+        "final_runtime_warning_penalty": final_runtime_warning_penalty,
+        "final_runtime_warning_codes": final_runtime_warning_codes,
+        "runtime_structure_signature": runtime_structure_signature,
+        "duplicate_runtime_signature": duplicate_runtime_signature,
         "final_smoke_ok": preferred_assessment.smoke.ok,
         "final_smoke_reason": preferred_assessment.smoke.reason,
         "final_composite_score": final_composite_score,

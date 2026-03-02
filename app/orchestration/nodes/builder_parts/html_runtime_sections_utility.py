@@ -51,9 +51,15 @@ def build_runtime_utility_functions_js() -> str:
       }}
 
       function applyPlayerDamage(amount, options = {{}}) {{
-        const cooldown = Math.max(0, Number(options.cooldownSec ?? 0.62));
+        const modeCooldownFloor = MODE_IS_BRAWLER ? 0.88 : MODE_IS_3D_RUNNER ? 0.78 : 0.62;
+        const cooldown = Math.max(modeCooldownFloor, Number(options.cooldownSec ?? modeCooldownFloor));
         if ((state.run.damageCooldown || 0) > 0) return false;
-        const hpDamage = Math.max(1, Number(amount || 1));
+        const requestedDamage = Math.max(1, Number(amount || 1));
+        const hpDamage = MODE_IS_BRAWLER
+          ? Math.max(1, Math.floor(requestedDamage * 0.7 + 0.3))
+          : MODE_IS_3D_RUNNER
+            ? Math.max(1, Math.floor(requestedDamage * 0.82 + 0.25))
+            : requestedDamage;
         state.hp -= hpDamage;
         const scorePenalty = Math.max(0, Number(options.scorePenalty || 0));
         if (scorePenalty > 0) {{
