@@ -4,11 +4,13 @@ from app.core.config import Settings
 from app.orchestration.nodes.builder import (
     _build_hybrid_asset_bank,
     _build_hybrid_engine_html,
+    _build_generated_genre_directive,
     _extract_hybrid_bundle_from_inline_html,
     _build_request_capability_hint,
     _infer_core_loop_profile,
     _infer_core_loop_type,
     _resolve_asset_pack,
+    _synthesize_genre_profile,
 )
 from app.services.quality_service import QualityService
 
@@ -91,6 +93,33 @@ def test_request_capability_hint_keeps_original_intent_text() -> None:
     )
     assert "Requested intent: 특이한 장르 실험형 1인칭 퍼즐 슈팅." in hint
     assert "Detected capability flags" in hint
+
+
+def test_synthesize_genre_profile_produces_non_empty_generation_contract() -> None:
+    profile = _synthesize_genre_profile(
+        keyword="특이한 장르 실험형 1인칭 퍼즐 슈팅",
+        title="Odd Signal",
+        genre="hybrid",
+    )
+    assert profile["profile_id"]
+    assert profile["camera_model"] == "first_person"
+    pillars = profile["pillars"]
+    assert isinstance(pillars, list)
+    assert len(pillars) >= 2
+    rules = profile["non_negotiables"]
+    assert isinstance(rules, list)
+    assert "stable_embedded_iframe_runtime" in rules
+
+
+def test_generated_genre_directive_contains_profile_summary() -> None:
+    directive = _build_generated_genre_directive(
+        keyword="실험형 로그라이크 탑다운 슈팅",
+        title="Pulse Sink",
+        genre="hybrid",
+    )
+    assert "Auto-generated genre profile" in directive
+    assert "Gameplay pillars:" in directive
+    assert "Non-negotiables:" in directive
 
 
 def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> None:

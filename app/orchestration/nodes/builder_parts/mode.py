@@ -200,6 +200,118 @@ def _build_request_capability_hint(*, keyword: str, title: str, genre: str) -> s
     )
 
 
+def _synthesize_genre_profile(
+    *,
+    keyword: str,
+    title: str,
+    genre: str,
+    core_loop_profile: dict[str, object] | None = None,
+) -> dict[str, object]:
+    profile = core_loop_profile if isinstance(core_loop_profile, dict) else _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
+    core_loop_type = str(profile.get("core_loop_type", "arcade_generic"))
+    capabilities = profile.get("capabilities")
+    typed_capabilities = capabilities if isinstance(capabilities, dict) else {}
+    haystack = " ".join([keyword, title, genre]).casefold()
+
+    camera_model = "third_person"
+    if _contains_any(haystack, ("1인칭", "first-person", "first person", "fps", "cockpit")):
+        camera_model = "first_person"
+    elif bool(typed_capabilities.get("is_topdown")):
+        camera_model = "top_down"
+    elif core_loop_type == "flight_sim_3d":
+        camera_model = "cockpit_or_chase"
+
+    interaction_model = "arcade_action"
+    if bool(typed_capabilities.get("is_racing")):
+        interaction_model = "vehicle_control"
+    elif bool(typed_capabilities.get("is_flight")):
+        interaction_model = "flight_control"
+    elif bool(typed_capabilities.get("is_shooter")) and bool(typed_capabilities.get("is_brawler")):
+        interaction_model = "hybrid_shoot_melee"
+    elif bool(typed_capabilities.get("is_shooter")):
+        interaction_model = "ranged_combat"
+    elif bool(typed_capabilities.get("is_brawler")):
+        interaction_model = "melee_combat"
+
+    world_style = "arcade"
+    if _contains_any(haystack, ("cyber", "사이버", "네온", "neon", "sci-fi", "sf")):
+        world_style = "sci_fi_neon"
+    elif _contains_any(haystack, ("fantasy", "판타지", "마법")):
+        world_style = "fantasy"
+    elif _contains_any(haystack, ("military", "현대전", "전술", "tactical")):
+        world_style = "tactical"
+    elif _contains_any(haystack, ("horror", "공포")):
+        world_style = "horror"
+
+    pillars: list[str] = []
+    if bool(typed_capabilities.get("is_3d")):
+        pillars.append("3d_spatial_readability")
+    if interaction_model == "vehicle_control":
+        pillars.extend(["speed_control_curve", "corner_or_obstacle_mastery"])
+    elif interaction_model == "flight_control":
+        pillars.extend(["pitch_roll_yaw_feedback", "air_route_precision"])
+    elif interaction_model == "ranged_combat":
+        pillars.extend(["enemy_pressure_patterns", "aim_and_positioning_loop"])
+    elif interaction_model == "melee_combat":
+        pillars.extend(["combo_and_counter_timing", "spacing_and_recovery"])
+    elif interaction_model == "hybrid_shoot_melee":
+        pillars.extend(["stance_switch_readability", "ranged_to_melee_transition"])
+    else:
+        pillars.extend(["reactive_core_loop", "clear_risk_reward_feedback"])
+    if bool(typed_capabilities.get("is_roguelike")):
+        pillars.append("run_based_progression")
+    if not pillars:
+        pillars.append("core_loop_clarity")
+
+    non_negotiables = [
+        "no_rectangle_placeholder_only_visuals",
+        "stable_embedded_iframe_runtime",
+        "playable_loop_with_clear_fail_and_restart",
+    ]
+    if bool(typed_capabilities.get("is_3d")):
+        non_negotiables.append("maintain_3d_depth_cues_and_camera_identity")
+    if bool(typed_capabilities.get("is_shooter")):
+        non_negotiables.append("projectile_and_hit_feedback_clarity")
+    if bool(typed_capabilities.get("is_brawler")):
+        non_negotiables.append("impactful_melee_contact_feedback")
+
+    profile_label = str(genre).strip() or "hybrid"
+    profile_id = _slugify(f"{profile_label}-{core_loop_type}-{world_style}")
+    return {
+        "profile_id": profile_id,
+        "core_loop_type": core_loop_type,
+        "camera_model": camera_model,
+        "interaction_model": interaction_model,
+        "world_style": world_style,
+        "pillars": pillars[:6],
+        "non_negotiables": non_negotiables[:8],
+        "confidence": float(profile.get("confidence", 0.45)),
+    }
+
+
+def _build_generated_genre_directive(
+    *,
+    keyword: str,
+    title: str,
+    genre: str,
+    genre_profile: dict[str, object] | None = None,
+) -> str:
+    profile = genre_profile if isinstance(genre_profile, dict) else _synthesize_genre_profile(keyword=keyword, title=title, genre=genre)
+    pillars = profile.get("pillars")
+    typed_pillars = [str(item).strip() for item in pillars] if isinstance(pillars, list) else []
+    required_rules = profile.get("non_negotiables")
+    typed_rules = [str(item).strip() for item in required_rules] if isinstance(required_rules, list) else []
+    return (
+        f"Auto-generated genre profile ({profile.get('profile_id', 'dynamic-profile')}): "
+        f"camera={profile.get('camera_model', 'third_person')}, "
+        f"interaction={profile.get('interaction_model', 'arcade_action')}, "
+        f"style={profile.get('world_style', 'arcade')}. "
+        f"Gameplay pillars: {', '.join(typed_pillars[:4]) if typed_pillars else 'core_loop_clarity'}. "
+        f"Non-negotiables: {', '.join(typed_rules[:5]) if typed_rules else 'stable_runtime'}. "
+        "If exact genre implementation is unavailable, synthesize the closest playable interpretation while preserving requested fantasy and control identity."
+    )
+
+
 def _detect_unsupported_scope(*, keyword: str, title: str, genre: str) -> str | None:
     haystack = " ".join([keyword, title, genre]).casefold()
     out_of_scope_map: dict[str, tuple[str, ...]] = {

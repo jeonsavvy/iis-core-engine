@@ -8,11 +8,13 @@ from app.orchestration.nodes.builder_parts.assets import _build_hybrid_asset_ban
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.mode import (
+    _build_generated_genre_directive,
     _build_request_capability_hint,
     _detect_unsupported_scope,
     _infer_core_loop_profile,
     _infer_core_loop_type,
     _is_safe_slug,
+    _synthesize_genre_profile,
     _slugify,
 )
 from app.orchestration.nodes.builder_parts.production_pipeline import build_production_artifact
@@ -27,9 +29,11 @@ __all__ = [
     "_resolve_asset_pack",
     "_extract_hybrid_bundle_from_inline_html",
     "_build_hybrid_engine_html",
+    "_build_generated_genre_directive",
     "_build_request_capability_hint",
     "_infer_core_loop_profile",
     "_infer_core_loop_type",
+    "_synthesize_genre_profile",
 ]
 
 
@@ -214,6 +218,18 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     core_loop_profile = _infer_core_loop_profile(keyword=state["keyword"], title=title, genre=genre)
     core_loop_type = str(core_loop_profile.get("core_loop_type", _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)))
     request_capability_hint = _build_request_capability_hint(keyword=state["keyword"], title=title, genre=genre)
+    generated_genre_profile = _synthesize_genre_profile(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        core_loop_profile=core_loop_profile,
+    )
+    generated_genre_directive = _build_generated_genre_directive(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        genre_profile=generated_genre_profile,
+    )
     unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
     if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
         state["status"] = PipelineStatus.ERROR
@@ -266,6 +282,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "core_loop_type": core_loop_type,
             "core_loop_profile": core_loop_profile,
             "request_capability_hint_applied": bool(request_capability_hint),
+            "generated_genre_profile": generated_genre_profile,
+            "generated_genre_directive_applied": bool(generated_genre_directive),
             "asset_memory_hint_applied": bool(asset_memory_context.hint),
             "asset_memory_profile": asset_memory_context.retrieval_profile,
             "asset_memory_snapshot": asset_memory_context.registry_snapshot,
@@ -335,6 +353,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         memory_hint=asset_memory_context.hint,
         memory_tokens=asset_memory_context.recurring_failures,
         request_capability_hint=request_capability_hint,
+        generated_genre_directive=generated_genre_directive,
     )
     build_artifact = production_result.build_artifact
 
@@ -381,6 +400,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "contribution_score": 4.6,
             "contract_issues": contract_issues,
             "contract_repaired": repaired_any,
+            "generated_genre_profile": generated_genre_profile,
+            "generated_genre_directive_applied": bool(generated_genre_directive),
             **production_result.metadata,
         },
     )
