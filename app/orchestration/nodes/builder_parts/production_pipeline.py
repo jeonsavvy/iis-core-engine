@@ -457,10 +457,13 @@ def build_production_artifact(
         and combined_feedback_hint
         and int(state.get("build_iteration", 0)) > 1
     )
+    configured_codegen_enabled = bool(getattr(deps.vertex_service.settings, "builder_codegen_enabled", False))
     configured_codegen_passes = int(deps.vertex_service.settings.builder_codegen_passes)
-    runtime_mutation_enabled = bool(
-        getattr(deps.vertex_service.settings, "builder_runtime_mutation_enabled", False)
+    configured_runtime_mutation_enabled = bool(
+        configured_codegen_enabled and getattr(deps.vertex_service.settings, "builder_runtime_mutation_enabled", False)
     )
+    runtime_mutation_enabled = False
+    runtime_mutation_lock_reason = "template_runtime_hard_lock"
     codegen_pass_budget = _resolve_codegen_pass_budget(
         configured_passes=configured_codegen_passes,
         has_feedback_hint=bool(combined_feedback_hint),
@@ -468,6 +471,7 @@ def build_production_artifact(
     )
     if not runtime_mutation_enabled:
         codegen_pass_budget = 0
+        reuse_previous_artifact_seed = False
 
     append_log(
         state,
@@ -495,7 +499,9 @@ def build_production_artifact(
             "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
             "configured_codegen_passes": configured_codegen_passes,
             "effective_codegen_pass_budget": codegen_pass_budget,
+            "configured_runtime_mutation_enabled": configured_runtime_mutation_enabled,
             "runtime_mutation_enabled": runtime_mutation_enabled,
+            "runtime_mutation_lock_reason": runtime_mutation_lock_reason,
         },
     )
 
@@ -812,7 +818,7 @@ def build_production_artifact(
     refinement_target_score = max(0.0, min(refinement_target_score, 100.0))
     refinement_rounds_executed = 0
 
-    if preferred_assessment.smoke.ok and preferred_assessment.builder_score < refinement_target_score:
+    if runtime_mutation_enabled and preferred_assessment.smoke.ok and preferred_assessment.builder_score < refinement_target_score:
         for round_index in range(1, refinement_round_limit + 1):
             refinement_rounds_executed += 1
             refinement_hint = _build_builder_refinement_hint(
@@ -882,7 +888,7 @@ def build_production_artifact(
     )
     playability_refinement_round_limit = max(0, min(playability_refinement_round_limit, 4))
     playability_refinement_rounds_executed = 0
-    if preferred_assessment.smoke.ok and not preferred_assessment.playability.ok:
+    if runtime_mutation_enabled and preferred_assessment.smoke.ok and not preferred_assessment.playability.ok:
         for round_index in range(1, playability_refinement_round_limit + 1):
             playability_refinement_rounds_executed += 1
             remediation_hint = (
@@ -1125,10 +1131,12 @@ def build_production_artifact(
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "configured_candidate_count": configured_candidate_count,
         "candidate_count": candidate_count,
-        "codegen_enabled": bool(deps.vertex_service.settings.builder_codegen_enabled),
+        "codegen_enabled": configured_codegen_enabled,
         "codegen_passes_per_candidate": configured_codegen_passes,
         "effective_codegen_passes_per_candidate": codegen_pass_budget,
+        "configured_runtime_mutation_enabled": configured_runtime_mutation_enabled,
         "runtime_mutation_enabled": runtime_mutation_enabled,
+        "runtime_mutation_lock_reason": runtime_mutation_lock_reason,
         "reuse_previous_artifact_seed": reuse_previous_artifact_seed,
         "selected_candidate_index": int(best_candidate["index"]),
         "selected_candidate_score": selected_composite,

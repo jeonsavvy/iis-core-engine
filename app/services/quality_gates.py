@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Any
 
 from app.core.config import Settings
@@ -88,7 +87,7 @@ def evaluate_gameplay_gate(
         ("control_tuning_table", "control_presets" in lowered and "const control =" in lowered, 10),
         ("depth_pack_system", "depth_packs" in lowered and "active_depth_pack" in lowered, 10),
         ("miniboss_loop", "spawnminiboss" in lowered and "miniboss" in lowered, 10),
-        ("relic_synergy_system", "relic_synergy_rules" in lowered and "applyrelicsynergy" in lowered, 10),
+        ("progression_state_machine", "stepprogression(" in lowered and "state.run.level" in lowered, 10),
         ("risk_reward", any(token in lowered for token in ("boost", "combo", "score +=", "state.score +=")), 14),
         ("pacing_control", any(token in lowered for token in ("spawnrate", "enemy_spawn_rate", "difficulty", "speed")), 12),
         ("feedback_fx", any(token in lowered for token in ("shadowblur", "burst(", "particles", "screen")), 13),
@@ -197,6 +196,13 @@ def evaluate_gameplay_gate(
         hard_failures.append("genre_engine_mismatch")
     if "flight" in keyword_hint and genre_engine_hint != "flight_sim_3d":
         hard_failures.append("keyword_engine_mismatch_flight")
+    fill_rect_count = lowered.count("fillrect(")
+    shape_signal = sum(
+        lowered.count(token)
+        for token in ("drawsprite(", "beginpath(", "arc(", "ellipse(", "quadraticcurveto(", "beziercurveto(", "roundrect(")
+    )
+    if fill_rect_count >= 42 and shape_signal <= 14:
+        hard_failures.append("geometry_variety_too_low")
     if genre_engine_hint == "flight_sim_3d":
         missing_flight_token = any(token not in lowered for token in ("state.flight", "checkpointcombo", "throttle"))
         if missing_flight_token:

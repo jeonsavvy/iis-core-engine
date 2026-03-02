@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     qa_min_artifact_contract_score: int = Field(default=70, ge=0, le=100)
     qa_hard_gate: bool = False
     builder_candidate_count: int = Field(default=1, ge=1, le=5)
-    builder_codegen_enabled: bool = True
+    builder_codegen_enabled: bool = False
     builder_codegen_passes: int = Field(default=1, ge=0, le=2)
     builder_codegen_max_output_tokens: int = Field(default=12_000, ge=512, le=65_536)
     builder_runtime_mutation_enabled: bool = False
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     builder_scope_guard_enabled: bool = True
     builder_asset_memory_enabled: bool = True
     builder_quality_floor_enforced: bool = True
-    builder_quality_floor_score: int = Field(default=72, ge=0, le=100)
+    builder_quality_floor_score: int = Field(default=82, ge=0, le=100)
     builder_runtime_signature_guard: bool = True
     builder_playability_hard_gate: bool = True
     builder_playability_refinement_rounds: int = Field(default=2, ge=0, le=4)

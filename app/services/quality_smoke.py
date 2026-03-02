@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -356,8 +357,9 @@ def evaluate_runtime_liveness(
             str(after.get("overlay_text", "") or ""),
         ]
     ).casefold()
-    hud_jargon_tokens = ("relic", "syn", "synergy", "build(", "lv.", "xp ", "웨이브", "시너지(", "빌드(")
-    if any(token in hud_text for token in hud_jargon_tokens):
+    hud_jargon_tokens = ("relic", "syn", "synergy", "build(", "wave", "xp ", "웨이브", "시너지(", "빌드(")
+    hud_jargon_pattern = re.compile(r"\blv\.?\s*\d+\b|\bw\d+\b|\bxp\s*[:/\d]")
+    if any(token in hud_text for token in hud_jargon_tokens) or bool(hud_jargon_pattern.search(hud_text)):
         warnings.append("hud_jargon_visible")
 
     canvas_width = _to_float(after.get("canvas_width", 0))
