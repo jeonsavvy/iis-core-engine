@@ -355,6 +355,31 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
     )
+    quality_floor_enforced = bool(production_result.metadata.get("quality_floor_enforced", False))
+    quality_floor_passed = bool(production_result.metadata.get("quality_floor_passed", True))
+    if quality_floor_enforced and not quality_floor_passed:
+        fail_reasons = production_result.metadata.get("quality_floor_fail_reasons", [])
+        fail_tokens = [str(item).strip() for item in fail_reasons if str(item).strip()] if isinstance(fail_reasons, list) else []
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "builder_quality_floor_unmet"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 자동 품질 하한선을 통과하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "quality_floor_score": production_result.metadata.get("quality_floor_score"),
+                "quality_floor_fail_reasons": fail_tokens,
+                "final_builder_quality_score": production_result.metadata.get("final_builder_quality_score"),
+                "final_placeholder_heavy": production_result.metadata.get("final_placeholder_heavy"),
+                "deliverables": ["quality_floor_gate", "builder_refinement_report"],
+                "contract_status": "fail",
+                "contribution_score": 1.8,
+                **production_result.metadata,
+            },
+        )
     build_artifact = production_result.build_artifact
 
     state["outputs"]["build_artifact"] = build_artifact.model_dump()

@@ -126,7 +126,7 @@ def _make_runner(repository: PipelineRepository) -> PipelineRunner:
 
 
 def _make_runner_with_quality(repository: PipelineRepository, quality_service: Any) -> PipelineRunner:
-    settings = Settings(telegram_bot_token="")
+    settings = Settings(telegram_bot_token="", builder_quality_floor_enforced=False)
     return PipelineRunner(
         repository=repository,
         settings=settings,

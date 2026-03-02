@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     builder_force_pro_model: bool = True
     builder_scope_guard_enabled: bool = True
     builder_asset_memory_enabled: bool = True
+    builder_quality_floor_enforced: bool = True
+    builder_quality_floor_score: int = Field(default=72, ge=0, le=100)
     pipeline_contract_enforcement: str = Field(default="warn_only", pattern=r"^(strict|warn_only)$")
     qa_retry_source: str = Field(default="builder_only", pattern=r"^(builder_only|qa_or_builder)$")
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)

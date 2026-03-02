@@ -82,6 +82,14 @@ class _FakeQualityService:
         return SmokeCheckResult(ok=False, reason=f"smoke_failed:{'POLISHED' if 'POLISHED' in html else 'BASE'}")
 
 
+class _LowQualityService(_FakeQualityService):
+    def evaluate_quality_contract(self, html: str, *, design_spec=None):
+        return QualityGateResult(ok=False, score=28, threshold=75, failed_checks=["quality_contract_low"], checks={"quality": False})
+
+    def evaluate_gameplay_gate(self, html: str, *, design_spec=None, genre=None, genre_engine=None, keyword=None):
+        return GameplayGateResult(ok=False, score=32, threshold=55, failed_checks=["gameplay_depth_low"], checks={"gameplay": False})
+
+
 def _patch_runtime_builders(monkeypatch) -> None:
     def _build_hybrid_engine_html(**_kwargs) -> str:
         return "<!doctype html><html><body>BASELINE LOOP RUNTIME HTML PAYLOAD FOR TESTS</body></html>"
@@ -445,3 +453,42 @@ def test_build_production_artifact_records_builder_refinement_attempts(monkeypat
     scoreboard = result.metadata["candidate_scoreboard"]
     assert isinstance(scoreboard, list)
     assert scoreboard and "builder_quality_score" in scoreboard[0]
+
+
+def test_build_production_artifact_reports_quality_floor_fail_metadata(monkeypatch) -> None:
+    _patch_runtime_builders(monkeypatch)
+
+    vertex = _FakeVertexService(polished_suffix="POLISHED")
+    vertex.settings.builder_quality_floor_enforced = True
+    vertex.settings.builder_quality_floor_score = 92
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex,
+        quality_service=_LowQualityService(smoke_ok=True),
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+
+    assert result.metadata["quality_floor_enforced"] is True
+    assert result.metadata["quality_floor_passed"] is False
+    assert "builder_quality_floor_unmet" in result.metadata["quality_floor_fail_reasons"]

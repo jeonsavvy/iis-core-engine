@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,8 @@ class _ArtifactAssessment:
     smoke: SmokeCheckResult
     visual: QualityGateResult
     builder_score: float
+    placeholder_heavy: bool
+    placeholder_score: float
 
 
 def _coerce_float(value: object, *, fallback: float) -> float:
@@ -93,11 +96,43 @@ def _compose_builder_score(
     gameplay_score: int,
     visual_score: int,
     smoke_ok: bool,
+    placeholder_score: float,
 ) -> float:
     score = (quality_score * 0.32) + (gameplay_score * 0.46) + (visual_score * 0.22)
     if not smoke_ok:
         score -= 22.0
+    score -= min(24.0, placeholder_score * 24.0)
     return round(max(0.0, score), 2)
+
+
+def _estimate_placeholder_risk(html_content: str) -> tuple[bool, float]:
+    lowered = html_content.lower()
+    fill_rect_count = lowered.count("fillrect(")
+    draw_sprite_count = lowered.count("drawsprite(")
+    path_count = sum(
+        lowered.count(token)
+        for token in (
+            "beginpath(",
+            "arc(",
+            "ellipse(",
+            "quadraticcurveto(",
+            "beziercurveto(",
+            "roundrect(",
+            "lineTo(".lower(),
+        )
+    )
+    gradient_count = lowered.count("createlineargradient(") + lowered.count("createradialgradient(")
+    unique_hex_colors = len(set(match.group(0).lower() for match in re.finditer(r"#[0-9a-f]{6}", lowered)))
+    if fill_rect_count <= 0:
+        return False, 0.0
+
+    geometric_signal = (path_count + draw_sprite_count + gradient_count + unique_hex_colors) / max(fill_rect_count, 1)
+    raw_risk = 1.0 - min(1.0, geometric_signal / 1.8)
+    heavy = fill_rect_count >= 20 and raw_risk >= 0.55 and draw_sprite_count <= 4
+    if "placeholder rectangle-only visuals" in lowered:
+        heavy = True
+        raw_risk = max(raw_risk, 0.85)
+    return heavy, round(max(0.0, min(raw_risk, 1.0)), 3)
 
 
 def _build_builder_refinement_hint(
@@ -156,11 +191,13 @@ def _assess_artifact_quality(
         visual_metrics=smoke.visual_metrics,
         core_loop_type=core_loop_type,
     )
+    placeholder_heavy, placeholder_score = _estimate_placeholder_risk(html_content)
     score = _compose_builder_score(
         quality_score=quality.score,
         gameplay_score=gameplay.score,
         visual_score=visual.score,
         smoke_ok=smoke.ok,
+        placeholder_score=placeholder_score,
     )
     return _ArtifactAssessment(
         html=html_content,
@@ -169,6 +206,8 @@ def _assess_artifact_quality(
         smoke=smoke,
         visual=visual,
         builder_score=score,
+        placeholder_heavy=placeholder_heavy,
+        placeholder_score=placeholder_score,
     )
 
 
@@ -482,6 +521,8 @@ def build_production_artifact(
             "smoke_ok": candidate_assessment.smoke.ok,
             "smoke_reason": candidate_assessment.smoke.reason,
             "builder_quality_score": candidate_assessment.builder_score,
+            "placeholder_heavy": candidate_assessment.placeholder_heavy,
+            "placeholder_score": candidate_assessment.placeholder_score,
             "composite_score": composite_score,
             "asset_pack": asset_pack["name"],
             "codegen_passes": codegen_meta_rows,
@@ -502,6 +543,8 @@ def build_production_artifact(
                 "visual_score": candidate_assessment.visual.score,
                 "smoke_ok": candidate_assessment.smoke.ok,
                 "builder_quality_score": candidate_assessment.builder_score,
+                "placeholder_heavy": candidate_assessment.placeholder_heavy,
+                "placeholder_score": candidate_assessment.placeholder_score,
                 "composite_score": composite_score,
                 "generation_source": generated_config.meta.get("generation_source", "stub"),
                 "model": generated_config.meta.get("model"),
@@ -596,6 +639,8 @@ def build_production_artifact(
                 "gameplay_score": assessment.gameplay.score,
                 "visual_score": assessment.visual.score,
                 "builder_quality_score": assessment.builder_score,
+                "placeholder_heavy": assessment.placeholder_heavy,
+                "placeholder_score": assessment.placeholder_score,
             }
         )
         if assessment.smoke.ok and (
@@ -666,6 +711,8 @@ def build_production_artifact(
                     "gameplay_score": refined_assessment.gameplay.score,
                     "visual_score": refined_assessment.visual.score,
                     "builder_quality_score": refined_assessment.builder_score,
+                    "placeholder_heavy": refined_assessment.placeholder_heavy,
+                    "placeholder_score": refined_assessment.placeholder_score,
                     "smoke_ok": refined_assessment.smoke.ok,
                     "smoke_reason": refined_assessment.smoke.reason,
                     "generation_source": refinement_result.meta.get("generation_source", "stub"),
@@ -686,6 +733,8 @@ def build_production_artifact(
     final_gameplay_score = preferred_assessment.gameplay.score
     final_visual_score = preferred_assessment.visual.score
     final_builder_quality_score = preferred_assessment.builder_score
+    final_placeholder_heavy = preferred_assessment.placeholder_heavy
+    final_placeholder_score = preferred_assessment.placeholder_score
     final_composite_score = _candidate_composite_score(
         quality_score=final_quality_score,
         gameplay_score=final_gameplay_score,
@@ -705,6 +754,8 @@ def build_production_artifact(
             "smoke_ok": bool(row.get("smoke_ok")),
             "smoke_reason": row.get("smoke_reason"),
             "builder_quality_score": float(row.get("builder_quality_score", 0.0)),
+            "placeholder_heavy": bool(row.get("placeholder_heavy", False)),
+            "placeholder_score": float(row.get("placeholder_score", 0.0)),
             "composite_score": float(row["composite_score"]),
             "quality_ok": bool(row["quality_ok"]),
             "gameplay_ok": bool(row["gameplay_ok"]),
@@ -715,6 +766,23 @@ def build_production_artifact(
         }
         for row in candidate_rows
     ]
+
+    quality_floor_score = _coerce_int(
+        getattr(deps.vertex_service.settings, "builder_quality_floor_score", 72),
+        fallback=72,
+    )
+    quality_floor_score = max(0, min(100, quality_floor_score))
+    quality_floor_enforced = bool(
+        getattr(deps.vertex_service.settings, "builder_quality_floor_enforced", True)
+    )
+    quality_floor_fail_reasons: list[str] = []
+    if not preferred_assessment.smoke.ok:
+        quality_floor_fail_reasons.append("runtime_smoke_failed")
+    if final_builder_quality_score < float(quality_floor_score):
+        quality_floor_fail_reasons.append("builder_quality_floor_unmet")
+    if final_placeholder_heavy:
+        quality_floor_fail_reasons.append("placeholder_visual_detected")
+    quality_floor_passed = len(quality_floor_fail_reasons) == 0
 
     artifact_files: list[dict[str, str]] | None = None
     artifact_manifest: dict[str, object] | None = None
@@ -806,9 +874,15 @@ def build_production_artifact(
         "final_gameplay_score": final_gameplay_score,
         "final_visual_score": final_visual_score,
         "final_builder_quality_score": final_builder_quality_score,
+        "final_placeholder_heavy": final_placeholder_heavy,
+        "final_placeholder_score": final_placeholder_score,
         "final_smoke_ok": preferred_assessment.smoke.ok,
         "final_smoke_reason": preferred_assessment.smoke.reason,
         "final_composite_score": final_composite_score,
+        "quality_floor_score": quality_floor_score,
+        "quality_floor_enforced": quality_floor_enforced,
+        "quality_floor_passed": quality_floor_passed,
+        "quality_floor_fail_reasons": quality_floor_fail_reasons,
         "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
         "rebuild_feedback_tokens": rebuild_feedback_tokens,
         "memory_hint_applied": bool(normalized_memory_hint),

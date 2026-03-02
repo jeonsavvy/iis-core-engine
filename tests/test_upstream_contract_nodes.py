@@ -5,6 +5,8 @@ from typing import Any, cast
 from uuid import uuid4
 
 from app.orchestration.nodes import architect, builder, stylist, trigger
+from app.orchestration.nodes.builder_parts.production_pipeline import ProductionBuildResult
+from app.schemas.payloads import BuildArtifactPayload
 from app.schemas.pipeline import PipelineStatus
 from app.services.vertex_types import VertexGenerationResult
 
@@ -170,4 +172,41 @@ def test_builder_contract_validator_blocks_weak_contracts_in_strict_mode() -> No
 
     assert result["status"] == PipelineStatus.ERROR
     assert result["reason"] == "builder_contract_validation_failed"
+    assert any(log.stage.value == "build" and log.status.value == "error" for log in result["logs"])
+
+
+def test_builder_stops_when_quality_floor_unmet(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub(contract_mode="ok", enforcement="warn_only")
+    deps = _deps(vertex)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    state = architect.run(cast(Any, state), cast(Any, deps))
+    state = stylist.run(cast(Any, state), cast(Any, deps))
+
+    def _fake_production_artifact(**_kwargs: Any) -> ProductionBuildResult:
+        build_artifact = BuildArtifactPayload(
+            game_slug="arena-pulse",
+            game_name="Arena Pulse",
+            game_genre="shooter",
+            artifact_path="games/arena-pulse/index.html",
+            artifact_html="<!doctype html><html><body><main><canvas id='game'></canvas><script>window.__iis_game_boot_ok=true;</script></main></body></html>",
+        )
+        return ProductionBuildResult(
+            build_artifact=build_artifact,
+            selected_generation_meta={"generation_source": "stub"},
+            metadata={
+                "quality_floor_enforced": True,
+                "quality_floor_passed": False,
+                "quality_floor_score": 80,
+                "quality_floor_fail_reasons": ["builder_quality_floor_unmet"],
+                "final_builder_quality_score": 42,
+                "final_placeholder_heavy": True,
+            },
+        )
+
+    monkeypatch.setattr(builder, "build_production_artifact", _fake_production_artifact)
+    result = builder.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["reason"] == "builder_quality_floor_unmet"
     assert any(log.stage.value == "build" and log.status.value == "error" for log in result["logs"])
