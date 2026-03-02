@@ -198,6 +198,24 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         failure_reasons.extend(_string_list(quality_qa_metadata.get("failed_checks")))
 
         failure_tokens = _string_list(runtime_qa_metadata.get("fatal_errors")) + _string_list(runtime_qa_metadata.get("non_fatal_warnings"))
+        artifact_manifest = state["outputs"].get("artifact_manifest")
+        typed_artifact_manifest = artifact_manifest if isinstance(artifact_manifest, dict) else {}
+
+        def _list_len(key: str) -> int:
+            value = typed_artifact_manifest.get(key)
+            if not isinstance(value, list):
+                return 0
+            return len([item for item in value if isinstance(item, str) and item.strip()])
+
+        asset_complexity_score = round(
+            (
+                _list_len("mesh_like_layers") * 12.0
+                + _list_len("silhouette_sets") * 10.0
+                + _list_len("fx_hooks") * 8.0
+                + _list_len("material_profiles") * 8.0
+            ),
+            2,
+        )
 
         try:
             upsert_registry(
@@ -217,9 +235,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "qa_reason": qa_quality_log.reason if qa_quality_log else None,
                     "failure_reasons": failure_reasons,
                     "failure_tokens": failure_tokens,
-                    "artifact_manifest": state["outputs"].get("artifact_manifest")
-                    if isinstance(state["outputs"].get("artifact_manifest"), dict)
-                    else {},
+                    "artifact_manifest": typed_artifact_manifest,
                     "metadata": {
                         "resolved_public_url": resolved_public_url,
                         "review_generation_source": review_result.meta.get("generation_source"),
@@ -227,6 +243,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                         "final_runtime_warning_codes": build_metadata.get("final_runtime_warning_codes"),
                         "final_runtime_warning_penalty": build_metadata.get("final_runtime_warning_penalty"),
                         "duplicate_runtime_signature": build_metadata.get("duplicate_runtime_signature"),
+                        "playability_score": build_metadata.get("playability_score"),
+                        "asset_complexity_score": asset_complexity_score,
+                        "substrate_id": build_metadata.get("substrate_id"),
+                        "camera_model": build_metadata.get("camera_model"),
                     },
                 }
             )

@@ -355,6 +355,30 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
     )
+    playability_hard_gate = bool(getattr(deps.vertex_service.settings, "builder_playability_hard_gate", True))
+    playability_passed = bool(production_result.metadata.get("playability_passed", True))
+    if playability_hard_gate and not playability_passed:
+        fail_reasons = production_result.metadata.get("playability_fail_reasons", [])
+        fail_tokens = [str(item).strip() for item in fail_reasons if str(item).strip()] if isinstance(fail_reasons, list) else []
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "builder_playability_unmet"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 플레이 가능성 하드게이트를 통과하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "playability_score": production_result.metadata.get("playability_score"),
+                "playability_fail_reasons": fail_tokens,
+                "playability_refinement_rounds_executed": production_result.metadata.get("playability_refinement_rounds_executed"),
+                "deliverables": ["playability_gate", "builder_refinement_report"],
+                "contract_status": "fail",
+                "contribution_score": 1.6,
+                **production_result.metadata,
+            },
+        )
     quality_floor_enforced = bool(production_result.metadata.get("quality_floor_enforced", False))
     quality_floor_passed = bool(production_result.metadata.get("quality_floor_passed", True))
     if quality_floor_enforced and not quality_floor_passed:
@@ -393,6 +417,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["artifact_html"] = build_artifact.artifact_html
     state["outputs"]["artifact_files"] = [row.model_dump() for row in build_artifact.artifact_files or []]
     state["outputs"]["artifact_manifest"] = build_artifact.artifact_manifest or {}
+    state["outputs"]["playability_score"] = production_result.metadata.get("playability_score")
+    state["outputs"]["playability_fail_reasons"] = production_result.metadata.get("playability_fail_reasons", [])
+    state["outputs"]["substrate_id"] = production_result.metadata.get("substrate_id")
+    state["outputs"]["camera_model"] = production_result.metadata.get("camera_model")
     runtime_guard = production_result.metadata.get("runtime_guard")
     if isinstance(runtime_guard, dict):
         state["outputs"]["builder_runtime_guard"] = runtime_guard

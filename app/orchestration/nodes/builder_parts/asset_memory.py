@@ -7,6 +7,7 @@ from statistics import mean
 
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.dependencies import NodeDependencies
+from app.orchestration.nodes.builder_parts.substrates import resolve_substrate_profile
 from app.schemas.pipeline import PipelineLogRecord, PipelineStage, PipelineStatus
 
 
@@ -64,8 +65,18 @@ def _tokenize_keyword(value: str) -> set[str]:
 
 
 def _row_effective_quality(row: dict[str, object]) -> float:
-    for key in ("final_composite_score", "final_quality_score", "final_gameplay_score"):
+    metadata = row.get("metadata")
+    typed_metadata = metadata if isinstance(metadata, dict) else {}
+    for key in (
+        "final_composite_score",
+        "final_quality_score",
+        "final_gameplay_score",
+        "playability_score",
+        "asset_complexity_score",
+    ):
         score = _to_float(row.get(key), -1.0)
+        if score < 0:
+            score = _to_float(typed_metadata.get(key), -1.0)
         if score >= 0:
             return score
     return 0.0
@@ -75,6 +86,7 @@ def _registry_row_score(
     *,
     row: dict[str, object],
     current_keyword_tokens: set[str],
+    current_substrate_id: str,
     rank: int,
 ) -> tuple[float, float]:
     row_keyword_tokens = _tokenize_keyword(str(row.get("keyword", "")).strip())
@@ -95,8 +107,29 @@ def _registry_row_score(
     failure_penalty = min(len(_to_str_list(row.get("failure_reasons"))) * 2.5, 12.0)
     recency_bonus = max(6.0 - (rank * 0.12), 0.0)
     overlap_bonus = keyword_overlap * 16.0
+    metadata = row.get("metadata")
+    typed_metadata = metadata if isinstance(metadata, dict) else {}
+    row_substrate_id = str(row.get("substrate_id", "")).strip() or str(typed_metadata.get("substrate_id", "")).strip()
+    substrate_bonus = 6.0 if row_substrate_id and row_substrate_id == current_substrate_id else 0.0
+    complexity_score = _to_float(row.get("asset_complexity_score"), -1.0)
+    if complexity_score < 0:
+        complexity_score = _to_float(typed_metadata.get("asset_complexity_score"), 0.0)
+    playability_score = _to_float(row.get("playability_score"), -1.0)
+    if playability_score < 0:
+        playability_score = _to_float(typed_metadata.get("playability_score"), 0.0)
+    complexity_bonus = max(0.0, min(12.0, complexity_score * 0.12))
+    playability_bonus = max(0.0, min(10.0, playability_score * 0.1))
     base_quality = _row_effective_quality(row)
-    composed_score = base_quality + qa_bonus + overlap_bonus + recency_bonus - failure_penalty
+    composed_score = (
+        base_quality
+        + qa_bonus
+        + overlap_bonus
+        + recency_bonus
+        + substrate_bonus
+        + complexity_bonus
+        + playability_bonus
+        - failure_penalty
+    )
     return max(composed_score, 0.0), keyword_overlap
 
 
@@ -117,10 +150,12 @@ def _build_context_from_registry_entries(
     failure_token_counter: Counter[str] = Counter()
     keyword_match_count = 0
 
+    substrate_id = resolve_substrate_profile(core_loop_type).substrate_id
     for index, row in enumerate(entries):
         row_score, overlap = _registry_row_score(
             row=row,
             current_keyword_tokens=current_keyword_tokens,
+            current_substrate_id=substrate_id,
             rank=index,
         )
         if overlap > 0:
@@ -163,6 +198,7 @@ def _build_context_from_registry_entries(
 
     retrieval_profile: dict[str, object] = {
         "source": "asset_registry_v1",
+        "substrate_id": substrate_id,
         "preferred_asset_pack": preferred_asset_pack,
         "preferred_variant_id": preferred_variant_id,
         "preferred_variant_theme": preferred_variant_theme,
@@ -171,7 +207,7 @@ def _build_context_from_registry_entries(
         "sample_size": len(entries),
         "keyword_match_count": keyword_match_count,
         "keyword_query_tokens": sorted(current_keyword_tokens),
-        "scoring_profile": "quality+qa_status+keyword_overlap+recency-failure_penalty",
+        "scoring_profile": "quality+qa_status+keyword_overlap+substrate+complexity+playability+recency-failure_penalty",
     }
     registry_snapshot: dict[str, object] = {
         "core_loop_type": core_loop_type,

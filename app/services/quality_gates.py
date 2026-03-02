@@ -304,6 +304,10 @@ def evaluate_artifact_contract(
     policy_provider = ""
     policy_external_generation = None
     procedural_layer_count = 0
+    mesh_layer_count = 0
+    silhouette_set_count = 0
+    fx_hook_count = 0
+    material_profile_count = 0
     asset_pipeline_present = False
     asset_pipeline_automated = False
     asset_pipeline_variant_count = 0
@@ -321,6 +325,18 @@ def evaluate_artifact_contract(
         procedural_layers = asset_manifest.get("procedural_layers")
         if isinstance(procedural_layers, list):
             procedural_layer_count = len([value for value in procedural_layers if isinstance(value, str) and value.strip()])
+        mesh_layers = asset_manifest.get("mesh_like_layers")
+        if isinstance(mesh_layers, list):
+            mesh_layer_count = len([value for value in mesh_layers if isinstance(value, str) and value.strip()])
+        silhouette_sets = asset_manifest.get("silhouette_sets")
+        if isinstance(silhouette_sets, list):
+            silhouette_set_count = len([value for value in silhouette_sets if isinstance(value, str) and value.strip()])
+        fx_hooks = asset_manifest.get("fx_hooks")
+        if isinstance(fx_hooks, list):
+            fx_hook_count = len([value for value in fx_hooks if isinstance(value, str) and value.strip()])
+        material_profiles = asset_manifest.get("material_profiles")
+        if isinstance(material_profiles, list):
+            material_profile_count = len([value for value in material_profiles if isinstance(value, str) and value.strip()])
         pipeline_meta = asset_manifest.get("asset_pipeline")
         if isinstance(pipeline_meta, dict):
             asset_pipeline_present = True
@@ -342,6 +358,10 @@ def evaluate_artifact_contract(
         ("render_layers_count", module_count >= contract_min_layers, 16),
         ("animation_hooks_count", runtime_hook_count >= contract_min_hooks, 16),
         ("procedural_layers_count", procedural_layer_count >= contract_min_procedural_layers, 12),
+        ("mesh_like_layers_count", mesh_layer_count >= 3, 10),
+        ("silhouette_sets_count", silhouette_set_count >= 3, 8),
+        ("fx_hooks_count", fx_hook_count >= 3, 8),
+        ("material_profiles_count", material_profile_count >= 3, 8),
         ("policy_mode_procedural_threejs_first", policy_mode == "procedural_threejs_first", 8),
         ("policy_provider_present", bool(policy_provider), 6),
         ("policy_external_generation_disabled", policy_external_generation is False, 6),
@@ -350,7 +370,16 @@ def evaluate_artifact_contract(
         ("asset_pipeline_variant_count", asset_pipeline_variant_count >= 2, 8),
         ("asset_pipeline_selected_variant", bool(asset_pipeline_selected_variant), 4),
         ("art_direction_contract_present", bool(art_contract), 12),
-        ("asset_density", image_assets >= 6 and procedural_layer_count >= 3 and module_count >= 4, 12),
+        (
+            "asset_density",
+            image_assets >= 6
+            and procedural_layer_count >= 3
+            and module_count >= 4
+            and mesh_layer_count >= 3
+            and silhouette_set_count >= 3
+            and fx_hook_count >= 3,
+            12,
+        ),
     ]
 
     total_weight = sum(weight for _, _, weight in checks)

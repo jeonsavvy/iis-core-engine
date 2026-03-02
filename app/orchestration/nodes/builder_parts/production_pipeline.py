@@ -10,11 +10,12 @@ from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.html_runtime_config import MODE_CONFIG_BY_LOOP
 from app.orchestration.nodes.builder_parts.mode import _candidate_composite_score, _candidate_variation_hints
+from app.orchestration.nodes.builder_parts.substrates import resolve_substrate_profile
 from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
-from app.services.quality_types import GameplayGateResult, QualityGateResult, SmokeCheckResult
+from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class _ArtifactAssessment:
     html: str
     quality: QualityGateResult
     gameplay: GameplayGateResult
+    playability: PlayabilityGateResult
     smoke: SmokeCheckResult
     visual: QualityGateResult
     builder_score: float
@@ -91,6 +93,28 @@ def _evaluate_visual_or_fallback(
         threshold=50,
         failed_checks=[] if has_metrics else ["visual_metrics_missing"],
         checks={"visual_fallback": has_metrics},
+    )
+
+
+def _evaluate_playability_gate(*, smoke: SmokeCheckResult) -> PlayabilityGateResult:
+    reason = str(smoke.reason or "").strip().casefold()
+    raw_warnings = [str(item).strip() for item in (smoke.non_fatal_warnings or []) if str(item).strip()]
+    warning_codes = _critical_runtime_warning_codes(raw_warnings)
+    fail_reasons = list(dict.fromkeys(warning_codes))
+    if reason.startswith("playwright_error"):
+        fail_reasons.append("playwright_error")
+    elif reason.startswith("qa_exception"):
+        fail_reasons.append("qa_exception")
+    elif reason == "runtime_console_error":
+        fail_reasons.append(reason)
+    if smoke.ok is False and reason and reason not in fail_reasons:
+        fail_reasons.append(reason)
+    score = max(0, 100 - (len(fail_reasons) * 18))
+    return PlayabilityGateResult(
+        ok=len(fail_reasons) == 0,
+        score=score,
+        fail_reasons=fail_reasons,
+        warning_codes=warning_codes,
     )
 
 
@@ -197,6 +221,7 @@ def _build_builder_refinement_hint(
     core_loop_type: str,
     quality: QualityGateResult,
     gameplay: GameplayGateResult,
+    playability: PlayabilityGateResult,
     visual: QualityGateResult,
     smoke: SmokeCheckResult,
 ) -> str:
@@ -211,6 +236,8 @@ def _build_builder_refinement_hint(
         parts.append(f"Quality gaps: {', '.join(quality.failed_checks[:6])}.")
     if gameplay.failed_checks:
         parts.append(f"Gameplay gaps: {', '.join(gameplay.failed_checks[:6])}.")
+    if playability.fail_reasons:
+        parts.append(f"Playability gaps: {', '.join(playability.fail_reasons[:6])}.")
     if visual.failed_checks:
         parts.append(f"Visual gaps: {', '.join(visual.failed_checks[:6])}.")
     if smoke.reason:
@@ -242,6 +269,7 @@ def _assess_artifact_quality(
         artifact_files=artifact_files,
         entrypoint_path=f"games/{slug}/index.html",
     )
+    playability = _evaluate_playability_gate(smoke=smoke)
     visual = _evaluate_visual_or_fallback(
         deps=deps,
         visual_metrics=smoke.visual_metrics,
@@ -262,6 +290,7 @@ def _assess_artifact_quality(
         html=html_content,
         quality=quality,
         gameplay=gameplay,
+        playability=playability,
         smoke=smoke,
         visual=visual,
         builder_score=score,
@@ -384,6 +413,7 @@ def build_production_artifact(
 ) -> ProductionBuildResult:
     configured_candidate_count = max(1, int(deps.vertex_service.settings.builder_candidate_count))
     candidate_count = 1
+    substrate_profile = resolve_substrate_profile(core_loop_type)
     variation_hints = _candidate_variation_hints(core_loop_type=core_loop_type, candidate_count=candidate_count)
     design_spec_dump = design_spec.model_dump()
     rebuild_feedback_hint, rebuild_feedback_tokens = _build_rebuild_feedback_hint(state)
@@ -439,6 +469,9 @@ def build_production_artifact(
         metadata={
             "iteration": state["build_iteration"],
             "core_loop_type": core_loop_type,
+            "substrate_id": substrate_profile.substrate_id,
+            "camera_model": substrate_profile.camera_model,
+            "interaction_model": substrate_profile.interaction_model,
             "asset_pack": asset_pack["name"],
             "configured_candidate_count": configured_candidate_count,
             "candidate_count": candidate_count,
@@ -583,6 +616,9 @@ def build_production_artifact(
             "quality_score": candidate_assessment.quality.score,
             "gameplay_ok": candidate_assessment.gameplay.ok,
             "gameplay_score": candidate_assessment.gameplay.score,
+            "playability_ok": candidate_assessment.playability.ok,
+            "playability_score": candidate_assessment.playability.score,
+            "playability_fail_reasons": candidate_assessment.playability.fail_reasons,
             "visual_ok": candidate_assessment.visual.ok,
             "visual_score": candidate_assessment.visual.score,
             "smoke_ok": candidate_assessment.smoke.ok,
@@ -609,6 +645,8 @@ def build_production_artifact(
                 "candidate_index": index,
                 "quality_score": candidate_assessment.quality.score,
                 "gameplay_score": candidate_assessment.gameplay.score,
+                "playability_score": candidate_assessment.playability.score,
+                "playability_fail_reasons": candidate_assessment.playability.fail_reasons,
                 "visual_score": candidate_assessment.visual.score,
                 "smoke_ok": candidate_assessment.smoke.ok,
                 "builder_quality_score": candidate_assessment.builder_score,
@@ -628,6 +666,7 @@ def build_production_artifact(
     best_candidate = max(
         candidate_rows,
         key=lambda row: (
+            int(row.get("playability_score", 0)),
             float(row.get("builder_quality_score", 0.0)),
             float(row["composite_score"]),
             int(row["gameplay_score"]),
@@ -708,6 +747,9 @@ def build_production_artifact(
                 "non_fatal_warnings": assessment.smoke.non_fatal_warnings or [],
                 "quality_score": assessment.quality.score,
                 "gameplay_score": assessment.gameplay.score,
+                "playability_score": assessment.playability.score,
+                "playability_ok": assessment.playability.ok,
+                "playability_fail_reasons": assessment.playability.fail_reasons,
                 "visual_score": assessment.visual.score,
                 "builder_quality_score": assessment.builder_score,
                 "placeholder_heavy": assessment.placeholder_heavy,
@@ -750,6 +792,7 @@ def build_production_artifact(
                 core_loop_type=core_loop_type,
                 quality=preferred_assessment.quality,
                 gameplay=preferred_assessment.gameplay,
+                playability=preferred_assessment.playability,
                 visual=preferred_assessment.visual,
                 smoke=preferred_assessment.smoke,
             )
@@ -782,6 +825,8 @@ def build_production_artifact(
                     "promoted": promoted,
                     "quality_score": refined_assessment.quality.score,
                     "gameplay_score": refined_assessment.gameplay.score,
+                    "playability_score": refined_assessment.playability.score,
+                    "playability_fail_reasons": refined_assessment.playability.fail_reasons,
                     "visual_score": refined_assessment.visual.score,
                     "builder_quality_score": refined_assessment.builder_score,
                     "placeholder_heavy": refined_assessment.placeholder_heavy,
@@ -803,9 +848,77 @@ def build_production_artifact(
                 if preferred_assessment.builder_score >= refinement_target_score:
                     break
 
+    playability_refinement_round_limit = _coerce_int(
+        getattr(deps.vertex_service.settings, "builder_playability_refinement_rounds", 2),
+        fallback=2,
+    )
+    playability_refinement_round_limit = max(0, min(playability_refinement_round_limit, 4))
+    playability_refinement_rounds_executed = 0
+    if preferred_assessment.smoke.ok and not preferred_assessment.playability.ok:
+        for round_index in range(1, playability_refinement_round_limit + 1):
+            playability_refinement_rounds_executed += 1
+            remediation_hint = (
+                "Resolve runtime playability blockers before release: "
+                + ", ".join(preferred_assessment.playability.fail_reasons[:8])
+                + ". Keep instant interactive state, remove startup game-over overlay, and avoid overflow scroll layouts."
+            )
+            remediation_result = deps.vertex_service.generate_codegen_candidate_artifact(
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                objective=gdd.objective,
+                core_loop_type=core_loop_type,
+                variation_hint=remediation_hint,
+                design_spec=design_spec_dump,
+                asset_pack=asset_pack,
+                html_content=preferred_assessment.html,
+            )
+            remediated_html = str(remediation_result.payload.get("artifact_html", "")).strip() or preferred_assessment.html
+            remediated_assessment = _assess_artifact_quality(
+                deps=deps,
+                html_content=remediated_html,
+                design_spec=design_spec_dump,
+                genre=genre,
+                core_loop_type=core_loop_type,
+                keyword=state["keyword"],
+                artifact_files=asset_bank_files,
+                slug=slug,
+            )
+            promoted = remediated_assessment.smoke.ok and (
+                remediated_assessment.playability.score > preferred_assessment.playability.score
+                or (remediated_assessment.playability.ok and not preferred_assessment.playability.ok)
+            )
+            runtime_guard_result["refinement"].append(
+                {
+                    "round": f"playability_{round_index}",
+                    "promoted": promoted,
+                    "playability_score": remediated_assessment.playability.score,
+                    "playability_fail_reasons": remediated_assessment.playability.fail_reasons,
+                    "quality_score": remediated_assessment.quality.score,
+                    "gameplay_score": remediated_assessment.gameplay.score,
+                    "visual_score": remediated_assessment.visual.score,
+                    "builder_quality_score": remediated_assessment.builder_score,
+                    "smoke_ok": remediated_assessment.smoke.ok,
+                    "smoke_reason": remediated_assessment.smoke.reason,
+                    "generation_source": remediation_result.meta.get("generation_source", "stub"),
+                    "model": remediation_result.meta.get("model"),
+                    "reason": remediation_result.meta.get("reason"),
+                }
+            )
+            if promoted:
+                preferred_assessment = remediated_assessment
+                preferred_label = f"playability_refined_{round_index}"
+                runtime_guard_result["chosen"] = preferred_label
+                runtime_guard_result["reason"] = remediated_assessment.smoke.reason
+            if preferred_assessment.playability.ok:
+                break
+
     artifact_html = preferred_assessment.html
     final_quality_score = preferred_assessment.quality.score
     final_gameplay_score = preferred_assessment.gameplay.score
+    final_playability_score = preferred_assessment.playability.score
+    final_playability_passed = preferred_assessment.playability.ok
+    final_playability_fail_reasons = list(preferred_assessment.playability.fail_reasons)
     final_visual_score = preferred_assessment.visual.score
     final_builder_quality_score = preferred_assessment.builder_score
     final_placeholder_heavy = preferred_assessment.placeholder_heavy
@@ -827,6 +940,9 @@ def build_production_artifact(
             "index": int(row["index"]),
             "quality_score": int(row["quality_score"]),
             "gameplay_score": int(row["gameplay_score"]),
+            "playability_ok": bool(row.get("playability_ok")),
+            "playability_score": int(row.get("playability_score", 0)),
+            "playability_fail_reasons": [str(item) for item in row.get("playability_fail_reasons", []) if str(item).strip()],
             "visual_score": int(row.get("visual_score", 0)),
             "smoke_ok": bool(row.get("smoke_ok")),
             "smoke_reason": row.get("smoke_reason"),
@@ -863,6 +979,9 @@ def build_production_artifact(
         quality_floor_fail_reasons.append("placeholder_visual_detected")
     if final_runtime_warning_codes:
         quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
+    if not final_playability_passed:
+        quality_floor_fail_reasons.append("builder_playability_unmet")
+        quality_floor_fail_reasons.extend(final_playability_fail_reasons)
 
     runtime_structure_signature = _runtime_structure_signature(html_content=artifact_html)
     runtime_signature_guard_enabled = bool(
@@ -894,6 +1013,7 @@ def build_production_artifact(
                 break
     if duplicate_runtime_signature:
         quality_floor_fail_reasons.append("runtime_structure_duplicate")
+    quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
 
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
 
@@ -985,6 +1105,9 @@ def build_production_artifact(
         "selected_candidate_score": selected_composite,
         "final_quality_score": final_quality_score,
         "final_gameplay_score": final_gameplay_score,
+        "playability_score": final_playability_score,
+        "playability_passed": final_playability_passed,
+        "playability_fail_reasons": final_playability_fail_reasons,
         "final_visual_score": final_visual_score,
         "final_builder_quality_score": final_builder_quality_score,
         "final_placeholder_heavy": final_placeholder_heavy,
@@ -1012,11 +1135,16 @@ def build_production_artifact(
         "refinement_target_score": refinement_target_score,
         "refinement_round_limit": refinement_round_limit,
         "refinement_rounds_executed": refinement_rounds_executed,
+        "playability_refinement_round_limit": playability_refinement_round_limit,
+        "playability_refinement_rounds_executed": playability_refinement_rounds_executed,
         "polish_generation_source": polish_result.meta.get("generation_source", "stub"),
         "polish_model": polish_result.meta.get("model"),
         "polish_reason": polish_result.meta.get("reason"),
         "runtime_guard": runtime_guard_result,
         "candidate_scoreboard": candidate_scoreboard,
+        "substrate_id": substrate_profile.substrate_id,
+        "camera_model": substrate_profile.camera_model,
+        "interaction_model": substrate_profile.interaction_model,
     }
     return ProductionBuildResult(
         build_artifact=build_artifact,

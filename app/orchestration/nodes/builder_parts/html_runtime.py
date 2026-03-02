@@ -5,6 +5,7 @@ from typing import Any
 from app.orchestration.nodes.builder_parts.html_runtime_balance import build_runtime_balance_block_js
 from app.orchestration.nodes.builder_parts.html_runtime_config import build_runtime_config_json, resolve_mode_config
 from app.orchestration.nodes.builder_parts.html_runtime_progression import build_progression_block_js
+from app.orchestration.nodes.builder_parts.substrates import resolve_substrate_profile
 from app.orchestration.nodes.builder_parts.html_runtime_sections import (
     build_runtime_hud_functions_js,
     build_runtime_progression_functions_js,
@@ -36,6 +37,7 @@ def _build_hybrid_engine_html(
     asset_manifest: dict[str, object] | None = None,
 ) -> str:
     mode_config = resolve_mode_config(core_loop_type)
+    substrate_profile = resolve_substrate_profile(core_loop_type)
     config_json = build_runtime_config_json(
         title=title,
         genre=genre,
@@ -105,6 +107,13 @@ def _build_hybrid_engine_html(
       const MODE_USES_WEBGL_BG = CONFIG.mode === "webgl_three_runner" || MODE_IS_FORMULA_CIRCUIT || MODE_IS_FLIGHT_SIM;
       const MODE_IS_SHOOTER = CONFIG.mode === "arena_shooter" || CONFIG.mode === "topdown_roguelike_shooter";
       const MODE_IS_BRAWLER = CONFIG.mode === "duel_brawler" || CONFIG.mode === "comic_action_brawler_3d";
+      const SUBSTRATE = {{
+        id: "{substrate_profile.substrate_id}",
+        cameraModel: "{substrate_profile.camera_model}",
+        interactionModel: "{substrate_profile.interaction_model}",
+        renderBias: "{substrate_profile.render_bias}",
+        objectiveHint: "{substrate_profile.objective_hint}",
+      }};
 {runtime_balance_js}
 {runtime_progression_js}
       const canvas = document.getElementById("game");
@@ -125,9 +134,16 @@ def _build_hybrid_engine_html(
       const state = {{
         running: true,
         score: 0,
-        hp: CONFIG.player_hp || 3,
-        timeLeft: CONFIG.time_limit_sec || 60,
+        hp: Math.max(1, Number(CONFIG.player_hp || 3)),
+        timeLeft: Math.max(12, Number(CONFIG.time_limit_sec || 60)),
+        runtimeSec: 0,
         lastTime: 0,
+        substrate: SUBSTRATE,
+        engagement: {{
+          inputActivated: false,
+          firstInteractionAt: 0,
+          guardSeconds: 2.8,
+        }},
         player: {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }},
         enemies: [],
         bullets: [],
@@ -200,10 +216,15 @@ def _build_hybrid_engine_html(
           checkpointCombo: 0,
         }},
       }};
+      window.__iis_game_substrate = SUBSTRATE;
 
       document.addEventListener("keydown", (e) => {{
         ensureAudio();
         keys.add(e.key);
+        if (!state.engagement.inputActivated) {{
+          state.engagement.inputActivated = true;
+          state.engagement.firstInteractionAt = state.runtimeSec;
+        }}
         if (!state.running && (e.key === "r" || e.key === "R")) restartGame();
         if (MODE_IS_SHOOTER && e.code === "Space") {{
           e.preventDefault();
@@ -215,14 +236,26 @@ def _build_hybrid_engine_html(
         }}
       }});
       document.addEventListener("keyup", (e) => keys.delete(e.key));
+      document.addEventListener("pointerdown", () => {{
+        if (!state.engagement.inputActivated) {{
+          state.engagement.inputActivated = true;
+          state.engagement.firstInteractionAt = state.runtimeSec;
+        }}
+      }}, {{ passive: true }});
       document.getElementById("restart-btn").addEventListener("click", restartGame);
 
       function resetState() {{
         state.running = true;
         state.score = 0;
-        state.hp = CONFIG.player_hp || 3;
-        state.timeLeft = CONFIG.time_limit_sec || 60;
+        state.hp = Math.max(1, Number(CONFIG.player_hp || 3));
+        state.timeLeft = Math.max(12, Number(CONFIG.time_limit_sec || 60));
+        state.runtimeSec = 0;
         state.lastTime = 0;
+        state.engagement = {{
+          inputActivated: false,
+          firstInteractionAt: 0,
+          guardSeconds: 2.8,
+        }};
         state.player = {{ x: canvas.width * 0.5, y: canvas.height * 0.8, w: 36, h: 56, vx: 0, vy: 0, lane: 1 }};
         state.enemies = [];
         state.bullets = [];
@@ -293,6 +326,7 @@ def _build_hybrid_engine_html(
           checkpointCombo: 0,
         }};
         overlay.classList.remove("show");
+        overlayText.textContent = `준비 완료 · ${{SUBSTRATE.objectiveHint}}`;
         updateHud();
       }}
 

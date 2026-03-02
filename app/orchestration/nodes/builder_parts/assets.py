@@ -710,10 +710,39 @@ def _build_hybrid_asset_bank(
         }
         for filename, content in svg_map.items()
     ]
+    if core_loop_type in {"f1_formula_circuit_3d", "webgl_three_runner", "lane_dodge_racer"}:
+        mesh_like_layers = ["track_lane_mesh", "vehicle_shell_mesh", "checkpoint_mesh"]
+        silhouette_sets = ["car_player", "opponent_pack", "track_props"]
+        fx_hooks = ["boost_trail", "impact_flare", "speed_lines", "checkpoint_burst"]
+        material_profiles = ["asphalt_spec", "neon_clearcoat", "glass_tint"]
+    elif core_loop_type == "flight_sim_3d":
+        mesh_like_layers = ["cockpit_mesh", "airframe_mesh", "air_route_mesh"]
+        silhouette_sets = ["jet_player", "hazard_pack", "ring_targets"]
+        fx_hooks = ["afterburner_trail", "wing_vapor", "altitude_haze", "checkpoint_burst"]
+        material_profiles = ["anodized_metal", "sky_fog", "signal_glow"]
+    elif core_loop_type in {"comic_action_brawler_3d", "duel_brawler"}:
+        mesh_like_layers = ["arena_floor_mesh", "fighter_rig_mesh", "crowd_prop_mesh"]
+        silhouette_sets = ["fighter_player", "fighter_enemy", "combo_fx"]
+        fx_hooks = ["hit_spark", "combo_flash", "counter_ring", "knockback_trail"]
+        material_profiles = ["toon_diffuse", "rim_light", "impact_emissive"]
+    elif core_loop_type == "arena_shooter":
+        mesh_like_layers = ["arena_blockout_mesh", "weapon_core_mesh", "enemy_rig_mesh"]
+        silhouette_sets = ["player_fps", "enemy_wave_pack", "projectile_pack"]
+        fx_hooks = ["muzzle_flash", "hit_marker", "damage_vignette", "impact_debris"]
+        material_profiles = ["rough_metal", "energy_emissive", "depth_fog"]
+    else:
+        mesh_like_layers = ["terrain_mesh", "character_mesh", "interaction_mesh"]
+        silhouette_sets = ["player_core", "enemy_core", "pickup_core"]
+        fx_hooks = ["spawn_flash", "impact_flare", "trail_core", "levelup_pulse"]
+        material_profiles = ["base_diffuse", "accent_emissive", "ambient_fog"]
     asset_manifest: dict[str, object] = {
         "schema_version": 1,
         "pack_name": str(asset_pack.get("name", "hybrid-asset-pack")),
         "genre_engine": core_loop_type,
+        "mesh_like_layers": mesh_like_layers,
+        "silhouette_sets": silhouette_sets,
+        "fx_hooks": fx_hooks,
+        "material_profiles": material_profiles,
         "images": {key: f"./{filename}" for key, filename in image_keys.items()},
         "audio": {"profile": str(asset_pack.get("sfx_profile", "synth"))},
         "asset_policy": {

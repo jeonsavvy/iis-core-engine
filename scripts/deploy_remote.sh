@@ -8,6 +8,7 @@ WORKER_SERVICE="${WORKER_SERVICE:-iis-core-worker.service}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8000/healthz}"
 HEALTHCHECK_RETRIES="${HEALTHCHECK_RETRIES:-20}"
 HEALTHCHECK_RETRY_DELAY="${HEALTHCHECK_RETRY_DELAY:-2}"
+PIPELINE_SCHEMA_EXPECTED="${PIPELINE_SCHEMA_EXPECTED:-v2}"
 
 resolve_python_bin() {
   if [[ -n "${PYTHON_BIN:-}" ]]; then
@@ -61,6 +62,40 @@ run_healthcheck() {
     "${HEALTHCHECK_URL}" >/dev/null
 }
 
+ensure_git_writable() {
+  if [[ -w ".git" && -w ".git/refs" ]]; then
+    return
+  fi
+  echo "Repairing .git ownership/permissions for deploy user"
+  sudo chown -R "$(id -u):$(id -g)" .git
+  sudo find .git -type d -exec chmod u+rwx {} \;
+  sudo find .git -type f -exec chmod u+rw {} \;
+}
+
+verify_health_signature() {
+  local expected_sha="$1"
+  local raw
+  raw="$(curl --fail --silent --show-error --max-time 10 "${HEALTHCHECK_URL}")"
+  HEALTH_JSON="${raw}" EXPECTED_SHA="${expected_sha}" EXPECTED_SCHEMA="${PIPELINE_SCHEMA_EXPECTED}" "${PY_BIN}" - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["HEALTH_JSON"])
+expected_sha = os.environ["EXPECTED_SHA"].strip().lower()
+expected_schema = os.environ["EXPECTED_SCHEMA"].strip()
+actual_sha = str(payload.get("git_sha", "")).strip().lower()
+actual_schema = str(payload.get("pipeline_schema_version", "")).strip()
+
+if not actual_sha:
+    raise SystemExit("health_missing_git_sha")
+if expected_sha and not actual_sha.startswith(expected_sha):
+    raise SystemExit(f"health_sha_mismatch expected={expected_sha} actual={actual_sha}")
+if expected_schema and actual_schema != expected_schema:
+    raise SystemExit(f"health_schema_mismatch expected={expected_schema} actual={actual_schema}")
+PY
+}
+
 PY_BIN="$(resolve_python_bin)"
 VENV_DIR="$(resolve_venv_dir)"
 
@@ -79,6 +114,8 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "APP_DIR is not a git repository: ${APP_DIR}"
   exit 1
 fi
+
+ensure_git_writable
 
 if ! git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
   git checkout -b "${BRANCH}" "origin/${BRANCH}"
@@ -115,5 +152,8 @@ if ! run_healthcheck; then
   echo "Rollback completed."
   exit 1
 fi
+
+EXPECTED_SHA_SHORT="$(echo "${TARGET_COMMIT}" | cut -c1-12)"
+verify_health_signature "${EXPECTED_SHA_SHORT}"
 
 echo "Deployment completed: ${TARGET_COMMIT}"

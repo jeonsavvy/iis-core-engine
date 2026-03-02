@@ -33,10 +33,17 @@ class GameplayGateResult:
 
 
 @dataclass
+class PlayabilityGateResult:
+    ok: bool
+    score: int
+    fail_reasons: list[str]
+    warning_codes: list[str]
+
+
+@dataclass
 class ArtifactContractResult:
     ok: bool
     score: int
     threshold: int
     failed_checks: list[str]
     checks: dict[str, bool]
-

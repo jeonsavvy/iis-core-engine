@@ -243,6 +243,7 @@ def build_runtime_spawn_combat_functions_js() -> str:
 def build_runtime_update_function_js() -> str:
     return _normalize_escaped_braces(r"""      function update(dt) {{
         if (!state.running) return;
+        state.runtimeSec += dt;
         state.timeLeft = Math.max(0, state.timeLeft - dt);
         state.spawnTimer += dt;
         state.attackCooldown = Math.max(0, state.attackCooldown - dt);
@@ -718,7 +719,11 @@ def build_runtime_update_function_js() -> str:
         }}
         state.particles = state.particles.filter((p) => p.t < p.life);
 
-        if (state.timeLeft <= 0 || state.hp <= 0) {{
+        const engagementUnlocked = state.engagement.inputActivated || state.runtimeSec >= Number(state.engagement.guardSeconds || 2.8);
+        if (!engagementUnlocked && state.hp <= 0) {{
+          state.hp = 1;
+        }}
+        if (engagementUnlocked && (state.timeLeft <= 0 || state.hp <= 0)) {{
           endGame();
         }}
         updateHud();
