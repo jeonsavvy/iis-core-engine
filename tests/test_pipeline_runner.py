@@ -114,6 +114,123 @@ class FakeGitHubArchiveService:
         return {"status": "committed"}
 
 
+class FakeVertexService:
+    def __init__(self, *, quality_floor_enforced: bool = True) -> None:
+        self.settings = SimpleNamespace(
+            builder_scope_guard_enabled=False,
+            builder_asset_memory_enabled=False,
+            builder_quality_floor_enforced=quality_floor_enforced,
+            builder_quality_floor_score=82,
+            builder_playability_hard_gate=True,
+            builder_codegen_enabled=True,
+            builder_codegen_passes=1,
+            generation_engine_version="scaffold_v3",
+        )
+
+    def generate_analyze_contract(self, *, keyword: str):
+        return SimpleNamespace(
+            payload={
+                "intent": f"{keyword} intent",
+                "scope_in": ["browser runtime", "artifact"],
+                "scope_out": ["native app"],
+                "hard_constraints": ["boot flag"],
+                "forbidden_patterns": ["placeholder only"],
+                "success_outcome": "playable build",
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    def generate_gdd_bundle(self, keyword: str):
+        return SimpleNamespace(
+            payload={
+                "research_summary": {"intent": keyword, "references": ["ref-a", "ref-b", "ref-c"]},
+                "gdd": {
+                    "title": f"{keyword.title()} Infinite",
+                    "genre": "arcade",
+                    "objective": "survive",
+                    "visual_style": "neon",
+                },
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    def generate_plan_contract(self, *, keyword: str, gdd: dict[str, Any], research_summary: dict[str, Any] | None = None):
+        _ = keyword, gdd, research_summary
+        return SimpleNamespace(
+            payload={
+                "core_mechanics": ["movement", "attack"],
+                "progression_plan": ["intro", "mid", "late"],
+                "encounter_plan": ["wave-a", "wave-b"],
+                "risk_reward_plan": ["safe", "risky"],
+                "control_model": "keyboard",
+                "balance_baseline": {"base_hp": 3, "spawn_rate": 1.0},
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    def generate_design_spec(self, *, keyword: str, visual_style: str, genre: str):
+        _ = keyword, visual_style, genre
+        return SimpleNamespace(
+            payload={
+                "visual_style": "neon",
+                "palette": ["#22C55E", "#111827", "#60A5FA", "#F43F5E"],
+                "hud": "score/time/hp",
+                "viewport_width": 1280,
+                "viewport_height": 720,
+                "safe_area_padding": 24,
+                "min_font_size_px": 14,
+                "text_overflow_policy": "ellipsis-clamp",
+                "typography": "inter",
+                "thumbnail_concept": "dynamic",
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    def generate_design_contract(self, *, keyword: str, genre: str, visual_style: str, design_spec: dict[str, Any]):
+        _ = keyword, genre, visual_style, design_spec
+        return SimpleNamespace(
+            payload={
+                "camera_ui_contract": ["stable camera"],
+                "asset_blueprint_2d3d": ["player", "enemy", "fx", "bg"],
+                "scene_layers": ["fg", "mg", "bg"],
+                "feedback_fx_contract": ["hit", "danger"],
+                "readability_contract": ["contrast"],
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    def generate_codegen_candidate_artifact(self, *, html_content: str, **_kwargs):
+        return SimpleNamespace(
+            payload={
+                "artifact_html": (
+                    f"{html_content}\\n"
+                    "<script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script>"
+                )
+            },
+            meta={"generation_source": "vertex", "model": "fake-pro"},
+        )
+
+    def generate_marketing_copy(self, *, keyword: str, slug: str, genre: str, game_name: str | None = None):
+        _ = keyword, slug, genre, game_name
+        return SimpleNamespace(payload={"marketing_copy": "demo copy"}, meta={"generation_source": "vertex"})
+
+    def generate_grounded_ai_review(
+        self,
+        *,
+        keyword: str,
+        game_name: str,
+        genre: str,
+        objective: str,
+        evidence: dict[str, Any],
+    ):
+        _ = keyword, game_name, genre, objective, evidence
+        return SimpleNamespace(payload={"ai_review": "grounded review"}, meta={"generation_source": "vertex"})
+
+    def generate_ai_review(self, *, keyword: str, game_name: str, genre: str, objective: str):
+        _ = keyword, game_name, genre, objective
+        return SimpleNamespace(payload={"ai_review": "review"}, meta={"generation_source": "vertex"})
+
+
 def _make_runner(repository: PipelineRepository) -> PipelineRunner:
     settings = Settings(telegram_bot_token="")
     return PipelineRunner(
@@ -122,6 +239,7 @@ def _make_runner(repository: PipelineRepository) -> PipelineRunner:
         quality_service=cast(Any, FakeQualityService()),
         publisher_service=cast(Any, FakePublisherService()),
         github_archive_service=cast(Any, FakeGitHubArchiveService()),
+        vertex_service=cast(Any, FakeVertexService()),
     )
 
 
@@ -133,6 +251,7 @@ def _make_runner_with_quality(repository: PipelineRepository, quality_service: A
         quality_service=cast(Any, quality_service),
         publisher_service=cast(Any, FakePublisherService()),
         github_archive_service=cast(Any, FakeGitHubArchiveService()),
+        vertex_service=cast(Any, FakeVertexService(quality_floor_enforced=False)),
     )
 
 
@@ -162,7 +281,7 @@ def test_pipeline_runner_success_flow_contains_style_and_publish() -> None:
     assert usage_summary.get("game_slug")
 
 
-def test_pipeline_runner_forced_runtime_soft_fail_still_completes() -> None:
+def test_pipeline_runner_forced_runtime_fail_blocks_pipeline() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="retry test", qa_fail_until=3))
     queued_job = repository.claim_next_queued_pipeline()
@@ -174,16 +293,16 @@ def test_pipeline_runner_forced_runtime_soft_fail_still_completes() -> None:
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
-    assert final_job.status == PipelineStatus.SUCCESS
-    assert final_job.error_reason is None
+    assert final_job.status == PipelineStatus.ERROR
+    assert final_job.error_reason == "runtime_smoke_failed"
 
     logs = repository.list_logs(job.pipeline_id)
     qa_runtime_logs = [log for log in logs if log.stage.value == "qa_runtime"]
     assert qa_runtime_logs
-    assert any(log.reason == "soft_fail" for log in qa_runtime_logs)
+    assert any(log.status == PipelineStatus.ERROR for log in qa_runtime_logs)
 
 
-def test_pipeline_runner_quality_gate_soft_fails_but_pipeline_succeeds() -> None:
+def test_pipeline_runner_quality_gate_failure_blocks_pipeline() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="quality check", qa_fail_until=0))
     queued_job = repository.claim_next_queued_pipeline()
@@ -195,15 +314,16 @@ def test_pipeline_runner_quality_gate_soft_fails_but_pipeline_succeeds() -> None
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
-    assert final_job.status == PipelineStatus.SUCCESS
+    assert final_job.status == PipelineStatus.ERROR
+    assert final_job.error_reason == "qa_quality_gate_failed"
 
     logs = repository.list_logs(job.pipeline_id)
     qa_quality_logs = [log for log in logs if log.stage == PipelineStage.QA_QUALITY]
     assert qa_quality_logs
-    assert any(log.reason == "soft_fail" for log in qa_quality_logs)
+    assert any(log.status == PipelineStatus.ERROR for log in qa_quality_logs)
 
 
-def test_pipeline_runner_quality_gate_hard_gate_flag_does_not_block_release() -> None:
+def test_pipeline_runner_quality_gate_always_blocks_release() -> None:
     repository = PipelineRepository()
     job = repository.create_pipeline(TriggerRequest(keyword="quality hard gate", qa_fail_until=0))
     queued_job = repository.claim_next_queued_pipeline()
@@ -215,5 +335,5 @@ def test_pipeline_runner_quality_gate_hard_gate_flag_does_not_block_release() ->
 
     final_job = repository.get_pipeline(job.pipeline_id)
     assert final_job is not None
-    assert final_job.status == PipelineStatus.SUCCESS
-    assert final_job.error_reason is None
+    assert final_job.status == PipelineStatus.ERROR
+    assert final_job.error_reason == "qa_quality_gate_failed"

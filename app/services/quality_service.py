@@ -172,11 +172,17 @@ class QualityService:
         html_content: str,
         *,
         design_spec: dict[str, Any] | None = None,
+        genre: str | None = None,
+        genre_engine: str | None = None,
+        keyword: str | None = None,
     ) -> QualityGateResult:
         return evaluate_quality_contract_gate(
             self.settings,
             html_content,
             design_spec=design_spec,
+            genre=genre,
+            genre_engine=genre_engine,
+            keyword=keyword,
         )
 
     def evaluate_gameplay_gate(

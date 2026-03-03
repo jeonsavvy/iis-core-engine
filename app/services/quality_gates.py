@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
+from app.orchestration.nodes.builder_parts.genre_engine import get_genre_quality_floor, resolve_genre_engine
 from app.core.config import Settings
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult
 
@@ -10,6 +11,9 @@ def evaluate_quality_contract(
     html_content: str,
     *,
     design_spec: dict[str, Any] | None = None,
+    genre: str | None = None,
+    genre_engine: str | None = None,
+    keyword: str | None = None,
 ) -> QualityGateResult:
     spec = design_spec or {}
 
@@ -57,20 +61,66 @@ def evaluate_quality_contract(
     if not has_threejs and not has_webgl:
         hard_failures.append("no_3d_rendering_engine")
 
+    resolved_genre = resolve_genre_engine(
+        genre_engine or genre or "",
+        keyword=keyword or "",
+    )
+    genre_floor = get_genre_quality_floor(resolved_genre)
+    min_fn_count = int(genre_floor.get("min_functions", 15) or 15)
+    min_line_count = int(genre_floor.get("min_lines", 800) or 800)
+    min_shader_count = int(genre_floor.get("min_shaders", 1) or 1)
+    min_state_count = int(genre_floor.get("min_states", 2) or 2)
+
     # --- Quality Floor: minimum code complexity ---
     import re as _re
     function_count = len(_re.findall(r"\bfunction\s+\w+\s*\(", html_content))
     arrow_fn_count = len(_re.findall(r"\b(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>", html_content))
     total_fn_count = function_count + arrow_fn_count
     line_count = html_content.count("\n") + 1
-    if total_fn_count < 15:
+    if total_fn_count < min_fn_count:
         hard_failures.append("code_complexity_too_low_fn_count")
-    if line_count < 800:
+    if line_count < min_line_count:
         hard_failures.append("code_complexity_too_low_line_count")
 
-    # --- Quality Floor: shader presence (soft signal, warns but doesn't block) ---
-    has_shader = "fragmentshader" in lowered or "vertexshader" in lowered or "glsl" in lowered
+    shader_token_count = sum(
+        lowered.count(token)
+        for token in (
+            "fragmentshader",
+            "vertexshader",
+            "shadermaterial",
+            "glsl",
+            "gl_position",
+            "gl_fragcolor",
+        )
+    )
+    if shader_token_count < min_shader_count:
+        hard_failures.append("shader_complexity_too_low")
+
+    state_token_count = sum(
+        lowered.count(token)
+        for token in (
+            "state.",
+            "gamestate",
+            "switch(state",
+            "state_machine",
+            "mode ===",
+            "mode===",
+            "running",
+            "restart",
+            "game over",
+            "overlay",
+        )
+    )
+    if state_token_count < min_state_count:
+        hard_failures.append("state_machine_complexity_too_low")
+
+    # --- Quality Floor: shader presence (signal) ---
+    has_shader = shader_token_count > 0
     check_map["has_custom_shader"] = has_shader
+    check_map["quality_floor_min_functions"] = total_fn_count >= min_fn_count
+    check_map["quality_floor_min_lines"] = line_count >= min_line_count
+    check_map["quality_floor_min_shaders"] = shader_token_count >= min_shader_count
+    check_map["quality_floor_min_states"] = state_token_count >= min_state_count
 
     if hard_failures:
         failed_checks.extend(hard_failures)

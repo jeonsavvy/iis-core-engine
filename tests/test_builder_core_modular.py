@@ -47,7 +47,6 @@ class _QualityService:
 class _VertexServiceWithCodegen:
     def __init__(self) -> None:
         self.settings = SimpleNamespace(
-            gen_core_mode="modular",
             rqc_version="rqc-1",
             builder_codegen_enabled=True,
             builder_codegen_passes=1,
@@ -194,14 +193,10 @@ def test_build_modular_artifact_uses_readable_objective_and_hides_slug_like_genr
     assert result.selfcheck_result["checks"]["subtitle_no_slug_noise"] is True
 
 
-def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
+def test_build_production_artifact_uses_scaffold_single_pass_engine() -> None:
+    vertex_service = _VertexServiceWithCodegen()
     deps = SimpleNamespace(
-        vertex_service=SimpleNamespace(
-            settings=SimpleNamespace(
-                gen_core_mode="modular",
-                rqc_version="rqc-1",
-            )
-        ),
+        vertex_service=vertex_service,
         quality_service=_QualityService(),
     )
     result = build_production_artifact(
@@ -227,15 +222,15 @@ def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
         asset_bank_files=[],
         runtime_asset_manifest={},
     )
-    assert result.metadata["builder_strategy"] == "builder_core_modular_v1"
-    assert result.metadata["rebuild_source"] == "builder_core"
-    assert result.metadata["rqc_passed"] is True
-    assert result.metadata["module_signature"]
+    assert result.metadata["builder_strategy"] == "scaffold_first_codegen_v3"
+    assert result.metadata["generation_engine_version"] == "scaffold_v3"
+    assert result.metadata["effective_codegen_passes_per_candidate"] == 1
+    assert vertex_service.calls == 1
     assert result.build_artifact.artifact_manifest is not None
-    assert result.build_artifact.artifact_manifest["bundle_kind"] in {"modular_builder_core", "hybrid_engine"}
+    assert result.build_artifact.artifact_manifest["bundle_kind"] in {"hybrid_engine"}
 
 
-def test_build_production_artifact_applies_modular_codegen_refinement() -> None:
+def test_build_production_artifact_runs_single_codegen_pass() -> None:
     vertex_service = _VertexServiceWithCodegen()
     deps = SimpleNamespace(
         vertex_service=vertex_service,
@@ -265,6 +260,6 @@ def test_build_production_artifact_applies_modular_codegen_refinement() -> None:
         runtime_asset_manifest={},
     )
     assert vertex_service.calls == 1
-    assert result.metadata["modular_codegen_passes"] == 1
+    assert result.metadata["effective_codegen_passes_per_candidate"] == 1
     assert result.selected_generation_meta["generation_source"] == "vertex"
     assert "<!-- codegen-refined -->" in result.build_artifact.artifact_html

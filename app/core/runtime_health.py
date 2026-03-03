@@ -64,7 +64,7 @@ def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
         "git_sha": resolve_git_sha(),
         "pipeline_schema_version": PIPELINE_SCHEMA_VERSION,
         "pipeline_agent_enum_signature": pipeline_agent_enum_signature(),
-        "gen_core_mode": resolved.gen_core_mode,
+        "generation_engine_version": resolved.generation_engine_version,
         "rqc_version": resolved.rqc_version,
         "module_signature": default_module_signature(),
         "builder_codegen_enabled": "true" if resolved.builder_codegen_enabled else "false",

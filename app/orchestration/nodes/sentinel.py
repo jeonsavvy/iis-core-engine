@@ -35,19 +35,21 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     # deterministic forced failures for controlled retry testing
     if state["qa_attempt"] <= state["fail_qa_until"]:
         state["needs_rebuild"] = False
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "runtime_smoke_failed"
         return append_log(
             state,
             stage=PipelineStage.QA_RUNTIME,
-            status=PipelineStatus.SUCCESS,
+            status=PipelineStatus.ERROR,
             agent_name=PipelineAgentName.QA_RUNTIME,
-            message="Runtime QA forced soft-fail for simulation.",
-            reason="soft_fail",
+            message="Runtime QA forced fail for simulation.",
+            reason=state["reason"],
             metadata={
                 "attempt": state["qa_attempt"],
-                "soft_fail": True,
-                "deliverables": ["runtime_smoke_probe", "qa_improvement_queue_item"],
-                "contract_status": "warn",
-                "contribution_score": 3.4,
+                "soft_fail": False,
+                "deliverables": ["runtime_smoke_probe", "qa_gate_block_report"],
+                "contract_status": "fail",
+                "contribution_score": 1.4,
             },
         )
 
@@ -90,7 +92,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             {
                 "stage": PipelineStage.QA_RUNTIME.value,
                 "reason": str(smoke_result.reason or "runtime_smoke_failed"),
-                "severity": "high" if fatal_errors else "medium",
+                "severity": "high",
                 "tokens": [
                     *fatal_errors,
                     *non_fatal_warnings,
@@ -104,46 +106,26 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             }
         )
         state["outputs"]["qa_improvement_items"] = improvement_items
-        state["outputs"]["qa_soft_fail"] = not critical_failure
-        if critical_failure:
-            state["status"] = PipelineStatus.ERROR
-            state["reason"] = "runtime_system_failure"
-            return append_log(
-                state,
-                stage=PipelineStage.QA_RUNTIME,
-                status=PipelineStatus.ERROR,
-                agent_name=PipelineAgentName.QA_RUNTIME,
-                message="Runtime QA hard-fail: system-critical execution failure detected.",
-                reason=state["reason"],
-                metadata={
-                    "attempt": state["qa_attempt"],
-                    "critical_failure": True,
-                    "console_errors": smoke_result.console_errors or [],
-                    "fatal_errors": fatal_errors,
-                    "non_fatal_warnings": non_fatal_warnings,
-                    "deliverables": ["runtime_smoke_probe", "critical_failure_report"],
-                    "contract_status": "fail",
-                    "contribution_score": 1.5,
-                },
-            )
-
+        state["outputs"]["qa_soft_fail"] = False
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "runtime_system_failure" if critical_failure else "runtime_smoke_failed"
         return append_log(
             state,
             stage=PipelineStage.QA_RUNTIME,
-            status=PipelineStatus.SUCCESS,
+            status=PipelineStatus.ERROR,
             agent_name=PipelineAgentName.QA_RUNTIME,
-            message="Runtime QA soft-fail: improvement queued.",
-            reason=str(smoke_result.reason or "runtime_smoke_failed"),
+            message="Runtime QA blocked release.",
+            reason=state["reason"],
             metadata={
                 "attempt": state["qa_attempt"],
-                "soft_fail": True,
-                "critical_failure": False,
+                "critical_failure": critical_failure,
+                "soft_fail": False,
                 "console_errors": smoke_result.console_errors or [],
                 "fatal_errors": fatal_errors,
                 "non_fatal_warnings": non_fatal_warnings,
-                "deliverables": ["runtime_smoke_probe", "qa_improvement_queue_item"],
-                "contract_status": "warn",
-                "contribution_score": 3.5,
+                "deliverables": ["runtime_smoke_probe", "qa_gate_block_report"],
+                "contract_status": "fail",
+                "contribution_score": 1.6,
             },
         )
 

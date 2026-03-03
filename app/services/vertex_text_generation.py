@@ -261,12 +261,12 @@ def generate_codegen_candidate_artifact(
 ) -> VertexGenerationResult:
     if not service.settings.builder_codegen_enabled:
         return VertexGenerationResult(
-            payload={"artifact_html": html_content},
+            payload={"artifact_html": ""},
             meta={"generation_source": "stub", "reason": "builder_codegen_disabled"},
         )
     if not service._is_enabled():
         return VertexGenerationResult(
-            payload={"artifact_html": html_content},
+            payload={"artifact_html": ""},
             meta={"generation_source": "stub", "reason": "vertex_not_configured"},
         )
 
@@ -316,7 +316,7 @@ def generate_codegen_candidate_artifact(
     except Exception as exc:
         logger.warning("Vertex codegen artifact generation failed: %s", exc)
         return VertexGenerationResult(
-            payload={"artifact_html": html_content},
+            payload={"artifact_html": ""},
             meta={
                 "generation_source": "stub",
                 "reason": f"vertex_error:{type(exc).__name__}",
@@ -336,7 +336,7 @@ def polish_hybrid_artifact(
 ) -> VertexGenerationResult:
     if not service._is_enabled():
         return VertexGenerationResult(
-            payload={"artifact_html": html_content},
+            payload={"artifact_html": ""},
             meta={"generation_source": "stub", "reason": "vertex_not_configured"},
         )
 
@@ -380,7 +380,7 @@ def polish_hybrid_artifact(
     except Exception as exc:
         logger.warning("Vertex artifact polish failed: %s", exc)
         return VertexGenerationResult(
-            payload={"artifact_html": html_content},
+            payload={"artifact_html": ""},
             meta={
                 "generation_source": "stub",
                 "reason": f"vertex_error:{type(exc).__name__}",

@@ -101,6 +101,8 @@ cp .env.example .env
   - 퍼블리시 차단은 시스템 치명 오류(artifact/storage 실패)만 허용됩니다.
   - 운영 중 강제 하드게이트가 필요하면 `QA_HARD_GATE=1` 사용
 - Builder는 현재 단일 후보(1개) 생성 모드로 동작하며, 후보 다중 생성 루프는 비활성화
+- Builder 생성 엔진은 `scaffold_v3` 단일 경로(Scaffold-first + 단일 codegen pass)로 동작
+- QA는 verify-only 하드게이트로 동작하며, 품질 미달 산출물은 Release 단계로 진행되지 않음
 - Builder는 최근 성공/실패 로그를 기반으로 자산 메모리(retriever)를 적용하며, 필요 시 `BUILDER_ASSET_MEMORY_ENABLED=false`로 즉시 비활성화 가능
 - Asset Registry(`public.asset_registry`)가 존재하면 retriever는 로그 기반 대신 DB 누적 자산 데이터를 우선 사용
 - 삭제 API는 archive 삭제 실패를 warning으로 반환하고 DB/Storage 삭제를 우선 완료합니다.
@@ -161,3 +163,4 @@ systemd 템플릿:
 - `docs/oracle-arm-runbook.md`
 - `docs/telegram-operations.md`
 - `docs/html-runtime-refactor-plan.md`
+- `docs/scaffold-v3-migration.md`

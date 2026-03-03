@@ -226,6 +226,9 @@ def build_codegen_prompt(
     asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
     return (
         "You are a senior web game engineer. Rewrite and deepen this game artifact.\n"
+        "Generation policy:\n"
+        "- This is a single-pass full generation. Produce complete gameplay/runtime quality in one response.\n"
+        "- Do not rely on follow-up refinement loops.\n"
         "Hard constraints:\n"
         "- Return one complete HTML document only.\n"
         "- Keep leaderboard contract (`window.IISLeaderboard`) and boot flag (`window.__iis_game_boot_ok`).\n"
@@ -291,6 +294,7 @@ def build_polish_prompt(*, keyword: str, title: str, genre: str, html_content: s
     return (
         "You are a senior HTML5 game polish engineer.\n"
         "Improve this single-file browser game for stronger visual quality and game-feel.\n"
+        "Generation policy: keep this as a single-pass optional rescue. Do not assume iterative polish loops.\n"
         "Hard constraints:\n"
         "- Keep one complete HTML document.\n"
         "- Preserve all existing gameplay rules and controls.\n"

@@ -36,10 +36,20 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     design_spec = state["outputs"].get("design_spec", {})
     typed_design_spec = design_spec if isinstance(design_spec, dict) else None
 
-    quality_result = deps.quality_service.evaluate_quality_contract(
-        artifact_html,
-        design_spec=typed_design_spec,
-    )
+    evaluate_quality = getattr(deps.quality_service, "evaluate_quality_contract")
+    try:
+        quality_result = evaluate_quality(
+            artifact_html,
+            design_spec=typed_design_spec,
+            genre=str(state["outputs"].get("game_genre", "")),
+            genre_engine=str(state["outputs"].get("genre_engine", "")),
+            keyword=str(state.get("keyword", "")),
+        )
+    except TypeError:
+        quality_result = evaluate_quality(
+            artifact_html,
+            design_spec=typed_design_spec,
+        )
     gameplay_result = deps.quality_service.evaluate_gameplay_gate(
         artifact_html,
         design_spec=typed_design_spec,
@@ -67,18 +77,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     visual_failed_checks = [str(item).strip() for item in visual_result.failed_checks if str(item).strip()]
     artifact_failed_checks = [str(item).strip() for item in artifact_result.failed_checks if str(item).strip()]
 
+    blocking_items: list[dict[str, object]] = []
     if not quality_result.ok:
-        improvement_items.append(
+        blocking_items.append(
             {
                 "stage": PipelineStage.QA_QUALITY.value,
                 "reason": "quality_score_below_threshold",
-                "severity": "medium",
+                "severity": "high",
                 "tokens": quality_failed_checks,
                 "metrics": {"score": quality_result.score, "threshold": quality_result.threshold},
             }
         )
     if not gameplay_result.ok:
-        improvement_items.append(
+        blocking_items.append(
             {
                 "stage": PipelineStage.QA_QUALITY.value,
                 "reason": "gameplay_depth_below_threshold",
@@ -88,17 +99,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             }
         )
     if not visual_result.ok:
-        improvement_items.append(
+        blocking_items.append(
             {
                 "stage": PipelineStage.QA_QUALITY.value,
                 "reason": "visual_quality_below_threshold",
-                "severity": "medium",
+                "severity": "high",
                 "tokens": visual_failed_checks,
                 "metrics": {"score": visual_result.score, "threshold": visual_result.threshold},
             }
         )
     if not artifact_result.ok:
-        improvement_items.append(
+        blocking_items.append(
             {
                 "stage": PipelineStage.QA_QUALITY.value,
                 "reason": "artifact_contract_below_threshold",
@@ -107,6 +118,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "metrics": {"score": artifact_result.score, "threshold": artifact_result.threshold},
             }
         )
+    improvement_items.extend(blocking_items)
 
     runtime_warnings = _as_str_list(runtime_row.get("non_fatal_warnings"))
     if runtime_warnings:
@@ -121,7 +133,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
 
     state["outputs"]["qa_improvement_items"] = improvement_items
-    state["outputs"]["qa_soft_fail"] = len(improvement_items) > 0
+    state["outputs"]["qa_soft_fail"] = False
     if visual_failed_checks:
         state["outputs"]["qa_visual_feedback"] = {
             "reason": "visual_quality_below_threshold",
@@ -149,17 +161,54 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
 
     state["needs_rebuild"] = False
     summary_message = "Quality QA passed."
-    if improvement_items:
-        summary_message = f"Quality QA soft-fail: {len(improvement_items)} improvement task(s) queued."
+    blocking_reasons = [str(row.get("reason", "")).strip() for row in blocking_items if str(row.get("reason", "")).strip()]
+    if blocking_items:
+        summary_message = f"Quality QA blocked release: {len(blocking_items)} gate(s) failed."
 
     state["outputs"].pop("qa_rebuild_feedback", None)
+    if blocking_items:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "qa_quality_gate_failed"
+        return append_log(
+            state,
+            stage=PipelineStage.QA_QUALITY,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.QA_QUALITY,
+            message=summary_message,
+            reason=state["reason"],
+            metadata={
+                "quality_score": quality_result.score,
+                "quality_threshold": quality_result.threshold,
+                "gameplay_score": gameplay_result.score,
+                "gameplay_threshold": gameplay_result.threshold,
+                "visual_score": visual_result.score,
+                "visual_threshold": visual_result.threshold,
+                "artifact_score": artifact_result.score,
+                "artifact_threshold": artifact_result.threshold,
+                "failed_checks": blocking_reasons,
+                "blocking_reasons": blocking_reasons,
+                "improvement_count": len(improvement_items),
+                "soft_fail": False,
+                "quality_checks": quality_result.checks,
+                "gameplay_checks": gameplay_result.checks,
+                "visual_checks": visual_result.checks,
+                "artifact_checks": artifact_result.checks,
+                "visual_metrics": visual_metrics,
+                "non_fatal_warnings": runtime_warnings,
+                "deliverables": ["quality_scorecard", "qa_gate_block_report"],
+                "contract_status": "fail",
+                "contract_summary": summary_message,
+                "contribution_score": 1.8,
+            },
+        )
+
     return append_log(
         state,
         stage=PipelineStage.QA_QUALITY,
         status=PipelineStatus.SUCCESS,
         agent_name=PipelineAgentName.QA_QUALITY,
         message=summary_message,
-        reason="soft_fail" if improvement_items else None,
+        reason=None,
         metadata={
             "quality_score": quality_result.score,
             "quality_threshold": quality_result.threshold,
@@ -169,18 +218,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "visual_threshold": visual_result.threshold,
             "artifact_score": artifact_result.score,
             "artifact_threshold": artifact_result.threshold,
-            "failed_checks": [row["reason"] for row in improvement_items],
+            "failed_checks": [],
+            "blocking_reasons": [],
             "improvement_count": len(improvement_items),
-            "soft_fail": bool(improvement_items),
+            "soft_fail": False,
             "quality_checks": quality_result.checks,
             "gameplay_checks": gameplay_result.checks,
             "visual_checks": visual_result.checks,
             "artifact_checks": artifact_result.checks,
             "visual_metrics": visual_metrics,
             "non_fatal_warnings": runtime_warnings,
-            "deliverables": ["quality_scorecard", "qa_improvement_queue_items"],
-            "contract_status": "warn" if improvement_items else "pass",
+            "deliverables": ["quality_scorecard"],
+            "contract_status": "pass",
             "contract_summary": summary_message,
-            "contribution_score": 3.9 if improvement_items else 4.1,
+            "contribution_score": 4.2,
         },
     )

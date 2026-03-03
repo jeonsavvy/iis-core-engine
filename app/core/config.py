@@ -57,8 +57,8 @@ class Settings(BaseSettings):
     qa_hard_gate: bool = True
     builder_candidate_count: int = Field(default=1, ge=1, le=5)
     builder_codegen_enabled: bool = True
-    builder_codegen_passes: int = Field(default=2, ge=0, le=5)
-    builder_codegen_max_output_tokens: int = Field(default=12_000, ge=512, le=65_536)
+    builder_codegen_passes: int = Field(default=1, ge=0, le=5)
+    builder_codegen_max_output_tokens: int = Field(default=32_000, ge=512, le=65_536)
     builder_runtime_mutation_enabled: bool = True
     builder_force_pro_model: bool = True
     builder_scope_guard_enabled: bool = True
@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     builder_quality_floor_score: int = Field(default=82, ge=0, le=100)
     builder_runtime_signature_guard: bool = True
     builder_playability_hard_gate: bool = True
-    builder_playability_refinement_rounds: int = Field(default=2, ge=0, le=4)
-    gen_core_mode: str = Field(default="scaffold", pattern=r"^(legacy|modular|scaffold)$")
+    builder_playability_refinement_rounds: int = Field(default=0, ge=0, le=4)
+    generation_engine_version: str = Field(default="scaffold_v3", min_length=3, max_length=40)
     rqc_version: str = Field(default="rqc-1", min_length=3, max_length=24)
     pipeline_contract_enforcement: str = Field(default="warn_only", pattern=r"^(strict|warn_only)$")
     qa_retry_source: str = Field(default="builder_only", pattern=r"^(builder_only|qa_or_builder)$")

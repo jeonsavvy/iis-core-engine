@@ -144,38 +144,52 @@ def _deps_with_quality(quality_service) -> SimpleNamespace:
     )
 
 
-def test_sentinel_runtime_failure_soft_fails_and_queues_improvement() -> None:
+def test_sentinel_runtime_failure_blocks_release_and_queues_improvement() -> None:
     state = _base_state()
     deps = _deps_with_quality(_RuntimeFailQualityService())
 
     result = sentinel.run(cast(Any, state), cast(Any, deps))
 
     assert result["needs_rebuild"] is False
-    assert result["status"] == PipelineStatus.RUNNING
-    assert any(log.status == PipelineStatus.SUCCESS for log in result["logs"])
-    assert any("soft-fail" in log.message for log in result["logs"])
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["reason"] == "runtime_smoke_failed"
+    assert any(log.status == PipelineStatus.ERROR for log in result["logs"])
+    assert any("blocked release" in log.message.lower() for log in result["logs"])
 
     improvement_items = result["outputs"].get("qa_improvement_items")
     assert isinstance(improvement_items, list)
     assert any(item.get("reason") == "runtime_console_error" for item in improvement_items if isinstance(item, dict))
 
 
-def test_qa_quality_merges_runtime_and_quality_improvements() -> None:
+def test_qa_quality_blocks_when_visual_gate_fails() -> None:
     state = _base_state()
-    deps = _deps_with_quality(_RuntimeFailQualityService())
+    deps = _deps_with_quality(_GameplayCriticalQualityService())
+    state["outputs"]["runtime_smoke_result"] = {
+        "ok": True,
+        "reason": None,
+        "fatal_errors": [],
+        "non_fatal_warnings": [],
+        "visual_metrics": {
+            "canvas_width": 1280.0,
+            "canvas_height": 720.0,
+            "luminance_std": 38.0,
+            "non_dark_ratio": 0.41,
+            "color_bucket_count": 40.0,
+            "edge_energy": 0.052,
+            "motion_delta": 0.003,
+        },
+    }
+    after_quality = qa_quality.run(cast(Any, state), cast(Any, deps))
 
-    after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
-    after_quality = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
-
-    assert after_quality["status"] == PipelineStatus.RUNNING
+    assert after_quality["status"] == PipelineStatus.ERROR
     assert after_quality["needs_rebuild"] is False
-    assert any(log.stage.value == "qa_quality" for log in after_quality["logs"])
+    assert after_quality["reason"] == "qa_quality_gate_failed"
+    assert any(log.stage.value == "qa_quality" and log.status == PipelineStatus.ERROR for log in after_quality["logs"])
 
     improvement_items = after_quality["outputs"].get("qa_improvement_items")
     assert isinstance(improvement_items, list)
     reasons = [item.get("reason") for item in improvement_items if isinstance(item, dict)]
-    assert "runtime_console_error" in reasons
-    assert "visual_quality_below_threshold" in reasons
+    assert "gameplay_depth_below_threshold" in reasons
 
 
 def test_qa_quality_hard_gate_blocks_release_when_enabled() -> None:
@@ -183,11 +197,8 @@ def test_qa_quality_hard_gate_blocks_release_when_enabled() -> None:
     deps = _deps_with_quality(_RuntimeFailQualityService(hard_gate=True))
 
     after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
-    after_quality = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
-
-    assert after_quality["status"] == PipelineStatus.RUNNING
-    assert after_quality["reason"] is None
-    assert any(log.status == PipelineStatus.SUCCESS and log.stage.value == "qa_quality" for log in after_quality["logs"])
+    assert after_runtime["status"] == PipelineStatus.ERROR
+    assert after_runtime["reason"] in {"runtime_smoke_failed", "runtime_system_failure"}
 
 
 def test_sentinel_runtime_critical_failure_blocks_pipeline_without_rebuild() -> None:
@@ -202,13 +213,27 @@ def test_sentinel_runtime_critical_failure_blocks_pipeline_without_rebuild() -> 
     assert any(log.status == PipelineStatus.ERROR and log.reason == "runtime_system_failure" for log in result["logs"])
 
 
-def test_qa_quality_critical_failure_stays_soft_fail() -> None:
+def test_qa_quality_critical_failure_blocks_release() -> None:
     state = _base_state()
     deps = _deps_with_quality(_GameplayCriticalQualityService())
+    state["outputs"]["runtime_smoke_result"] = {
+        "ok": True,
+        "reason": None,
+        "fatal_errors": [],
+        "non_fatal_warnings": [],
+        "visual_metrics": {
+            "canvas_width": 1280.0,
+            "canvas_height": 720.0,
+            "luminance_std": 38.0,
+            "non_dark_ratio": 0.41,
+            "color_bucket_count": 40.0,
+            "edge_energy": 0.052,
+            "motion_delta": 0.003,
+        },
+    }
+    result = qa_quality.run(cast(Any, state), cast(Any, deps))
 
-    after_runtime = sentinel.run(cast(Any, state), cast(Any, deps))
-    result = qa_quality.run(cast(Any, after_runtime), cast(Any, deps))
-
-    assert result["status"] == PipelineStatus.RUNNING
+    assert result["status"] == PipelineStatus.ERROR
     assert result["needs_rebuild"] is False
-    assert any(log.status == PipelineStatus.SUCCESS and log.reason == "soft_fail" for log in result["logs"])
+    assert result["reason"] == "qa_quality_gate_failed"
+    assert any(log.status == PipelineStatus.ERROR and log.reason == "qa_quality_gate_failed" for log in result["logs"])
