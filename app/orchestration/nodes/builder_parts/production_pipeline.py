@@ -10,6 +10,8 @@ from app.orchestration.nodes.builder_core import build_modular_artifact
 from app.orchestration.nodes.builder_core.selfcheck_runner import run_builder_selfcheck
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
+from app.orchestration.nodes.builder_parts.scaffold_builder import build_scaffold_html
+from app.orchestration.nodes.builder_parts.genre_engine import resolve_genre_engine, get_genre_reference_prompt
 from app.orchestration.nodes.builder_parts.html_runtime_config import MODE_CONFIG_BY_LOOP
 from app.orchestration.nodes.builder_parts.mode import _candidate_composite_score, _candidate_variation_hints
 from app.orchestration.nodes.builder_parts.substrates import resolve_substrate_profile
@@ -743,7 +745,7 @@ def build_production_artifact(
 ) -> ProductionBuildResult:
     core_loop_type = _normalize_core_loop_type(core_loop_type)
     gen_core_mode = str(getattr(deps.vertex_service.settings, "gen_core_mode", "legacy")).strip().lower()
-    if gen_core_mode == "modular":
+    if gen_core_mode in ("modular", "scaffold"):
         return _build_modular_production_artifact(
             state=state,
             deps=deps,
@@ -864,21 +866,46 @@ def build_production_artifact(
             design_spec=design_spec_dump,
             variation_hint=effective_variation_hint,
         )
-        base_candidate_html = _build_hybrid_engine_html(
-            title=title,
-            genre=genre,
-            slug=slug,
-            accent_color=accent_color,
-            viewport_width=design_spec.viewport_width,
-            viewport_height=design_spec.viewport_height,
-            safe_area_padding=design_spec.safe_area_padding,
-            min_font_size_px=design_spec.min_font_size_px,
-            text_overflow_policy=design_spec.text_overflow_policy,
-            core_loop_type=core_loop_type,
-            game_config=generated_config.payload,
-            asset_pack=asset_pack,
-            asset_manifest=runtime_asset_manifest,
-        )
+        if gen_core_mode == "scaffold":
+            base_candidate_html = build_scaffold_html(
+                title=title,
+                genre=genre,
+                slug=slug,
+                accent_color=accent_color,
+                viewport_width=design_spec.viewport_width,
+                viewport_height=design_spec.viewport_height,
+                safe_area_padding=design_spec.safe_area_padding,
+                min_font_size_px=design_spec.min_font_size_px,
+                text_overflow_policy=design_spec.text_overflow_policy,
+                core_loop_type=core_loop_type,
+                asset_pack=asset_pack,
+            )
+            # Force codegen in scaffold mode — scaffold alone has no game logic
+            if not runtime_mutation_enabled:
+                runtime_mutation_enabled = True
+                runtime_mutation_lock_reason = ""
+                codegen_pass_budget = max(codegen_pass_budget, 2)
+            # Inject genre engine reference into feedback hint
+            genre_engine = resolve_genre_engine(genre, state["keyword"])
+            genre_ref_prompt = get_genre_reference_prompt(genre_engine)
+            if genre_ref_prompt not in combined_feedback_hint:
+                combined_feedback_hint = f"{combined_feedback_hint}\n{genre_ref_prompt}" if combined_feedback_hint else genre_ref_prompt
+        else:
+            base_candidate_html = _build_hybrid_engine_html(
+                title=title,
+                genre=genre,
+                slug=slug,
+                accent_color=accent_color,
+                viewport_width=design_spec.viewport_width,
+                viewport_height=design_spec.viewport_height,
+                safe_area_padding=design_spec.safe_area_padding,
+                min_font_size_px=design_spec.min_font_size_px,
+                text_overflow_policy=design_spec.text_overflow_policy,
+                core_loop_type=core_loop_type,
+                game_config=generated_config.payload,
+                asset_pack=asset_pack,
+                asset_manifest=runtime_asset_manifest,
+            )
         candidate_html = previous_artifact_html if reuse_previous_artifact_seed else base_candidate_html
         codegen_meta_rows: list[dict[str, Any]] = []
         if reuse_previous_artifact_seed:
