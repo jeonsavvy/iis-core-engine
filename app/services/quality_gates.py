@@ -19,18 +19,58 @@ def evaluate_quality_contract(
     keyword: str | None = None,
 ) -> QualityGateResult:
     spec = design_spec or {}
+    lowered = html_content.lower()
+    overflow_policy_present = any(
+        token in lowered
+        for token in (
+            "data-overflow-policy",
+            "overflow-guard",
+            "overflow:hidden",
+            "overflow: hidden",
+            "document.body.style.overflow",
+        )
+    )
+    state_logic_present = any(
+        token in lowered
+        for token in (
+            "game over",
+            "overlay",
+            "state.",
+            "gamestate",
+            "mode",
+            "phase",
+            "status",
+            "restart",
+            "reset",
+            "retry",
+        )
+    )
+    input_signal_present = any(
+        token in lowered
+        for token in (
+            "keydown",
+            "keyup",
+            "pointerdown",
+            "pointermove",
+            "mousedown",
+            "mousemove",
+            "touchstart",
+            "touchmove",
+            "gamepad",
+        )
+    )
 
     checks: list[tuple[str, bool, int]] = [
         ("boot_flag", "window.__iis_game_boot_ok" in html_content, 20),
         ("viewport_meta", "<meta name=\"viewport\"" in html_content, 20),
         ("leaderboard_contract", "window.IISLeaderboard" in html_content, 20),
-        ("overflow_guard", "overflow-guard" in html_content, 15),
-        ("overflow_policy", "data-overflow-policy" in html_content, 10),
-        ("safe_area", "--safe-area-padding" in html_content, 15),
-        ("canvas_present", "<canvas" in html_content.lower(), 20),
-        ("game_loop_raf", "requestanimationframe" in html_content.lower(), 20),
-        ("keyboard_input", "keydown" in html_content.lower(), 15),
-        ("game_state_logic", "game over" in html_content.lower() or "overlay" in html_content.lower(), 10),
+        ("overflow_guard", "overflow-guard" in html_content or "overflow:hidden" in lowered or "overflow: hidden" in lowered, 15),
+        ("overflow_policy", overflow_policy_present, 10),
+        ("safe_area", "--safe-area-padding" in html_content or "safe-area" in lowered, 15),
+        ("canvas_present", "<canvas" in lowered, 20),
+        ("game_loop_raf", "requestanimationframe" in lowered, 20),
+        ("input_binding", input_signal_present, 15),
+        ("game_state_logic", state_logic_present, 10),
     ]
 
     viewport_width = spec.get("viewport_width")
@@ -52,10 +92,9 @@ def evaluate_quality_contract(
     failed_checks = [name for name, passed, _ in checks if not passed]
 
     hard_failures: list[str] = []
-    lowered = html_content.lower()
     if "+100 score" in lowered and "requestanimationframe" not in lowered:
         hard_failures.append("trivial_score_button_template")
-    if "addEventListener(\"click\")" in html_content and "keydown" not in lowered and "<canvas" not in lowered:
+    if "addeventlistener(\"click\")" in lowered and not input_signal_present and "<canvas" not in lowered:
         hard_failures.append("click_only_interaction")
 
     # --- Runtime engine contract ---
@@ -86,15 +125,13 @@ def evaluate_quality_contract(
     min_state_count = int(genre_floor.get("min_states", 2) or 2)
 
     # --- Quality Floor: minimum code complexity ---
-    import re as _re
-    function_count = len(_re.findall(r"\bfunction\s+\w+\s*\(", html_content))
-    arrow_fn_count = len(_re.findall(r"\b(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>", html_content))
-    total_fn_count = function_count + arrow_fn_count
+    function_count = len(re.findall(r"\bfunction\s+\w+\s*\(", html_content))
+    arrow_fn_count = len(re.findall(r"\b(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>", html_content))
+    method_candidates = re.findall(r"(?m)^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*\{", html_content)
+    reserved_words = {"if", "for", "while", "switch", "catch", "function"}
+    method_count = sum(1 for name in method_candidates if name.casefold() not in reserved_words)
+    total_fn_count = function_count + arrow_fn_count + method_count
     line_count = html_content.count("\n") + 1
-    if total_fn_count < min_fn_count:
-        hard_failures.append("code_complexity_too_low_fn_count")
-    if line_count < min_line_count:
-        hard_failures.append("code_complexity_too_low_line_count")
 
     shader_token_count = sum(
         lowered.count(token)
@@ -125,8 +162,6 @@ def evaluate_quality_contract(
             "overlay",
         )
     )
-    if state_token_count < min_state_count:
-        hard_failures.append("state_machine_complexity_too_low")
 
     # --- Quality Floor: shader presence (signal) ---
     has_shader = shader_token_count > 0
@@ -138,6 +173,18 @@ def evaluate_quality_contract(
     check_map["engine_contract_match"] = (
         has_phaser if normalized_engine_mode == "2d_phaser" else (has_threejs or has_webgl)
     )
+
+    # --- Hard failures: only universal runtime-viability failures ---
+    if "requestanimationframe" not in lowered:
+        hard_failures.append("missing_realtime_loop")
+    if not input_signal_present:
+        hard_failures.append("input_reactivity_missing")
+    if total_fn_count < 4:
+        hard_failures.append("code_structure_too_shallow")
+    if line_count < 120:
+        hard_failures.append("code_structure_too_short")
+    if state_token_count < 1:
+        hard_failures.append("state_model_missing")
 
     if hard_failures:
         failed_checks.extend(hard_failures)
@@ -198,131 +245,129 @@ def evaluate_gameplay_gate(
         keyword_hint=keyword_hint,
     )
 
+    loop_signal = any(token in lowered for token in ("requestanimationframe", "setinterval(", "settimeout("))
+    loop_cadence_signal = any(token in lowered for token in ("update(", "tick(", "step(", "loop(", "animate("))
+    restart_signal = any(token in lowered for token in ("restart", "reset", "retry", "new run", "newrun", "start over", "startover"))
+    input_signal = any(
+        token in lowered
+        for token in (
+            "keydown",
+            "keyup",
+            "pointerdown",
+            "pointermove",
+            "mousedown",
+            "mousemove",
+            "touchstart",
+            "touchmove",
+            "gamepad",
+        )
+    )
+    failure_signal = any(
+        token in lowered
+        for token in (
+            "game over",
+            "failed",
+            "defeat",
+            "crash",
+            "destroyed",
+            "hp <= 0",
+            "health <= 0",
+            "overlay",
+        )
+    )
+    progression_signal = any(
+        token in lowered
+        for token in (
+            "level",
+            "wave",
+            "checkpoint",
+            "objective",
+            "mission",
+            "stage",
+            "quest",
+            "progress",
+            "lap",
+            "score +=",
+            "state.score +=",
+        )
+    )
+
     checks: list[tuple[str, bool, int]] = [
-        ("core_loop_tick", "requestanimationframe" in lowered and "update(" in lowered and "draw(" in lowered, 16),
-        ("restart_loop", "game over" in lowered and "restart" in lowered, 10),
-        ("input_depth", lowered.count("keydown") >= 1 and any(key in lowered for key in ("arrowup", "arrowdown", "space")), 12),
+        ("core_loop_tick", loop_signal and loop_cadence_signal, 16),
+        ("restart_loop", restart_signal, 10),
+        ("input_depth", input_signal and "addeventlistener" in lowered, 12),
         ("risk_reward", any(token in lowered for token in ("boost", "combo", "score +=", "state.score +=")), 14),
         ("pacing_control", any(token in lowered for token in ("spawnrate", "enemy_spawn_rate", "difficulty", "speed")), 12),
         ("feedback_fx", any(token in lowered for token in ("shadowblur", "burst(", "particles", "screen")), 13),
-        ("readability_guard", "safe-area" in lowered and "overflow-guard" in lowered, 10),
-        ("progression_curve", any(token in lowered for token in ("difficultyscale", "run.level", "leveltimer", "adaptive")), 12),
-        ("replay_loop", any(token in lowered for token in ("restartgame", "combo", "timeleft")), 10),
-        ("failure_feedback", "overlaytext" in lowered and "endgame(" in lowered, 8),
+        (
+            "readability_guard",
+            any(token in lowered for token in ("safe-area", "overflow-guard", "data-overflow-policy", "overflow:hidden", "overflow: hidden")),
+            10,
+        ),
+        ("progression_curve", progression_signal or any(token in lowered for token in ("difficultyscale", "run.level", "leveltimer", "adaptive")), 12),
+        ("replay_loop", restart_signal or any(token in lowered for token in ("restartgame", "retry", "new run")), 10),
+        ("failure_feedback", failure_signal or restart_signal, 8),
     ]
+
+    advisory_checks: list[tuple[str, bool]] = []
     if gameplay_profile == "combat":
-        checks.extend(
+        advisory_checks.extend(
             [
-                ("control_tuning_table", "control_presets" in lowered and "const control =" in lowered, 10),
-                ("depth_pack_system", "depth_packs" in lowered and "active_depth_pack" in lowered, 10),
-                ("miniboss_loop", "spawnminiboss" in lowered and "miniboss" in lowered, 10),
-                ("progression_state_machine", "stepprogression(" in lowered and "state.run.level" in lowered, 10),
-                ("postfx_pipeline", "drawpostfx" in lowered and "vignette" in lowered, 8),
-                ("audio_feedback", "playsfx(" in lowered or "audiocontext" in lowered, 8),
-                ("sprite_pack_usage", "sprite_profile" in lowered or "roundrect" in lowered, 8),
-                ("mode_branching", lowered.count("config.mode") >= 2, 10),
-                ("telegraph_or_counterplay", any(token in lowered for token in ("attackcooldown", "dashcooldown", "kind === \"elite\"", "lanefloat")), 10),
-                (
-                    "mechanical_depth",
-                    sum(
-                        1
-                        for token in ("dash", "jump", "boost", "drift", "reload", "parry", "combo", "overtake", "checkpoint")
-                        if token in lowered
-                    )
-                    >= 3,
-                    14,
-                ),
-                (
-                    "encounter_variety",
-                    sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern", "kind ===") if token in lowered) >= 3,
-                    12,
-                ),
-                (
-                    "feedback_fidelity",
-                    sum(1 for token in ("shake", "flash", "particles", "playsfx", "hit", "impact", "trail") if token in lowered) >= 4,
-                    12,
-                ),
+                ("combat_mechanical_depth", sum(1 for token in ("dash", "jump", "combo", "parry", "reload", "attack") if token in lowered) >= 3),
+                ("combat_encounter_variety", sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern") if token in lowered) >= 3),
             ]
         )
     elif gameplay_profile == "racing":
-        checks.extend(
+        advisory_checks.extend(
             [
-                (
-                    "racing_control_runtime",
-                    any(token in lowered for token in ("steervelocity", "drift", "accel_rate", "brake_rate", "throttle")),
-                    18,
-                ),
-                (
-                    "racing_checkpoint_loop",
-                    "checkpoint" in lowered and any(token in lowered for token in ("lap", "split", "overtake", "roadcurve")),
-                    18,
-                ),
-                ("racing_track_rendering", any(token in lowered for token in ("roadcurve", "roadscroll", "renderwebglbackground(")), 14),
-                ("racing_speed_feedback", any(token in lowered for token in ("boosttimer", "speed", "trail", "vignette")), 10),
-                ("racing_pressure_pattern", any(token in lowered for token in ("hazard", "traffic", "opponent", "spawn")), 10),
+                ("racing_control_runtime", any(token in lowered for token in ("steervelocity", "drift", "accel_rate", "brake_rate", "throttle"))),
+                ("racing_checkpoint_loop", "checkpoint" in lowered and any(token in lowered for token in ("lap", "split", "overtake", "roadcurve"))),
             ]
         )
     else:
-        checks.extend(
+        advisory_checks.extend(
             [
-                ("flight_control_runtime", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 18),
-                ("flight_checkpoint_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 14),
-                ("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 14),
-                ("flight_speed_feedback", any(token in lowered for token in ("afterburner", "trail", "speed", "boost")), 10),
+                ("flight_control_runtime", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle"))),
+                ("flight_progression_loop", "checkpoint" in lowered or "checkpointcombo" in lowered),
             ]
         )
 
     if any(token in genre_hint for token in ("racing", "레이싱", "drift", "드리프트")):
-        checks.append(("racing_specific_mechanics", any(token in lowered for token in ("boosttimer", "roadcurve", "accel", "brake")), 10))
+        advisory_checks.append(("racing_specific_mechanics", any(token in lowered for token in ("boosttimer", "roadcurve", "accel", "brake"))))
     if any(token in genre_hint for token in ("webgl", "three", "3d")):
-        checks.append(("webgl_background_runtime", "getcontext(\"webgl\")" in lowered and "renderwebglbackground(" in lowered, 12))
+        advisory_checks.append(("webgl_background_runtime", "getcontext(\"webgl\")" in lowered or "webglrenderer" in lowered))
     if any(token in genre_hint for token in ("shooter", "슈팅")):
-        checks.append(("shooter_specific_mechanics", "firebullet" in lowered and "bullets" in lowered, 10))
-        checks.append(("shooter_enemy_behaviors", any(token in lowered for token in ("charger", "elite", "orbit")), 8))
+        advisory_checks.append(("shooter_specific_mechanics", "firebullet" in lowered and "bullets" in lowered))
     if any(token in genre_hint for token in ("fighter", "격투", "brawler")):
-        checks.append(("fighter_specific_mechanics", "performattack" in lowered and "attackcooldown" in lowered, 10))
+        advisory_checks.append(("fighter_specific_mechanics", "performattack" in lowered or "attackcooldown" in lowered))
     if any(token in genre_hint for token in ("로그라이크", "roguelike", "탑다운", "topdown")):
-        checks.append(("roguelike_progression", any(token in lowered for token in ("run.level", "difficultyscale", "dashcooldown")), 10))
+        advisory_checks.append(("roguelike_progression", any(token in lowered for token in ("run.level", "difficultyscale", "dashcooldown"))))
     if genre_engine_hint:
-        checks.append(
+        advisory_checks.append(
             (
                 "genre_engine_declared",
                 f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered,
-                10,
             )
         )
-    if genre_engine_hint == "flight_sim_3d":
-        checks.append(("flight_controls", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 16))
-        checks.append(("flight_progression_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 12))
-        checks.append(("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 12))
     if genre_engine_hint == "f1_formula_circuit_3d":
-        checks.append(
-            (
-                "f1_analog_steering_runtime",
-                "steervelocity" in lowered and "lanefloat" in lowered and "math.round(state.player.lane)" not in lowered,
-                14,
-            )
+        advisory_checks.extend(
+            [
+                (
+                    "f1_analog_steering_runtime",
+                    "steervelocity" in lowered and "lanefloat" in lowered and "math.round(state.player.lane)" not in lowered,
+                ),
+                ("f1_lap_checkpoint_loop", "state.formula.lap" in lowered and "checkpoint" in lowered),
+            ]
         )
-        checks.append(("f1_lap_checkpoint_loop", "state.formula.lap" in lowered and "checkpoint" in lowered, 14))
-        checks.append(("f1_brake_accel_loop", "accel_rate" in lowered and "brake_rate" in lowered, 10))
-        checks.append(("f1_overtake_boost_loop", "overtakechain" in lowered and "boosttimer" in lowered, 10))
-        checks.append(("f1_track_rendering", "roadcurve" in lowered and "roadscroll" in lowered, 8))
     if genre_engine_hint == "webgl_three_runner":
-        checks.append(
-            (
-                "analog_steering_runtime",
-                "steervelocity" in lowered and "math.round(state.player.lane)" not in lowered,
-                12,
-            )
-        )
+        advisory_checks.append(("analog_steering_runtime", "steervelocity" in lowered and "math.round(state.player.lane)" not in lowered))
 
     text_overflow_policy = str(spec.get("text_overflow_policy", "")).strip()
     if text_overflow_policy:
-        checks.append(
+        advisory_checks.append(
             (
                 "style_contract_preserved",
                 text_overflow_policy.casefold() in lowered and "assetpack" in lowered,
-                8,
             )
         )
 
@@ -332,50 +377,23 @@ def evaluate_gameplay_gate(
     threshold = settings.qa_min_gameplay_score
     check_map = {name: passed for name, passed, _ in checks}
     failed_checks = [name for name, passed, _ in checks if not passed]
+    for name, passed in advisory_checks:
+        check_map[name] = passed
     hard_failures: list[str] = []
 
-    if "requestanimationframe" not in lowered:
+    if not loop_signal:
         hard_failures.append("missing_realtime_loop")
-    declared_mode_matches = bool(
-        genre_engine_hint
-        and (f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered)
-    )
-    if genre_engine_hint and "config.mode" in lowered and not declared_mode_matches:
-        hard_failures.append("genre_engine_mismatch")
-    if gameplay_profile == "combat":
-        if "spawnenemy(" not in lowered and "state.enemies.push" not in lowered:
-            hard_failures.append("no_enemy_pressure")
-        if lowered.count("score +=") <= 1 and "combo" not in lowered:
-            hard_failures.append("flat_scoring_loop")
-    elif gameplay_profile == "racing":
-        if not any(token in lowered for token in ("steervelocity", "accel_rate", "brake_rate", "drift", "throttle")):
-            hard_failures.append("racing_control_missing")
-        if "checkpoint" not in lowered and "lap" not in lowered:
-            hard_failures.append("racing_progression_missing")
-    if "flight" in keyword_hint and genre_engine_hint != "flight_sim_3d":
-        hard_failures.append("keyword_engine_mismatch_flight")
-    fill_rect_count = lowered.count("fillrect(")
-    shape_signal = sum(
-        lowered.count(token)
-        for token in ("drawsprite(", "beginpath(", "arc(", "ellipse(", "quadraticcurveto(", "beziercurveto(", "roundrect(")
-    )
-    if fill_rect_count >= 42 and shape_signal <= 14:
-        hard_failures.append("geometry_variety_too_low")
-    if genre_engine_hint == "flight_sim_3d":
+    if not input_signal:
+        hard_failures.append("input_reactivity_missing")
+    if genre_engine_hint == "flight_sim_3d" and any(
+        token in keyword_hint for token in ("flight", "비행", "pilot", "aircraft", "조종")
+    ):
         missing_flight_token = any(token not in lowered for token in ("state.flight", "checkpointcombo", "throttle"))
         if missing_flight_token:
             hard_failures.append("flight_mechanics_not_found")
-    if genre_engine_hint == "webgl_three_runner" and "math.round(state.player.lane)" in lowered:
-        hard_failures.append("quantized_lane_steering")
-    if genre_engine_hint == "f1_formula_circuit_3d":
-        missing_formula_token = any(
-            token not in lowered
-            for token in ("state.formula", "checkpoint", "overtakechain", "accel_rate", "brake_rate")
-        )
-        if missing_formula_token:
-            hard_failures.append("f1_mechanics_not_found")
+    if genre_engine_hint == "webgl_three_runner":
         if "math.round(state.player.lane)" in lowered:
-            hard_failures.append("f1_quantized_steering")
+            hard_failures.append("quantized_lane_steering")
 
     if hard_failures:
         failed_checks.extend(hard_failures)

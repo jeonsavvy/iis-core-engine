@@ -35,6 +35,7 @@ class _ArtifactAssessment:
     placeholder_score: float
     runtime_warning_penalty: float
     runtime_warning_codes: list[str]
+    intent_gate_report: dict[str, Any]
 
 
 def _coerce_int(value: object, *, fallback: int) -> int:
@@ -205,6 +206,7 @@ def _assess_artifact_quality(
     keyword: str,
     artifact_files: list[dict[str, str]],
     slug: str,
+    intent_contract: dict[str, Any] | None = None,
 ) -> _ArtifactAssessment:
     evaluate_quality = getattr(deps.quality_service, "evaluate_quality_contract")
     try:
@@ -239,6 +241,20 @@ def _assess_artifact_quality(
     runtime_warning_codes = _critical_runtime_warning_codes(smoke.non_fatal_warnings)
     runtime_warning_penalty = _runtime_warning_penalty(runtime_warning_codes)
     placeholder_heavy, placeholder_score = _estimate_placeholder_risk(html_content)
+    evaluate_intent = getattr(deps.quality_service, "evaluate_intent_gate", None)
+    if callable(evaluate_intent):
+        intent_gate_report = evaluate_intent(
+            html_content,
+            intent_contract=intent_contract if isinstance(intent_contract, dict) else None,
+        )
+    else:
+        intent_gate_report = {
+            "ok": True,
+            "score": 100,
+            "threshold": 75,
+            "failed_items": [],
+            "checks": {"intent_gate_unavailable": True},
+        }
     score = _compose_builder_score(
         quality_score=quality.score,
         gameplay_score=gameplay.score,
@@ -259,6 +275,7 @@ def _assess_artifact_quality(
         placeholder_score=placeholder_score,
         runtime_warning_penalty=runtime_warning_penalty,
         runtime_warning_codes=runtime_warning_codes,
+        intent_gate_report=intent_gate_report,
     )
 
 
@@ -292,10 +309,10 @@ def compute_intent_contract_hash_from_map(intent_contract: dict[str, Any] | None
     if not isinstance(intent_contract, dict) or not intent_contract:
         return "missing"
     try:
-        typed = IntentContractPayload.model_validate(intent_contract)
+        typed: IntentContractPayload = IntentContractPayload.model_validate(intent_contract)
     except Exception:
         return "invalid"
-    return compute_intent_contract_hash(typed)
+    return str(compute_intent_contract_hash(typed))
 
 
 def _build_scaffold_first_production_artifact(
@@ -435,6 +452,7 @@ def _build_scaffold_first_production_artifact(
         keyword=state["keyword"],
         artifact_files=asset_bank_files,
         slug=slug,
+        intent_contract=intent_contract,
     )
     final_assessment = _assess_artifact_quality(
         deps=deps,
@@ -446,6 +464,7 @@ def _build_scaffold_first_production_artifact(
         keyword=state["keyword"],
         artifact_files=asset_bank_files,
         slug=slug,
+        intent_contract=intent_contract,
     )
 
     quality_floor_score = _coerce_int(
@@ -478,6 +497,15 @@ def _build_scaffold_first_production_artifact(
         if not final_assessment.visual.ok:
             quality_floor_fail_reasons.append("visual_gate_unmet")
             quality_floor_fail_reasons.extend(final_assessment.visual.failed_checks[:8])
+        if not bool(final_assessment.intent_gate_report.get("ok", False)):
+            quality_floor_fail_reasons.append("intent_gate_unmet")
+            intent_failed_items = final_assessment.intent_gate_report.get("failed_items")
+            if isinstance(intent_failed_items, list):
+                quality_floor_fail_reasons.extend(
+                    f"intent:{str(item).strip()}"
+                    for item in intent_failed_items[:8]
+                    if str(item).strip()
+                )
         if final_assessment.builder_score < float(quality_floor_score):
             quality_floor_fail_reasons.append("builder_quality_floor_unmet")
         if final_assessment.placeholder_heavy:
@@ -559,6 +587,7 @@ def _build_scaffold_first_production_artifact(
             "fatal_errors": final_assessment.smoke.fatal_errors,
             "non_fatal_warnings": final_assessment.smoke.non_fatal_warnings,
         },
+        "intent": final_assessment.intent_gate_report,
     }
 
     selected_generation_meta = dict(codegen_result.meta or {})
@@ -606,6 +635,7 @@ def _build_scaffold_first_production_artifact(
         "quality_floor_passed": quality_floor_passed,
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
         "quality_gate_report": quality_gate_report,
+        "intent_gate_report": final_assessment.intent_gate_report,
         "blocking_reasons": quality_floor_fail_reasons,
         "rebuild_feedback_hint_applied": bool(rebuild_feedback_hint),
         "rebuild_feedback_tokens": rebuild_feedback_tokens,
