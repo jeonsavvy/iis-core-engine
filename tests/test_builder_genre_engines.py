@@ -122,6 +122,15 @@ def test_generated_genre_directive_contains_profile_summary() -> None:
     assert "Non-negotiables:" in directive
 
 
+def test_infer_core_loop_profile_never_returns_request_faithful_generic() -> None:
+    profile = _infer_core_loop_profile(
+        keyword="완전 새로운 실험형 장르 게임",
+        title="Nova Lab",
+        genre="experimental",
+    )
+    assert profile["core_loop_type"] != "request_faithful_generic"
+
+
 def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> None:
     html = _build_sample_html("topdown_roguelike_shooter").lower()
     assert "assetpack" in html

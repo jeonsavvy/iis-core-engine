@@ -42,7 +42,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     slug = state["outputs"].get("game_slug", "unknown-game")
     game_name = state["outputs"].get("game_name", slug)
     genre = state["outputs"].get("game_genre", "action")
-    genre_engine = str(state["outputs"].get("genre_engine", "request_faithful_generic"))
+    genre_engine = str(state["outputs"].get("genre_engine", "comic_action_brawler_3d"))
     keyword = state.get("keyword", "unknown")
     objective = ""
     gdd_payload = state["outputs"].get("gdd")

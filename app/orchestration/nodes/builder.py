@@ -41,6 +41,124 @@ def _contract_issue(label: str, issue: str) -> str:
     return f"{label}:{issue}"
 
 
+def _contains_any(value: str, tokens: tuple[str, ...]) -> bool:
+    lowered = value.casefold()
+    return any(token in lowered for token in tokens)
+
+
+def _merge_unique(base: list[str], additions: list[str], *, limit: int) -> list[str]:
+    merged: list[str] = []
+    for item in [*base, *additions]:
+        text = str(item).strip()
+        if text and text not in merged:
+            merged.append(text)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _expand_prompt_contracts(
+    *,
+    keyword: str,
+    title: str,
+    genre: str,
+    analyze_contract: AnalyzeContractPayload,
+    plan_contract: PlanContractPayload,
+    design_contract: DesignContractPayload,
+) -> tuple[AnalyzeContractPayload, PlanContractPayload, DesignContractPayload]:
+    haystack = " ".join([keyword, title, genre]).casefold()
+    render_stack = "three.js"
+    if _contains_any(haystack, ("2d", "pixel", "도트", "플랫", "카드게임", "보드게임")):
+        render_stack = "phaser.js"
+
+    analyze_scope_additions = [
+        "single html artifact export",
+        f"{render_stack} runtime enforcement",
+        "builder selfcheck hard-gate",
+    ]
+    analyze_constraints_additions = [
+        "framework enforcement: 3d->three.js / 2d->phaser.js",
+        "single html output with embedded runtime compatibility",
+        "no generic fallback route",
+    ]
+    analyze_forbidden_additions = [
+        "request_faithful_generic fallback",
+        "framework mismatch runtime output",
+        "duplicate controls guidance",
+    ]
+    expanded_analyze = analyze_contract.model_copy(
+        update={
+            "intent": f"{keyword} 요청을 상세 스펙 계약으로 확장하고 고품질 런타임으로 제작",
+            "scope_in": _merge_unique(analyze_contract.scope_in, analyze_scope_additions, limit=10),
+            "hard_constraints": _merge_unique(analyze_contract.hard_constraints, analyze_constraints_additions, limit=10),
+            "forbidden_patterns": _merge_unique(analyze_contract.forbidden_patterns, analyze_forbidden_additions, limit=12),
+            "success_outcome": f"요청({keyword})이 축약 없이 확장되어 {render_stack} 기반 단일 아티팩트로 실행된다.",
+        }
+    )
+
+    mechanics_additions = ["core movement", "primary action loop", "clear fail-state and recovery"]
+    progression_additions = ["onboarding loop", "mid escalation loop", "late mastery loop"]
+    encounter_additions = ["baseline pressure", "variant encounter pattern", "high-intensity checkpoint"]
+    risk_additions = ["safe scoring route", "high-risk high-reward route", "recover route after failure"]
+    control_model = f"{genre} / {render_stack} / keyboard-first deterministic loop"
+
+    if _contains_any(haystack, ("race", "racing", "레이싱", "드리프트", "f1", "formula")):
+        mechanics_additions = ["analog steering", "speed control + boost timing", "checkpoint racing loop"]
+        progression_additions = ["starter lap", "mid lap pressure", "late lap optimization"]
+        encounter_additions = ["traffic hazard", "curve challenge", "overtake window"]
+        risk_additions = ["safe line", "aggressive overtake line", "recovery braking line"]
+    elif _contains_any(haystack, ("flight", "비행", "pilot", "aircraft", "조종")):
+        mechanics_additions = ["pitch-roll-yaw control", "throttle stability management", "waypoint chaining"]
+        progression_additions = ["air-control onboarding", "mid-air hazard pressure", "precision finale"]
+        encounter_additions = ["ring gate", "hazard corridor", "stability check segment"]
+        risk_additions = ["safe vector", "high-speed route", "recovery vector"]
+    elif _contains_any(haystack, ("fps", "shooter", "사격", "슈팅", "총")):
+        mechanics_additions = ["aim + movement loop", "attack cooldown rhythm", "positioning counterplay"]
+        progression_additions = ["threat introduction", "pattern escalation", "survival burst"]
+        encounter_additions = ["light enemy", "heavy enemy", "mixed pressure wave"]
+        risk_additions = ["cover route", "aggressive route", "retreat and reset route"]
+    elif _contains_any(haystack, ("fight", "fighting", "격투", "brawler", "근접")):
+        mechanics_additions = ["spacing loop", "combo timing", "dodge-counter rhythm"]
+        progression_additions = ["footsies onboarding", "pressure exchange", "combo mastery"]
+        encounter_additions = ["jab-heavy mix", "counter window", "clutch duel phase"]
+        risk_additions = ["safe poke", "commit combo", "reset neutral"]
+
+    expanded_plan = plan_contract.model_copy(
+        update={
+            "core_mechanics": _merge_unique(plan_contract.core_mechanics, mechanics_additions, limit=12),
+            "progression_plan": _merge_unique(plan_contract.progression_plan, progression_additions, limit=12),
+            "encounter_plan": _merge_unique(plan_contract.encounter_plan, encounter_additions, limit=12),
+            "risk_reward_plan": _merge_unique(plan_contract.risk_reward_plan, risk_additions, limit=12),
+            "control_model": control_model,
+        }
+    )
+
+    design_camera_additions = ["camera readability preserved at all times", "hud remains concise and non-overlapping"]
+    design_asset_additions = ["player silhouette set", "enemy silhouette set", "interactive object set", "environment prop set"]
+    design_layers_additions = ["foreground gameplay layer", "midground interaction layer", "animated background layer", "feedback fx layer"]
+    design_fx_additions = ["hit feedback pulse", "damage feedback pulse", "objective progress feedback"]
+    design_readability_additions = ["player/enemy contrast", "critical object highlight", "no overflow clipping"]
+
+    expanded_design = design_contract.model_copy(
+        update={
+            "camera_ui_contract": _merge_unique(design_contract.camera_ui_contract, design_camera_additions, limit=12),
+            "asset_blueprint_2d3d": _merge_unique(design_contract.asset_blueprint_2d3d, design_asset_additions, limit=18),
+            "scene_layers": _merge_unique(design_contract.scene_layers, design_layers_additions, limit=12),
+            "feedback_fx_contract": _merge_unique(design_contract.feedback_fx_contract, design_fx_additions, limit=12),
+            "readability_contract": _merge_unique(design_contract.readability_contract, design_readability_additions, limit=12),
+        }
+    )
+
+    return expanded_analyze, expanded_plan, expanded_design
+
+
+def _normalize_core_loop_type(core_loop_type: str) -> str:
+    lowered = str(core_loop_type).strip().casefold()
+    if lowered == "request_faithful_generic":
+        return "comic_action_brawler_3d"
+    return str(core_loop_type).strip() or "comic_action_brawler_3d"
+
+
 def _ensure_analyze_contract(state: PipelineState) -> tuple[AnalyzeContractPayload, bool]:
     existing = state["outputs"].get("analyze_contract")
     if isinstance(existing, dict):
@@ -164,6 +282,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     analyze_contract, analyze_repaired = _ensure_analyze_contract(state)
     plan_contract, plan_repaired = _ensure_plan_contract(state, genre=genre)
     design_contract, design_repaired = _ensure_design_contract(state)
+    analyze_contract, plan_contract, design_contract = _expand_prompt_contracts(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        analyze_contract=analyze_contract,
+        plan_contract=plan_contract,
+        design_contract=design_contract,
+    )
+    state["outputs"]["analyze_contract"] = analyze_contract.model_dump()
+    state["outputs"]["plan_contract"] = plan_contract.model_dump()
+    state["outputs"]["design_contract"] = design_contract.model_dump()
     contract_issues = _validate_prebuild_contracts(
         analyze_contract=analyze_contract,
         plan_contract=plan_contract,
@@ -216,7 +345,9 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     palette = design_spec.palette
     accent_color = str(palette[0]) if palette else "#22C55E"
     core_loop_profile = _infer_core_loop_profile(keyword=state["keyword"], title=title, genre=genre)
-    core_loop_type = str(core_loop_profile.get("core_loop_type", _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)))
+    core_loop_type = _normalize_core_loop_type(
+        str(core_loop_profile.get("core_loop_type", _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)))
+    )
     request_capability_hint = _build_request_capability_hint(keyword=state["keyword"], title=title, genre=genre)
     generated_genre_profile = _synthesize_genre_profile(
         keyword=state["keyword"],
@@ -256,7 +387,6 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "lane_dodge_racer",
                     "arena_shooter",
                     "duel_brawler",
-                    "request_faithful_generic",
                 ],
             },
         )

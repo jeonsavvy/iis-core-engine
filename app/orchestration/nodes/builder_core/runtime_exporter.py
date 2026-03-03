@@ -60,6 +60,469 @@ def _resolve_runtime_contract(
     }
 
 
+def _resolve_render_mode(capability_profile: dict[str, Any]) -> str:
+    tags = capability_profile.get("capability_tags")
+    if isinstance(tags, list):
+        normalized = {str(item).strip().casefold() for item in tags if str(item).strip()}
+        if "render:2d" in normalized:
+            return "2d"
+    return "3d"
+
+
+def _export_phaser_runtime_artifact(
+    *,
+    title: str,
+    genre: str,
+    slug: str,
+    accent_color: str,
+    viewport_width: int,
+    viewport_height: int,
+    safe_area_padding: int,
+    text_overflow_policy: str,
+    capability_profile: dict[str, Any],
+    module_plan: dict[str, Any],
+    assembled_modules: dict[str, Any],
+    runtime_contract: dict[str, str],
+    rqc_version: str,
+) -> str:
+    module_signature = str(assembled_modules.get("module_signature", "unknown"))
+    profile_id = str(capability_profile.get("profile_id", "cp-unknown"))
+    camera_model = str(capability_profile.get("camera_model", "top_down"))
+    locomotion_model = str(capability_profile.get("locomotion_model", "on_foot"))
+    interaction_model = str(capability_profile.get("interaction_model", "action"))
+    world_topology = str(capability_profile.get("world_topology", "arena"))
+    progression_model = str(capability_profile.get("progression_model", "objective_chain"))
+
+    return f"""<!doctype html>
+<html lang=\"ko\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>{title}</title>
+    <style>
+      :root {{
+        --safe-area-padding: {safe_area_padding}px;
+        --accent: {accent_color};
+      }}
+      html, body {{
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(circle at 12% 10%, #1a2a48 0%, #071226 52%, #04070f 100%);
+        color: #e2e8f0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }}
+      body {{
+        display: grid;
+        place-items: center;
+      }}
+      .overflow-guard {{
+        width: min(100vw, calc(100vh * 16 / 9));
+        max-width: 100vw;
+        max-height: 100vh;
+        aspect-ratio: 16 / 9;
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+        gap: 10px;
+        padding: var(--safe-area-padding);
+        box-sizing: border-box;
+      }}
+      .topbar {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }}
+      .title {{
+        font-size: clamp(20px, 2.8vw, 34px);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }}
+      .subtitle {{
+        font-size: clamp(12px, 1.25vw, 14px);
+        color: #93c5fd;
+        margin-top: 4px;
+      }}
+      .hud {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }}
+      .hud span {{
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.74);
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 13px;
+      }}
+      #control-guide {{
+        margin: 0;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        background: rgba(15, 23, 42, 0.62);
+        color: #dbeafe;
+        font-size: 13px;
+      }}
+      .stage {{
+        position: relative;
+        border-radius: 14px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        overflow: hidden;
+        min-height: 320px;
+        background: linear-gradient(160deg, #020617 0%, #020a1c 70%, #021228 100%);
+      }}
+      #phaser-root {{
+        width: 100%;
+        height: 100%;
+      }}
+      #phaser-root canvas {{
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }}
+      #overlay {{
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(2, 6, 23, 0.72);
+        backdrop-filter: blur(2px);
+      }}
+      #overlay.show {{
+        display: flex;
+      }}
+      #overlay-card {{
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.9);
+        padding: 18px;
+        min-width: 260px;
+        text-align: center;
+        display: grid;
+        gap: 8px;
+      }}
+      #restart-btn {{
+        border: 1px solid rgba(125, 211, 252, 0.55);
+        background: rgba(59, 130, 246, 0.24);
+        color: #dbeafe;
+        border-radius: 999px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font-weight: 700;
+      }}
+    </style>
+    <script src=\"https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js\"></script>
+  </head>
+  <body data-overflow-policy=\"{text_overflow_policy}\">
+    <div class=\"overflow-guard\" aria-label=\"game-runtime-shell\">
+      <header class=\"topbar\">
+        <div>
+          <div class=\"title\">{title}</div>
+          <div class=\"subtitle\">{runtime_contract['mode_label']} · {genre}</div>
+        </div>
+        <div class=\"hud\" aria-live=\"polite\">
+          <span id=\"score\">점수 0</span>
+          <span id=\"timer\">남은 시간 90.0초</span>
+          <span id=\"hp\">내구도 100</span>
+          <span id=\"objective\">목표: {runtime_contract['objective']}</span>
+        </div>
+      </header>
+      <p id=\"control-guide\">{runtime_contract['controls']}</p>
+
+      <main class=\"stage\">
+        <div id=\"phaser-root\"></div>
+        <div id=\"overlay\" role=\"dialog\" aria-modal=\"true\" aria-hidden=\"true\">
+          <div id=\"overlay-card\">
+            <strong style=\"font-size:28px\">게임 종료</strong>
+            <p id=\"overlay-text\" style=\"margin:0;color:#bfdbfe\">다시 도전해 기록을 경신하세요.</p>
+            <button id=\"restart-btn\" type=\"button\">다시 시작 (R)</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      window.__iis_game_boot_ok = true;
+      window.IISLeaderboard = window.IISLeaderboard || {{
+        submit: async () => ({{ ok: true }}),
+      }};
+
+      const CONFIG = {{
+        title: {_js_string(title)},
+        genre: {_js_string(genre)},
+        slug: {_js_string(slug)},
+        mode: {_js_string(str(capability_profile.get("core_loop_type", "modular")))},
+        cameraModel: {_js_string(camera_model)},
+        locomotionModel: {_js_string(locomotion_model)},
+        interactionModel: {_js_string(interaction_model)},
+        worldTopology: {_js_string(world_topology)},
+        progressionModel: {_js_string(progression_model)},
+        profileId: {_js_string(profile_id)},
+        moduleSignature: {_js_string(module_signature)},
+        modulePlan: {_js_string(",".join(str(item) for item in module_plan.get("primary_modules", [])))},
+        rqcVersion: {_js_string(rqc_version)},
+      }};
+
+      const overlay = document.getElementById("overlay");
+      const overlayText = document.getElementById("overlay-text");
+      const restartBtn = document.getElementById("restart-btn");
+      const scoreEl = document.getElementById("score");
+      const timerEl = document.getElementById("timer");
+      const hpEl = document.getElementById("hp");
+      const objectiveEl = document.getElementById("objective");
+
+      const state = {{
+        running: true,
+        elapsed: 0,
+        timeLeft: 90,
+        hp: 100,
+        score: 0,
+        combo: 1,
+        objective: {_js_string(runtime_contract["objective"])},
+        attackCooldown: 0,
+      }};
+
+      let activeScene = null;
+
+      class MainScene extends Phaser.Scene {{
+        constructor() {{
+          super("main");
+        }}
+
+        create() {{
+          activeScene = this;
+          this.cameras.main.setBackgroundColor("#08152c");
+          this.cameras.main.setBounds(-40, -20, {viewport_width + 80}, {viewport_height + 40});
+          this.physics.world.setBounds(-20, -20, {viewport_width + 40}, {viewport_height + 40});
+
+          this.player = this.add.rectangle({viewport_width / 2}, {viewport_height / 2}, 36, 48, 0x22d3ee);
+          this.physics.add.existing(this.player);
+          this.player.body.setCollideWorldBounds(true);
+          this.player.body.setDrag(1200, 1200);
+          this.player.body.setMaxVelocity(290, 290);
+
+          this.enemies = this.physics.add.group();
+          this.pickups = this.physics.add.group();
+          this.checkpoints = this.physics.add.group();
+          this.pulses = this.add.group();
+
+          this.cursor = this.input.keyboard.createCursorKeys();
+          this.keys = this.input.keyboard.addKeys({{
+            W: Phaser.Input.Keyboard.KeyCodes.W,
+            A: Phaser.Input.Keyboard.KeyCodes.A,
+            S: Phaser.Input.Keyboard.KeyCodes.S,
+            D: Phaser.Input.Keyboard.KeyCodes.D,
+            SPACE: Phaser.Input.Keyboard.KeyCodes.SPACE,
+            SHIFT: Phaser.Input.Keyboard.KeyCodes.SHIFT,
+            R: Phaser.Input.Keyboard.KeyCodes.R,
+          }});
+
+          this.spawnTimer = this.time.addEvent({{
+            delay: 1100,
+            loop: true,
+            callback: () => this.spawnWave(),
+          }});
+
+          this.physics.add.overlap(this.player, this.pickups, (_player, pickup) => {{
+            pickup.destroy();
+            state.score += 45;
+            state.hp = Math.min(100, state.hp + 15);
+          }});
+
+          this.physics.add.overlap(this.player, this.checkpoints, (_player, checkpoint) => {{
+            checkpoint.destroy();
+            state.score += 90;
+            state.timeLeft = Math.min(120, state.timeLeft + 2.4);
+          }});
+
+          this.physics.add.overlap(this.player, this.enemies, () => {{
+            if (state.elapsed > 3) {{
+              state.hp = Math.max(0, state.hp - 0.75);
+              this.cameras.main.shake(80, 0.0032, true);
+            }}
+          }});
+
+          this.createBackdrop();
+          this.updateHud();
+        }}
+
+        createBackdrop() {{
+          const g = this.add.graphics();
+          for (let i = 0; i < 18; i += 1) {{
+            const alpha = 0.08 + (i * 0.02);
+            g.fillStyle(0x1e3a8a, alpha);
+            g.fillRect(0, i * 42, {viewport_width}, 20);
+          }}
+          for (let i = 0; i < 50; i += 1) {{
+            const x = Phaser.Math.Between(0, {viewport_width});
+            const y = Phaser.Math.Between(0, {viewport_height});
+            g.fillStyle(0x93c5fd, 0.34);
+            g.fillCircle(x, y, Phaser.Math.Between(1, 2));
+          }}
+        }}
+
+        spawnWave() {{
+          if (!state.running) return;
+          const enemy = this.add.rectangle(Phaser.Math.Between(60, {viewport_width - 60}), -20, 30, 36, 0xef4444);
+          this.physics.add.existing(enemy);
+          enemy.body.setVelocity(Phaser.Math.Between(-50, 50), Phaser.Math.Between(95, 145));
+          enemy.body.setBounce(1, 1);
+          enemy.body.setCollideWorldBounds(true);
+          enemy.hp = Phaser.Math.Between(1, 2);
+          this.enemies.add(enemy);
+
+          if (Math.random() < 0.68) {{
+            const checkpoint = this.add.ellipse(Phaser.Math.Between(70, {viewport_width - 70}), Phaser.Math.Between(80, {viewport_height - 80}), 34, 34, 0x22d3ee, 0.82);
+            this.physics.add.existing(checkpoint);
+            checkpoint.body.setImmovable(true);
+            this.checkpoints.add(checkpoint);
+          }}
+
+          if (Math.random() < 0.55) {{
+            const pickup = this.add.star(Phaser.Math.Between(70, {viewport_width - 70}), Phaser.Math.Between(80, {viewport_height - 80}), 5, 6, 12, 0x84cc16);
+            this.physics.add.existing(pickup);
+            pickup.body.setImmovable(true);
+            this.pickups.add(pickup);
+          }}
+        }}
+
+        tryAttack() {{
+          if (!state.running || state.attackCooldown > 0) return;
+          state.attackCooldown = 0.26;
+          const pulse = this.add.circle(this.player.x, this.player.y, 18, 0x22d3ee, 0.45);
+          this.pulses.add(pulse);
+          this.tweens.add({{
+            targets: pulse,
+            scale: 2.8,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => pulse.destroy(),
+          }});
+          this.enemies.getChildren().forEach((enemy) => {{
+            const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+            if (dist <= 82) {{
+              enemy.hp -= 1;
+              enemy.setTintFill(0xffffff);
+              this.time.delayedCall(70, () => enemy.clearTint());
+              if (enemy.hp <= 0) {{
+                enemy.destroy();
+                state.score += 70;
+                state.combo = Math.min(8, state.combo + 0.18);
+              }}
+            }}
+          }});
+        }}
+
+        update(_time, delta) {{
+          const dt = Math.min(0.05, Math.max(0.001, delta / 1000));
+          if (state.attackCooldown > 0) {{
+            state.attackCooldown = Math.max(0, state.attackCooldown - dt);
+          }}
+          if (!state.running) {{
+            if (Phaser.Input.Keyboard.JustDown(this.keys.R)) {{
+              resetGame();
+            }}
+            return;
+          }}
+
+          state.elapsed += dt;
+          state.timeLeft = Math.max(0, state.timeLeft - dt);
+
+          const moveX = (this.cursor.right.isDown || this.keys.D.isDown ? 1 : 0) - (this.cursor.left.isDown || this.keys.A.isDown ? 1 : 0);
+          const moveY = (this.cursor.down.isDown || this.keys.S.isDown ? 1 : 0) - (this.cursor.up.isDown || this.keys.W.isDown ? 1 : 0);
+          const speed = this.keys.SHIFT.isDown ? 260 : 190;
+          this.player.body.setVelocity(moveX * speed, moveY * speed);
+
+          if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {{
+            this.tryAttack();
+          }}
+
+          this.enemies.getChildren().forEach((enemy) => {{
+            const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+            this.physics.velocityFromRotation(angle, 92, enemy.body.velocity);
+          }});
+
+          if (state.timeLeft <= 0) {{
+            endGame("시간 초과");
+          }} else if (state.hp <= 0 && state.elapsed > 3) {{
+            endGame("내구도 고갈");
+          }}
+
+          this.updateHud();
+        }}
+
+        updateHud() {{
+          updateHud();
+        }}
+      }}
+
+      function updateHud() {{
+        scoreEl.textContent = `점수 ${{Math.floor(state.score)}} · 콤보 x${{state.combo.toFixed(1)}}`;
+        timerEl.textContent = `남은 시간 ${{Math.max(0, state.timeLeft).toFixed(1)}}초`;
+        hpEl.textContent = `내구도 ${{Math.max(0, Math.round(state.hp))}}`;
+        objectiveEl.textContent = `목표: ${{state.objective}}`;
+      }}
+
+      function endGame(reason) {{
+        if (!state.running) return;
+        state.running = false;
+        overlay.classList.add("show");
+        overlay.setAttribute("aria-hidden", "false");
+        overlayText.textContent = `사유: ${{reason}} · 최종 점수 ${{Math.floor(state.score)}}`;
+      }}
+
+      function resetGame() {{
+        state.running = true;
+        state.elapsed = 0;
+        state.timeLeft = 90;
+        state.hp = 100;
+        state.score = 0;
+        state.combo = 1;
+        state.attackCooldown = 0;
+        overlay.classList.remove("show");
+        overlay.setAttribute("aria-hidden", "true");
+        if (activeScene) {{
+          activeScene.scene.restart();
+        }}
+      }}
+
+      const game = new Phaser.Game({{
+        type: Phaser.AUTO,
+        parent: "phaser-root",
+        width: {viewport_width},
+        height: {viewport_height},
+        backgroundColor: "#08152c",
+        physics: {{
+          default: "arcade",
+          arcade: {{
+            gravity: {{ y: 0 }},
+            debug: false,
+          }},
+        }},
+        scale: {{
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+        }},
+        scene: [MainScene],
+      }});
+
+      restartBtn.addEventListener("click", resetGame);
+      window.addEventListener("message", (event) => {{
+        const data = event.data || {{}};
+        if (data.type === "iis:recover:start" && !state.running && state.elapsed < 8) {{
+          resetGame();
+        }}
+      }});
+    </script>
+  </body>
+</html>
+"""
+
+
 def export_runtime_artifact(
     *,
     title: str,
@@ -76,6 +539,29 @@ def export_runtime_artifact(
     contract_bundle: dict[str, Any],
     rqc_version: str,
 ) -> str:
+    render_mode = _resolve_render_mode(capability_profile)
+    runtime_contract = _resolve_runtime_contract(
+        capability_profile=capability_profile,
+        contract_bundle=contract_bundle,
+        genre=genre,
+    )
+    if render_mode == "2d":
+        return _export_phaser_runtime_artifact(
+            title=title,
+            genre=genre,
+            slug=slug,
+            accent_color=accent_color,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            safe_area_padding=safe_area_padding,
+            text_overflow_policy=text_overflow_policy,
+            capability_profile=capability_profile,
+            module_plan=module_plan,
+            assembled_modules=assembled_modules,
+            runtime_contract=runtime_contract,
+            rqc_version=rqc_version,
+        )
+
     module_signature = str(assembled_modules.get("module_signature", "unknown"))
     camera_model = str(capability_profile.get("camera_model", "third_person"))
     locomotion_model = str(capability_profile.get("locomotion_model", "on_foot"))
@@ -83,12 +569,6 @@ def export_runtime_artifact(
     world_topology = str(capability_profile.get("world_topology", "arena"))
     progression_model = str(capability_profile.get("progression_model", "objective_chain"))
     profile_id = str(capability_profile.get("profile_id", "cp-unknown"))
-    runtime_contract = _resolve_runtime_contract(
-        capability_profile=capability_profile,
-        contract_bundle=contract_bundle,
-        genre=genre,
-    )
-
     return f"""<!doctype html>
 <html lang=\"ko\">
   <head>

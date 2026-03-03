@@ -154,6 +154,26 @@ def test_build_modular_artifact_defaults_to_3d_render_for_generic_prompt() -> No
     assert "render:3d" in result.capability_profile["capability_tags"]
 
 
+def test_build_modular_artifact_enforces_phaser_for_explicit_2d_prompt() -> None:
+    result = build_modular_artifact(
+        keyword="2d 픽셀 로그라이크 액션 게임",
+        title="Pixel Frontier",
+        genre="arcade",
+        slug="pixel-frontier",
+        accent_color="#F59E0B",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=20,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type="topdown_roguelike_shooter",
+        rqc_version="rqc-1",
+    )
+    assert "render:2d" in result.capability_profile["capability_tags"]
+    assert "new Phaser.Game" in result.artifact_html
+    assert "new THREE.WebGLRenderer" not in result.artifact_html
+    assert result.selfcheck_result["passed"] is True
+
+
 def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
     deps = SimpleNamespace(
         vertex_service=SimpleNamespace(

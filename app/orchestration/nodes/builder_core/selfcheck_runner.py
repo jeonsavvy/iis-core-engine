@@ -8,6 +8,15 @@ def _count_present_tokens(source: str, tokens: tuple[str, ...]) -> int:
     return sum(1 for token in tokens if token in source)
 
 
+def _resolve_render_mode(capability_profile: dict[str, Any]) -> str:
+    tags = capability_profile.get("capability_tags")
+    if isinstance(tags, list):
+        normalized = {str(item).strip().casefold() for item in tags if str(item).strip()}
+        if "render:2d" in normalized:
+            return "2d"
+    return "3d"
+
+
 def run_builder_selfcheck(
     *,
     html_content: str,
@@ -18,6 +27,7 @@ def run_builder_selfcheck(
     lowered = html_content.casefold()
     locomotion = str(capability_profile.get("locomotion_model", "on_foot"))
     interaction = str(capability_profile.get("interaction_model", "action"))
+    render_mode = _resolve_render_mode(capability_profile)
 
     required_primary = [
         "scene_world",
@@ -32,36 +42,57 @@ def run_builder_selfcheck(
     optional_modules = [str(item) for item in module_plan.get("optional_modules", []) if str(item).strip()]
     all_modules = selected_modules + optional_modules
 
-    input_tokens = (
-        "keydown",
-        "keyup",
-        "arrowup",
-        "arrowdown",
-        "arrowleft",
-        "arrowright",
-        'key === "r"',
-        "shift",
-        "space",
-    )
+    if render_mode == "2d":
+        input_tokens = (
+            "keycodes.w",
+            "keycodes.a",
+            "keycodes.s",
+            "keycodes.d",
+            "cursor.right",
+            "cursor.left",
+            "cursor.up",
+            "cursor.down",
+            "space",
+            "shift",
+            "keys.r",
+        )
+    else:
+        input_tokens = (
+            "keydown",
+            "keyup",
+            "arrowup",
+            "arrowdown",
+            "arrowleft",
+            "arrowright",
+            'key === "r"',
+            "shift",
+            "space",
+        )
     state_tokens = ("running", "elapsed", "timeleft", "endgame", "resetgame", "objective")
-    object_tokens = ("makeplayermesh", "makeenemymesh", "makecheckpointmesh", "makepickupmesh", "scene.add", "worldroot")
-    feedback_tokens = ("overlay", "overlay-text", "score", "timer", "hp", "renderer.render")
+    if render_mode == "2d":
+        object_tokens = ("this.player", "this.enemies", "this.checkpoints", "this.pickups", "phaser")
+        feedback_tokens = ("overlay", "overlay-text", "score", "timer", "hp", "settintfill", "cameras.main.shake")
+    else:
+        object_tokens = ("makeplayermesh", "makeenemymesh", "makecheckpointmesh", "makepickupmesh", "scene.add", "worldroot")
+        feedback_tokens = ("overlay", "overlay-text", "score", "timer", "hp", "renderer.render")
 
     input_coverage = _count_present_tokens(lowered, input_tokens)
     state_coverage = _count_present_tokens(lowered, state_tokens)
     object_coverage = _count_present_tokens(lowered, object_tokens)
     feedback_coverage = _count_present_tokens(lowered, feedback_tokens)
 
-    mesh_tokens = (
-        "boxgeometry",
-        "spheregeometry",
-        "cylindergeometry",
-        "torusgeometry",
-        "octahedrongeometry",
-        "capsulegeometry",
-        "conegeometry",
-    )
-    mesh_variety = len({token for token in mesh_tokens if token in lowered})
+    mesh_variety = 0
+    if render_mode == "3d":
+        mesh_tokens = (
+            "boxgeometry",
+            "spheregeometry",
+            "cylindergeometry",
+            "torusgeometry",
+            "octahedrongeometry",
+            "capsulegeometry",
+            "conegeometry",
+        )
+        mesh_variety = len({token for token in mesh_tokens if token in lowered})
 
     controls_text_match = re.search(r"<p id=\"control-guide\">([^<]+)</p>", html_content, flags=re.IGNORECASE)
     controls_text = controls_text_match.group(1).strip() if controls_text_match else ""
@@ -72,15 +103,21 @@ def run_builder_selfcheck(
     checks: dict[str, bool] = {
         "rqc_version_declared": bool(rqc_version.strip()),
         "single_html_document": "<!doctype html>" in lowered and lowered.count("<html") == 1,
-        "threejs_runtime": "import * as three from \"three\"" in lowered,
-        "webgl_renderer": "new three.webglrenderer" in lowered,
-        "render_loop": "requestanimationframe(animate)" in lowered and "renderer.render(scene, camera)" in lowered,
+        "render_loop": (
+            "requestanimationframe(animate)" in lowered and "renderer.render(scene, camera)" in lowered
+            if render_mode == "3d"
+            else "new phaser.game" in lowered and "update(_time, delta)" in lowered
+        ),
         "input_axis_coverage": input_coverage >= 6,
         "state_machine_coverage": state_coverage >= 4,
         "object_variety": object_coverage >= 5,
-        "mesh_variety": mesh_variety >= 4,
+        "mesh_variety": mesh_variety >= 4 if render_mode == "3d" else True,
         "feedback_fidelity": feedback_coverage >= 4,
-        "progression_loop": "spawncheckpoint" in lowered and "timeleft" in lowered and "score" in lowered,
+        "progression_loop": (
+            "spawncheckpoint" in lowered and "timeleft" in lowered and "score" in lowered
+            if render_mode == "3d"
+            else "spawnwave" in lowered and "timeleft" in lowered and "score" in lowered and "checkpoint" in lowered
+        ),
         "boot_flag_and_leaderboard": "window.__iis_game_boot_ok = true" in lowered and "window.iisleaderboard" in lowered,
         "no_start_gate": "tap to start" not in lowered and "click to start" not in lowered and "press start" not in lowered,
         "no_hud_jargon": not bool(jargon_pattern.search(lowered)),
@@ -88,6 +125,12 @@ def run_builder_selfcheck(
         "controls_single_source": controls_text != "" and 2 <= lowered.count("control-guide") <= 4,
         "required_modules_present": all(module_id in all_modules for module_id in required_primary),
     }
+    if render_mode == "3d":
+        checks["threejs_runtime"] = "import * as three from \"three\"" in lowered
+        checks["webgl_renderer"] = "new three.webglrenderer" in lowered
+    else:
+        checks["phaser_runtime"] = "new phaser.game" in lowered and "phaser.min.js" in lowered
+        checks["phaser_scene_lifecycle"] = "class mainscene extends phaser.scene" in lowered and "create()" in lowered
 
     if locomotion == "flight":
         checks["flight_control_scheme_consistent"] = (
@@ -105,7 +148,11 @@ def run_builder_selfcheck(
         )
 
     if interaction in {"melee_combat", "ranged_combat"}:
-        checks["combat_interaction_present"] = "resolvecombat" in lowered and "attackcooldown" in lowered
+        checks["combat_interaction_present"] = (
+            "resolvecombat" in lowered and "attackcooldown" in lowered
+            if render_mode == "3d"
+            else "tryattack" in lowered and "attackcooldown" in lowered
+        )
 
     failed_reasons = [name for name, passed in checks.items() if not passed]
     score = int(round((sum(1 for passed in checks.values() if passed) / max(1, len(checks))) * 100))

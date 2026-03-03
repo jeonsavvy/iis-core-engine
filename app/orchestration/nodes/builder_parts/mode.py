@@ -126,15 +126,14 @@ def _infer_core_loop_profile(*, keyword: str, title: str, genre: str) -> dict[st
     }
 
     scores: dict[str, float] = {
-        "f1_formula_circuit_3d": 0.0,
-        "flight_sim_3d": 0.0,
-        "webgl_three_runner": 0.0,
-        "topdown_roguelike_shooter": 0.0,
-        "comic_action_brawler_3d": 0.0,
-        "lane_dodge_racer": 0.0,
-        "arena_shooter": 0.0,
-        "duel_brawler": 0.0,
-        "request_faithful_generic": 0.55,
+        "f1_formula_circuit_3d": 0.2,
+        "flight_sim_3d": 0.25,
+        "webgl_three_runner": 0.55,
+        "topdown_roguelike_shooter": 0.35,
+        "comic_action_brawler_3d": 0.62,
+        "lane_dodge_racer": 0.48,
+        "arena_shooter": 0.58,
+        "duel_brawler": 0.52,
     }
     if capabilities["is_racing"]:
         scores["lane_dodge_racer"] += 2.2
@@ -181,7 +180,7 @@ def _infer_core_loop_profile(*, keyword: str, title: str, genre: str) -> dict[st
 
 def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
-    return str(profile.get("core_loop_type", "request_faithful_generic"))
+    return str(profile.get("core_loop_type", "comic_action_brawler_3d"))
 
 
 def _build_request_capability_hint(*, keyword: str, title: str, genre: str) -> str:
@@ -208,7 +207,7 @@ def _synthesize_genre_profile(
     core_loop_profile: dict[str, object] | None = None,
 ) -> dict[str, object]:
     profile = core_loop_profile if isinstance(core_loop_profile, dict) else _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
-    core_loop_type = str(profile.get("core_loop_type", "request_faithful_generic"))
+    core_loop_type = str(profile.get("core_loop_type", "comic_action_brawler_3d"))
     capabilities = profile.get("capabilities")
     typed_capabilities = capabilities if isinstance(capabilities, dict) else {}
     haystack = " ".join([keyword, title, genre]).casefold()
@@ -394,15 +393,8 @@ def _candidate_variation_hints(*, core_loop_type: str, candidate_count: int) -> 
             "Variant D: high-risk burst mode where attack openings are rare but decisive.",
             "Variant E: attrition duel with resilient enemies and clutch comeback flow.",
         ],
-        "request_faithful_generic": [
-            "Variant A: request-faithful action loop with high responsiveness and clear visual intent.",
-            "Variant B: request-faithful tactical loop with stronger telegraphs and deliberate pacing.",
-            "Variant C: request-faithful progression loop with reward multipliers for execution mastery.",
-            "Variant D: request-faithful endurance loop with escalating pressure and adaptation windows.",
-            "Variant E: request-faithful balanced loop prioritizing readability while preserving fantasy identity.",
-        ],
     }
-    hints = list(presets.get(core_loop_type, presets["request_faithful_generic"]))
+    hints = list(presets.get(core_loop_type, presets["comic_action_brawler_3d"]))
     if candidate_count <= len(hints):
         return hints[:candidate_count]
 

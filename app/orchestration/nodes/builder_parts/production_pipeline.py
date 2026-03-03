@@ -76,6 +76,13 @@ def _coerce_int(value: object, *, fallback: int) -> int:
     return fallback
 
 
+def _normalize_core_loop_type(core_loop_type: str) -> str:
+    normalized = str(core_loop_type).strip()
+    if normalized.casefold() == "request_faithful_generic":
+        return "comic_action_brawler_3d"
+    return normalized or "comic_action_brawler_3d"
+
+
 def _evaluate_visual_or_fallback(
     *,
     deps: NodeDependencies,
@@ -734,6 +741,7 @@ def build_production_artifact(
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
 ) -> ProductionBuildResult:
+    core_loop_type = _normalize_core_loop_type(core_loop_type)
     gen_core_mode = str(getattr(deps.vertex_service.settings, "gen_core_mode", "legacy")).strip().lower()
     if gen_core_mode == "modular":
         return _build_modular_production_artifact(
