@@ -46,7 +46,7 @@ def build_runtime_spawn_combat_functions_js() -> str:
           }});
           return;
         }}
-        if (MODE_IS_SHOOTER || MODE_IS_BRAWLER || CONFIG.mode === "arcade_generic" || CONFIG.mode === "request_faithful_generic") {{
+        if (MODE_IS_SHOOTER || MODE_IS_BRAWLER || CONFIG.mode === "arcade_generic") {{
           state.enemies.push({{
             x: rand(canvas.width * 0.22, canvas.width * 0.78),
             y: rand(20, canvas.height * 0.18),

@@ -51,16 +51,12 @@ MODE_CONFIG_BY_LOOP: dict[str, RuntimeModeConfig] = {
         "objective": "근접전으로 적의 체력을 먼저 깎아 승리하세요.",
         "controls": "← → ↑ ↓ 이동 / Space 공격 / R 재시작",
     },
-    "request_faithful_generic": {
-        "label": "Adaptive Action",
-        "objective": "요청한 게임 판타지를 유지하며 핵심 상호작용을 익혀 목표를 달성하세요.",
-        "controls": "← → ↑ ↓ 이동 / R 재시작",
-    },
 }
 
 
 def resolve_mode_config(core_loop_type: str) -> RuntimeModeConfig:
-    return MODE_CONFIG_BY_LOOP.get(core_loop_type, MODE_CONFIG_BY_LOOP["request_faithful_generic"])
+    normalized_mode = "comic_action_brawler_3d" if core_loop_type == "request_faithful_generic" else core_loop_type
+    return MODE_CONFIG_BY_LOOP.get(normalized_mode, MODE_CONFIG_BY_LOOP["comic_action_brawler_3d"])
 
 
 def _coerce_int(value: Any, *, fallback: int) -> int:
@@ -134,12 +130,13 @@ def build_runtime_config_json(
     asset_pack: dict[str, str],
     asset_manifest: dict[str, object] | None = None,
 ) -> str:
+    normalized_mode = "comic_action_brawler_3d" if core_loop_type == "request_faithful_generic" else core_loop_type
     normalized_game_config = _normalize_mode_balance_config(
-        core_loop_type=core_loop_type,
+        core_loop_type=normalized_mode,
         raw_config=game_config,
     )
     config_dict: dict[str, Any] = {
-        "mode": core_loop_type,
+        "mode": normalized_mode,
         "title": title,
         "genre": genre,
         "slug": slug,
