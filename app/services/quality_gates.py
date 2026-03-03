@@ -51,6 +51,27 @@ def evaluate_quality_contract(
     if "addEventListener(\"click\")" in html_content and "keydown" not in lowered and "<canvas" not in lowered:
         hard_failures.append("click_only_interaction")
 
+    # --- Quality Floor: 3D rendering engine required ---
+    has_threejs = "three.js" in lowered or "three.module" in lowered or "three.min.js" in lowered
+    has_webgl = "getcontext(\"webgl" in lowered or "getcontext('webgl" in lowered or "webglrenderer" in lowered
+    if not has_threejs and not has_webgl:
+        hard_failures.append("no_3d_rendering_engine")
+
+    # --- Quality Floor: minimum code complexity ---
+    import re as _re
+    function_count = len(_re.findall(r"\bfunction\s+\w+\s*\(", html_content))
+    arrow_fn_count = len(_re.findall(r"\b(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>", html_content))
+    total_fn_count = function_count + arrow_fn_count
+    line_count = html_content.count("\n") + 1
+    if total_fn_count < 15:
+        hard_failures.append("code_complexity_too_low_fn_count")
+    if line_count < 800:
+        hard_failures.append("code_complexity_too_low_line_count")
+
+    # --- Quality Floor: shader presence (soft signal, warns but doesn't block) ---
+    has_shader = "fragmentshader" in lowered or "vertexshader" in lowered or "glsl" in lowered
+    check_map["has_custom_shader"] = has_shader
+
     if hard_failures:
         failed_checks.extend(hard_failures)
         for failure in hard_failures:

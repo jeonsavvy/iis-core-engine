@@ -806,8 +806,8 @@ def build_production_artifact(
     configured_runtime_mutation_enabled = bool(
         configured_codegen_enabled and getattr(deps.vertex_service.settings, "builder_runtime_mutation_enabled", False)
     )
-    runtime_mutation_enabled = False
-    runtime_mutation_lock_reason = "template_runtime_hard_lock"
+    runtime_mutation_enabled = configured_runtime_mutation_enabled
+    runtime_mutation_lock_reason = "" if runtime_mutation_enabled else "config_disabled"
     codegen_pass_budget = _resolve_codegen_pass_budget(
         configured_passes=configured_codegen_passes,
         has_feedback_hint=bool(combined_feedback_hint),
