@@ -366,14 +366,33 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre=genre,
         genre_profile=generated_genre_profile,
     )
-    intent_contract = build_intent_contract(
-        keyword=state["keyword"],
-        title=title,
-        gdd=gdd,
-        analyze_contract=analyze_contract,
-        plan_contract=plan_contract,
-        design_contract=design_contract,
-    )
+    try:
+        intent_contract = build_intent_contract(
+            keyword=state["keyword"],
+            title=title,
+            gdd=gdd,
+            analyze_contract=analyze_contract,
+            plan_contract=plan_contract,
+            design_contract=design_contract,
+        )
+    except ValidationError as exc:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "intent_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 의도 계약 생성이 스키마 검증을 통과하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "validation_error": str(exc),
+                "contract_status": "fail",
+                "deliverables": ["intent_contract_validator"],
+                "contribution_score": 1.2,
+                "strict_vertex_only": strict_vertex_only,
+            },
+        )
     intent_issues = _validate_intent_contract(intent_contract)
     if intent_issues:
         state["status"] = PipelineStatus.ERROR

@@ -52,10 +52,25 @@ _VERB_HINTS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _merge_unique(rows: list[str], *, limit: int) -> list[str]:
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _clip_text(value: str, *, limit: int) -> str:
+    normalized = _normalize_text(value)
+    if len(normalized) <= limit:
+        return normalized
+    if limit <= 1:
+        return normalized[:limit]
+    return f"{normalized[: limit - 1].rstrip()}…"
+
+
+def _merge_unique(rows: list[str], *, limit: int, item_max_length: int | None = None) -> list[str]:
     merged: list[str] = []
     for row in rows:
-        text = str(row).strip()
+        text = _normalize_text(str(row))
+        if item_max_length is not None:
+            text = _clip_text(text, limit=item_max_length)
         if not text or text in merged:
             continue
         merged.append(text)
@@ -105,11 +120,18 @@ def build_intent_contract(
     plan_contract: PlanContractPayload,
     design_contract: DesignContractPayload,
 ) -> IntentContractPayload:
-    fantasy = (
+    fantasy = _clip_text(
+        (
         f"{keyword} 요청 판타지를 유지하고 "
         f"{gdd.genre} 장르의 목표({gdd.objective})를 플레이 가능한 루프로 구현한다."
+        ),
+        limit=260,
     )
-    player_verbs = _derive_player_verbs(keyword=keyword, plan_contract=plan_contract)
+    player_verbs = _merge_unique(
+        _derive_player_verbs(keyword=keyword, plan_contract=plan_contract),
+        limit=8,
+        item_max_length=32,
+    ) or ["move"]
     camera_interaction = _merge_unique(
         [
             plan_contract.control_model,
@@ -117,6 +139,7 @@ def build_intent_contract(
             "camera/interaction intent must match request",
         ],
         limit=3,
+        item_max_length=96,
     )
     progression_loop = _merge_unique(
         [
@@ -125,9 +148,11 @@ def build_intent_contract(
             f"session goal: {gdd.objective}",
         ],
         limit=5,
+        item_max_length=120,
     )
-    fail_restart_loop = (
-        f"Fail condition must be explicit for {title}, and restart should return to playable state immediately."
+    fail_restart_loop = _clip_text(
+        f"Fail condition must be explicit for {title}, and restart should return to playable state immediately.",
+        limit=240,
     )
     non_negotiables = _merge_unique(
         [
@@ -136,11 +161,12 @@ def build_intent_contract(
             "preserve_requested_intent_without_generic_substitution",
         ],
         limit=8,
+        item_max_length=120,
     )
     return IntentContractPayload(
         fantasy=fantasy,
         player_verbs=player_verbs,
-        camera_interaction=" / ".join(camera_interaction),
+        camera_interaction=_clip_text(" / ".join(camera_interaction), limit=200),
         progression_loop=progression_loop,
         fail_restart_loop=fail_restart_loop,
         non_negotiables=non_negotiables,
@@ -151,4 +177,3 @@ def compute_intent_contract_hash(contract: IntentContractPayload) -> str:
     payload = contract.model_dump()
     normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
-

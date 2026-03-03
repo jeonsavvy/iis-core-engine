@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from app.orchestration.nodes import architect, builder, stylist, trigger
 from app.orchestration.nodes.builder_parts.production_pipeline import ProductionBuildResult
-from app.schemas.payloads import BuildArtifactPayload
+from app.schemas.payloads import BuildArtifactPayload, IntentContractPayload
 from app.schemas.pipeline import PipelineStatus
 from app.services.vertex_types import VertexGenerationResult
 
@@ -258,6 +258,28 @@ def test_builder_stops_when_playability_hard_gate_unmet(monkeypatch) -> None:
     assert result["status"] == PipelineStatus.ERROR
     assert result["reason"] == "builder_playability_unmet"
     assert any(log.stage.value == "build" and log.status.value == "error" for log in result["logs"])
+
+
+def test_builder_handles_intent_contract_validation_error(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub(contract_mode="ok")
+    deps = _deps(vertex)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    state = architect.run(cast(Any, state), cast(Any, deps))
+    state = stylist.run(cast(Any, state), cast(Any, deps))
+
+    def _invalid_intent_contract(**_kwargs: Any):
+        return IntentContractPayload.model_validate({})
+
+    monkeypatch.setattr(builder, "build_intent_contract", _invalid_intent_contract)
+    result = builder.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["reason"] == "intent_contract_invalid"
+    build_error_logs = [log for log in result["logs"] if log.stage.value == "build" and log.status.value == "error"]
+    assert build_error_logs
+    assert "validation_error" in build_error_logs[-1].metadata
 
 
 def test_trigger_blocks_when_strict_vertex_only_and_source_is_stub() -> None:
