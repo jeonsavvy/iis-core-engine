@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     builder_runtime_signature_guard: bool = True
     builder_playability_hard_gate: bool = True
     builder_playability_refinement_rounds: int = Field(default=0, ge=0, le=4)
+    builder_deterministic_fallback_enabled: bool = False
     generation_engine_version: str = Field(default="scaffold_v3", min_length=3, max_length=40)
     rqc_version: str = Field(default="rqc-1", min_length=3, max_length=24)
     pipeline_contract_enforcement: str = Field(default="warn_only", pattern=r"^(strict|warn_only)$")

@@ -489,7 +489,10 @@ def _build_scaffold_first_production_artifact(
 
     deterministic_fallback_used = False
     deterministic_fallback_meta: dict[str, Any] = {}
-    if not codegen_available:
+    deterministic_fallback_enabled = bool(
+        getattr(deps.vertex_service.settings, "builder_deterministic_fallback_enabled", False)
+    )
+    if not codegen_available and deterministic_fallback_enabled:
         primary_reason = generation_reason.casefold()
         recovery_reason = str(recovery_meta.get("reason", "")).strip().casefold()
         should_use_deterministic_fallback = (
@@ -583,26 +586,27 @@ def _build_scaffold_first_production_artifact(
             quality_floor_fail_reasons.append(f"codegen_error:{generation_error[:120]}")
         for token in (generation_validation_failures or recovery_failures)[:6]:
             quality_floor_fail_reasons.append(f"codegen_missing:{token}")
-    if not final_assessment.smoke.ok:
-        quality_floor_fail_reasons.append("runtime_smoke_failed")
-    if not final_assessment.playability.ok:
-        quality_floor_fail_reasons.append("builder_playability_unmet")
-        quality_floor_fail_reasons.extend(final_assessment.playability.fail_reasons)
-    if not final_assessment.quality.ok:
-        quality_floor_fail_reasons.append("quality_gate_unmet")
-        quality_floor_fail_reasons.extend(final_assessment.quality.failed_checks[:8])
-    if not final_assessment.gameplay.ok:
-        quality_floor_fail_reasons.append("gameplay_gate_unmet")
-        quality_floor_fail_reasons.extend(final_assessment.gameplay.failed_checks[:8])
-    if not final_assessment.visual.ok:
-        quality_floor_fail_reasons.append("visual_gate_unmet")
-        quality_floor_fail_reasons.extend(final_assessment.visual.failed_checks[:8])
-    if final_assessment.builder_score < float(quality_floor_score):
-        quality_floor_fail_reasons.append("builder_quality_floor_unmet")
-    if final_assessment.placeholder_heavy:
-        quality_floor_fail_reasons.append("placeholder_visual_detected")
-    if final_assessment.runtime_warning_codes:
-        quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
+    if codegen_available:
+        if not final_assessment.smoke.ok:
+            quality_floor_fail_reasons.append("runtime_smoke_failed")
+        if not final_assessment.playability.ok:
+            quality_floor_fail_reasons.append("builder_playability_unmet")
+            quality_floor_fail_reasons.extend(final_assessment.playability.fail_reasons)
+        if not final_assessment.quality.ok:
+            quality_floor_fail_reasons.append("quality_gate_unmet")
+            quality_floor_fail_reasons.extend(final_assessment.quality.failed_checks[:8])
+        if not final_assessment.gameplay.ok:
+            quality_floor_fail_reasons.append("gameplay_gate_unmet")
+            quality_floor_fail_reasons.extend(final_assessment.gameplay.failed_checks[:8])
+        if not final_assessment.visual.ok:
+            quality_floor_fail_reasons.append("visual_gate_unmet")
+            quality_floor_fail_reasons.extend(final_assessment.visual.failed_checks[:8])
+        if final_assessment.builder_score < float(quality_floor_score):
+            quality_floor_fail_reasons.append("builder_quality_floor_unmet")
+        if final_assessment.placeholder_heavy:
+            quality_floor_fail_reasons.append("placeholder_visual_detected")
+        if final_assessment.runtime_warning_codes:
+            quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
     quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
 
@@ -702,6 +706,7 @@ def _build_scaffold_first_production_artifact(
         "codegen_initial_error": initial_generation_error,
         "codegen_initial_validation_failures": initial_generation_validation_failures,
         "codegen_recovery_meta": recovery_meta,
+        "deterministic_fallback_enabled": deterministic_fallback_enabled,
         "deterministic_fallback_used": deterministic_fallback_used,
         "deterministic_fallback_meta": deterministic_fallback_meta,
         "effective_codegen_passes_per_candidate": 1,

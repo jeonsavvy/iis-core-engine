@@ -245,7 +245,7 @@ def test_build_production_artifact_runs_single_recovery_attempt_when_codegen_fai
     assert result.metadata["quality_floor_passed"] is True
 
 
-def test_build_production_artifact_uses_deterministic_fallback_on_codegen_value_error() -> None:
+def test_build_production_artifact_does_not_use_deterministic_fallback_on_codegen_value_error() -> None:
     vertex = _FakeVertexService(
         generation_sequence=("stub", "stub"),
         stub_reason="vertex_error:ValueError",
@@ -255,6 +255,8 @@ def test_build_production_artifact_uses_deterministic_fallback_on_codegen_value_
     assert deps.vertex_service.calls == 2
     assert result.metadata["codegen_recovery_attempted"] is True
     assert result.metadata["codegen_recovery_success"] is False
-    assert result.metadata["deterministic_fallback_used"] is True
-    assert result.metadata["quality_floor_passed"] is True
-    assert result.selected_generation_meta["generation_source"] == "deterministic_fallback"
+    assert result.metadata["deterministic_fallback_enabled"] is False
+    assert result.metadata["deterministic_fallback_used"] is False
+    assert result.metadata["quality_floor_passed"] is False
+    assert "codegen_generation_failed" in result.metadata["quality_floor_fail_reasons"]
+    assert result.selected_generation_meta["generation_source"] == "stub"
