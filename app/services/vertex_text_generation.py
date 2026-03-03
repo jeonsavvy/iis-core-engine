@@ -17,7 +17,12 @@ from app.services.vertex_prompts import (
     build_marketing_copy_prompt,
     build_polish_prompt,
 )
-from app.services.vertex_text_utils import coerce_message_text, looks_like_playable_artifact, strip_code_fences
+from app.services.vertex_text_utils import (
+    coerce_message_text,
+    looks_like_playable_artifact,
+    playable_artifact_missing_requirements,
+    strip_code_fences,
+)
 from app.services.vertex_types import VertexGenerationResult
 
 logger = logging.getLogger(__name__)
@@ -301,7 +306,9 @@ def generate_codegen_candidate_artifact(
 
         normalized = generated_html.strip()
         if not looks_like_playable_artifact(normalized):
-            raise ValueError("invalid_codegen_artifact")
+            missing_requirements = playable_artifact_missing_requirements(normalized)
+            detail = ",".join(missing_requirements[:8]) if missing_requirements else "unknown"
+            raise ValueError(f"invalid_codegen_artifact:{detail}")
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         return VertexGenerationResult(
@@ -315,6 +322,12 @@ def generate_codegen_candidate_artifact(
         )
     except Exception as exc:
         logger.warning("Vertex codegen artifact generation failed: %s", exc)
+        validation_failures: list[str] = []
+        if isinstance(exc, ValueError):
+            text = str(exc)
+            if text.startswith("invalid_codegen_artifact:"):
+                raw_items = text.split(":", 1)[1]
+                validation_failures = [item.strip() for item in raw_items.split(",") if item.strip()]
         return VertexGenerationResult(
             payload={"artifact_html": ""},
             meta={
@@ -322,6 +335,7 @@ def generate_codegen_candidate_artifact(
                 "reason": f"vertex_error:{type(exc).__name__}",
                 "vertex_error": str(exc),
                 "model": builder_model,
+                "validation_failures": validation_failures,
             },
         )
 

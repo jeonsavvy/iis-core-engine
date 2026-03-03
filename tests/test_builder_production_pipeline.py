@@ -33,6 +33,8 @@ def _make_state() -> Any:
 class _FakeVertexService:
     generation_source: str = "vertex"
     generated_suffix: str = "CODEGEN"
+    generation_sequence: tuple[str, ...] = ()
+    validation_failures: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.calls = 0
@@ -44,12 +46,25 @@ class _FakeVertexService:
 
     def generate_codegen_candidate_artifact(self, *, html_content: str, **_kwargs):
         self.calls += 1
+        if self.generation_sequence and self.calls <= len(self.generation_sequence):
+            source = self.generation_sequence[self.calls - 1]
+        else:
+            source = self.generation_source
         artifact_html = f"{html_content}\n<!-- {self.generated_suffix} -->"
-        if self.generation_source != "vertex":
+        if source != "vertex":
             artifact_html = ""
+        meta: dict[str, Any] = {
+            "generation_source": source,
+            "model": "gemini-test",
+            "reason": "test",
+        }
+        if source != "vertex":
+            meta["reason"] = "vertex_error:ValueError"
+            meta["vertex_error"] = "invalid_codegen_artifact:" + ",".join(self.validation_failures or ("unknown",))
+            meta["validation_failures"] = list(self.validation_failures)
         return SimpleNamespace(
             payload={"artifact_html": artifact_html},
-            meta={"generation_source": self.generation_source, "model": "gemini-test", "reason": "test"},
+            meta=meta,
         )
 
 
@@ -134,6 +149,37 @@ def _build_result(*, vertex_source: str = "vertex", quality_service: _FakeQualit
     return result, deps
 
 
+def _build_result_with_vertex(vertex_service: _FakeVertexService, *, quality_service: _FakeQualityService | None = None):
+    deps: Any = SimpleNamespace(
+        vertex_service=vertex_service,
+        quality_service=quality_service or _FakeQualityService(),
+    )
+    result = build_production_artifact(
+        state=_make_state(),
+        deps=deps,
+        gdd=GDDPayload(title="Neon Racer", genre="arcade", objective="survive", visual_style="neon"),
+        design_spec=DesignSpecPayload(
+            visual_style="neon",
+            palette=["#22C55E", "#111827"],
+            hud="score-top-left",
+            viewport_width=1280,
+            viewport_height=720,
+            safe_area_padding=24,
+            min_font_size_px=14,
+            text_overflow_policy="ellipsis-clamp",
+        ),
+        title="Neon Racer",
+        genre="arcade",
+        slug="neon-racer",
+        accent_color="#22C55E",
+        core_loop_type="arcade_generic",
+        asset_pack={"name": "arcade-pack"},
+        asset_bank_files=[],
+        runtime_asset_manifest={},
+    )
+    return result, deps
+
+
 def test_build_production_artifact_uses_scaffold_v3_single_pass() -> None:
     result, deps = _build_result()
     assert deps.vertex_service.calls == 1
@@ -149,6 +195,7 @@ def test_build_production_artifact_blocks_when_codegen_unavailable() -> None:
     result, _ = _build_result(vertex_source="stub")
     assert result.metadata["quality_floor_passed"] is False
     assert "codegen_generation_failed" in result.metadata["quality_floor_fail_reasons"]
+    assert "codegen_recovery_failed" in result.metadata["quality_floor_fail_reasons"]
     assert "codegen_generation_failed" in result.metadata["blocking_reasons"]
 
 
@@ -163,3 +210,16 @@ def test_build_production_artifact_blocks_when_runtime_smoke_fails() -> None:
     assert result.metadata["playability_passed"] is False
     assert result.metadata["quality_floor_passed"] is False
     assert "runtime_smoke_failed" in result.metadata["quality_floor_fail_reasons"]
+
+
+def test_build_production_artifact_runs_single_recovery_attempt_when_codegen_fails() -> None:
+    vertex = _FakeVertexService(
+        generation_sequence=("stub", "vertex"),
+        validation_failures=("boot_flag", "canvas_or_render_runtime"),
+    )
+    result, deps = _build_result_with_vertex(vertex)
+    assert deps.vertex_service.calls == 2
+    assert result.metadata["codegen_generation_attempts"] == 2
+    assert result.metadata["codegen_recovery_attempted"] is True
+    assert result.metadata["codegen_recovery_success"] is True
+    assert result.metadata["quality_floor_passed"] is True

@@ -260,6 +260,27 @@ def _assess_artifact_quality(
     )
 
 
+def _build_codegen_recovery_hint(*, failed_requirements: list[str]) -> str:
+    requirement_prompts = {
+        "html_document": "Return one complete HTML document with <html>, <head>, <body>.",
+        "boot_flag": "Set window.__iis_game_boot_ok = true after runtime boot completes.",
+        "leaderboard_contract": "Define window.IISLeaderboard contract object in global scope.",
+        "realtime_loop": "Implement requestAnimationFrame-based realtime update loop.",
+        "canvas_or_render_runtime": "Create playable canvas runtime (<canvas> or createElement('canvas') / WebGL renderer).",
+    }
+    hints = [
+        requirement_prompts[item]
+        for item in failed_requirements
+        if item in requirement_prompts
+    ]
+    if not hints:
+        return (
+            "Structural recovery required. Return full playable HTML artifact with boot flag, leaderboard contract, "
+            "requestAnimationFrame game loop, and active canvas runtime."
+        )
+    return "Structural recovery required. " + " ".join(hints)
+
+
 def _build_scaffold_first_production_artifact(
     *,
     state: PipelineState,
@@ -354,7 +375,62 @@ def _build_scaffold_first_production_artifact(
     generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
     generation_source = str(codegen_result.meta.get("generation_source", "stub")).strip().lower()
     generation_reason = str(codegen_result.meta.get("reason", "")).strip()
+    generation_error = str(codegen_result.meta.get("vertex_error", "")).strip()
+    generation_validation_failures = [
+        str(item).strip()
+        for item in (codegen_result.meta.get("validation_failures") or [])
+        if str(item).strip()
+    ]
     codegen_available = bool(generated_html) and generation_source == "vertex"
+    initial_generation_reason = generation_reason
+    initial_generation_error = generation_error
+    initial_generation_validation_failures = list(generation_validation_failures)
+
+    recovery_attempted = False
+    recovery_success = False
+    recovery_meta: dict[str, Any] = {}
+    recovery_failures: list[str] = []
+    if not codegen_available:
+        recovery_attempted = True
+        recovery_hint = _build_codegen_recovery_hint(failed_requirements=generation_validation_failures)
+        recovery_variation_hint = f"{effective_variation_hint}\n{recovery_hint}"
+        recovery_result = deps.vertex_service.generate_codegen_candidate_artifact(
+            keyword=state["keyword"],
+            title=title,
+            genre=genre,
+            objective=gdd.objective,
+            core_loop_type=core_loop_type,
+            variation_hint=recovery_variation_hint,
+            design_spec=design_spec_dump,
+            asset_pack=asset_pack,
+            html_content=scaffold_html,
+        )
+        recovery_html = str(recovery_result.payload.get("artifact_html", "")).strip()
+        recovery_source = str(recovery_result.meta.get("generation_source", "stub")).strip().lower()
+        recovery_reason = str(recovery_result.meta.get("reason", "")).strip()
+        recovery_error = str(recovery_result.meta.get("vertex_error", "")).strip()
+        recovery_validation_failures = [
+            str(item).strip()
+            for item in (recovery_result.meta.get("validation_failures") or [])
+            if str(item).strip()
+        ]
+        recovery_success = bool(recovery_html) and recovery_source == "vertex"
+        recovery_failures = recovery_validation_failures
+        recovery_meta = {
+            "generation_source": recovery_source,
+            "reason": recovery_reason,
+            "vertex_error": recovery_error,
+            "validation_failures": recovery_validation_failures,
+        }
+        if recovery_success:
+            codegen_result = recovery_result
+            generated_html = recovery_html
+            generation_source = recovery_source
+            generation_reason = recovery_reason
+            generation_error = recovery_error
+            generation_validation_failures = recovery_validation_failures
+            codegen_available = True
+
     final_html = generated_html if generated_html else scaffold_html
 
     scaffold_assessment = _assess_artifact_quality(
@@ -387,8 +463,20 @@ def _build_scaffold_first_production_artifact(
     quality_floor_fail_reasons: list[str] = []
     if not codegen_available:
         quality_floor_fail_reasons.append("codegen_generation_failed")
+        if recovery_attempted and not recovery_success:
+            quality_floor_fail_reasons.append("codegen_recovery_failed")
+            recovery_reason = str(recovery_meta.get("reason", "")).strip()
+            recovery_error = str(recovery_meta.get("vertex_error", "")).strip()
+            if recovery_reason:
+                quality_floor_fail_reasons.append(f"codegen_recovery_reason:{recovery_reason}")
+            if recovery_error:
+                quality_floor_fail_reasons.append(f"codegen_recovery_error:{recovery_error[:120]}")
         if generation_reason:
             quality_floor_fail_reasons.append(f"codegen_reason:{generation_reason}")
+        if generation_error:
+            quality_floor_fail_reasons.append(f"codegen_error:{generation_error[:120]}")
+        for token in (generation_validation_failures or recovery_failures)[:6]:
+            quality_floor_fail_reasons.append(f"codegen_missing:{token}")
     if not final_assessment.smoke.ok:
         quality_floor_fail_reasons.append("runtime_smoke_failed")
     if not final_assessment.playability.ok:
@@ -491,6 +579,13 @@ def _build_scaffold_first_production_artifact(
         "generation_engine_version": "scaffold_v3",
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "codegen_enabled": True,
+        "codegen_generation_attempts": 2 if recovery_attempted else 1,
+        "codegen_recovery_attempted": recovery_attempted,
+        "codegen_recovery_success": recovery_success,
+        "codegen_initial_reason": initial_generation_reason,
+        "codegen_initial_error": initial_generation_error,
+        "codegen_initial_validation_failures": initial_generation_validation_failures,
+        "codegen_recovery_meta": recovery_meta,
         "effective_codegen_passes_per_candidate": 1,
         "selected_candidate_index": 1,
         "selected_candidate_score": float(final_assessment.builder_score),

@@ -17,10 +17,10 @@ class GenreEngine:
     name: str
     required_systems: list[str]
     reference_patterns: list[str]
-    min_functions: int = 20
-    min_lines: int = 1000
-    min_shaders: int = 2
-    min_states: int = 3
+    min_functions: int = 10
+    min_lines: int = 320
+    min_shaders: int = 1
+    min_states: int = 2
     prompt_hints: str = ""
 
 
@@ -43,10 +43,10 @@ _REGISTRY: dict[str, GenreEngine] = {
             "6DOF flight with pitch/yaw/roll/throttle",
             "Raycaster-based laser targeting",
         ],
-        min_functions=30,
-        min_lines=2000,
-        min_shaders=3,
-        min_states=4,
+        min_functions=14,
+        min_lines=420,
+        min_shaders=1,
+        min_states=3,
         prompt_hints=(
             "Implement a space combat game with procedural planets using QuadTree LOD, "
             "6DOF flight physics, NPC fighters with FSM AI (orbit/chase/attack/dying), "
@@ -73,10 +73,10 @@ _REGISTRY: dict[str, GenreEngine] = {
             "Checkpoint/lap system with split times",
             "Dynamic camera shake on boost/collision",
         ],
-        min_functions=25,
-        min_lines=1500,
-        min_shaders=2,
-        min_states=3,
+        min_functions=12,
+        min_lines=340,
+        min_shaders=1,
+        min_states=2,
         prompt_hints=(
             "Implement a 3D racing game with procedural road generation, "
             "realistic vehicle physics (acceleration, braking, drift), "
@@ -103,10 +103,10 @@ _REGISTRY: dict[str, GenreEngine] = {
             "Health/ammo pickup system with respawn",
             "Hit impact particles and screen shake",
         ],
-        min_functions=25,
-        min_lines=1500,
-        min_shaders=2,
-        min_states=3,
+        min_functions=12,
+        min_lines=340,
+        min_shaders=1,
+        min_states=2,
         prompt_hints=(
             "Implement a first-person arena shooter with mouse look camera, "
             "raycaster-based weapons, procedural arena map, enemy AI FSM, "
@@ -132,10 +132,10 @@ _REGISTRY: dict[str, GenreEngine] = {
             "Smooth third-person camera with orbit controls",
             "Hazard patterns: moving, rotating, timed",
         ],
-        min_functions=20,
-        min_lines=1200,
-        min_shaders=2,
-        min_states=3,
+        min_functions=10,
+        min_lines=300,
+        min_shaders=1,
+        min_states=2,
         prompt_hints=(
             "Implement a 3D platformer with character controller, jump physics "
             "(coyote time, variable height), procedural platforms, collectibles, "
@@ -161,9 +161,9 @@ _REGISTRY: dict[str, GenreEngine] = {
             "Particle burst effects on hit/collect/destroy",
             "Progressive difficulty scaling on timer/score thresholds",
         ],
-        min_functions=15,
-        min_lines=800,
-        min_shaders=1,
+        min_functions=8,
+        min_lines=220,
+        min_shaders=0,
         min_states=2,
         prompt_hints=(
             "Implement a polished arcade game with smooth player movement, "

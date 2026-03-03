@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.services.vertex_text_utils import coerce_message_text, looks_like_playable_artifact, strip_code_fences
+from app.services.vertex_text_utils import (
+    coerce_message_text,
+    looks_like_playable_artifact,
+    playable_artifact_missing_requirements,
+    strip_code_fences,
+)
 
 
 def test_coerce_message_text_handles_mixed_content() -> None:
@@ -22,3 +27,23 @@ def test_looks_like_playable_artifact_checks_required_tokens() -> None:
         "</script></body></html>"
     )
     assert looks_like_playable_artifact(html)
+
+
+def test_looks_like_playable_artifact_accepts_canvas_runtime_without_canvas_tag() -> None:
+    html = (
+        "<html><body><script>"
+        "const c = document.createElement('canvas');"
+        "document.body.appendChild(c);"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "</script></body></html>"
+    )
+    assert looks_like_playable_artifact(html)
+
+
+def test_playable_artifact_missing_requirements_returns_missing_tokens() -> None:
+    html = "<html><body><script>requestAnimationFrame(()=>{});</script></body></html>"
+    missing = playable_artifact_missing_requirements(html)
+    assert "boot_flag" in missing
+    assert "leaderboard_contract" in missing

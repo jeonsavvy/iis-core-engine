@@ -28,15 +28,36 @@ def strip_code_fences(text: str) -> str:
     return cleaned.strip()
 
 
-def looks_like_playable_artifact(html_content: str) -> bool:
+def playable_artifact_missing_requirements(html_content: str) -> list[str]:
     lowered = html_content.casefold()
-    return all(
+    missing: list[str] = []
+
+    if "<html" not in lowered:
+        missing.append("html_document")
+    if "__iis_game_boot_ok" not in lowered:
+        missing.append("boot_flag")
+    if "iisleaderboard" not in lowered:
+        missing.append("leaderboard_contract")
+    if "requestanimationframe" not in lowered:
+        missing.append("realtime_loop")
+
+    has_canvas_runtime = any(
         token in lowered
         for token in (
-            "<html",
-            "window.__iis_game_boot_ok",
-            "window.iisleaderboard",
-            "requestanimationframe",
             "<canvas",
+            "createelement(\"canvas\")",
+            "createelement('canvas')",
+            "webglrenderer(",
+            "getcontext(\"webgl",
+            "getcontext('webgl",
+            "new phaser.game",
         )
     )
+    if not has_canvas_runtime:
+        missing.append("canvas_or_render_runtime")
+
+    return missing
+
+
+def looks_like_playable_artifact(html_content: str) -> bool:
+    return not playable_artifact_missing_requirements(html_content)
