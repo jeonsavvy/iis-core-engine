@@ -128,10 +128,21 @@ def extract_capability_profile(
             f"fail_state:{fail_state_model}",
         }
     )
-    if _contains(token_set, merged_compact, "3d", "webgl", "voxel", "first", "third", "입체", "fps", "tps"):
-        capability_tags.append("render:3d")
-    else:
+    explicit_2d_request = _contains(
+        token_set,
+        merged_compact,
+        "2d",
+        "pixel",
+        "도트",
+        "플랫",
+        "카드게임",
+        "텍스트",
+        "보드게임",
+    )
+    if explicit_2d_request:
         capability_tags.append("render:2d")
+    else:
+        capability_tags.append("render:3d")
 
     profile: dict[str, Any] = {
         "profile_id": f"cp-{request_hash}",

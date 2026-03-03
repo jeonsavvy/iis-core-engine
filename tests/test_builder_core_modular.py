@@ -92,7 +92,7 @@ def test_build_modular_artifact_produces_rqc_ready_runtime() -> None:
         design_contract={"scene_layers": ["fg", "mg", "bg"]},
         rqc_version="rqc-1",
     )
-    assert "getContext(\"webgl\"" in result.artifact_html
+    assert "new THREE.WebGLRenderer" in result.artifact_html
     assert result.selfcheck_result["passed"] is True
     assert result.module_signature
     assert result.module_plan["primary_modules"]
@@ -116,7 +116,7 @@ def test_build_modular_artifact_resolves_vehicle_capability_for_korean_car_promp
     assert result.capability_profile["interaction_model"] == "navigation"
     assert result.capability_profile["camera_model"] == "chase"
     assert "조향:" in result.artifact_html
-    assert "Objective: engage and clear" not in result.artifact_html
+    assert "피치" not in result.artifact_html
 
 
 def test_build_modular_artifact_resolves_vehicle_capability_for_compact_korean_prompt() -> None:
@@ -135,6 +135,23 @@ def test_build_modular_artifact_resolves_vehicle_capability_for_compact_korean_p
     )
     assert result.capability_profile["locomotion_model"] == "vehicle"
     assert result.capability_profile["interaction_model"] == "navigation"
+
+
+def test_build_modular_artifact_defaults_to_3d_render_for_generic_prompt() -> None:
+    result = build_modular_artifact(
+        keyword="게임 만들어줘",
+        title="Generic Quest",
+        genre="arcade",
+        slug="generic-quest",
+        accent_color="#38BDF8",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=20,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type="arcade",
+        rqc_version="rqc-1",
+    )
+    assert "render:3d" in result.capability_profile["capability_tags"]
 
 
 def test_build_production_artifact_uses_modular_core_when_enabled() -> None:

@@ -5,7 +5,59 @@ from typing import Any
 
 def _js_string(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-    return f"\"{escaped}\""
+    return f'"{escaped}"'
+
+
+def _resolve_runtime_contract(
+    *,
+    capability_profile: dict[str, Any],
+    contract_bundle: dict[str, Any],
+    genre: str,
+) -> dict[str, str]:
+    locomotion = str(capability_profile.get("locomotion_model", "on_foot"))
+    interaction = str(capability_profile.get("interaction_model", "action"))
+    camera = str(capability_profile.get("camera_model", "third_person"))
+
+    plan_rows = []
+    deliverables = contract_bundle.get("deliverables")
+    if isinstance(deliverables, dict):
+        plan = deliverables.get("plan")
+        if isinstance(plan, list):
+            plan_rows = [str(item).strip() for item in plan if str(item).strip()]
+
+    objective = "핵심 루프를 유지하면서 점수를 누적하세요."
+    controls = "이동: W/A/S/D 또는 방향키 · 액션: Space · 회피: Shift · 재시작: R"
+    mode_label = "전술 전투"
+
+    if locomotion == "flight":
+        mode_label = "3D 비행 임무"
+        objective = "링과 목표 지점을 연결해 고도와 속도를 안정적으로 유지하세요."
+        controls = "피치: W/S · 요: A/D · 롤: Q/E · 스로틀: ↑/↓ · 부스트: Shift · 재시작: R"
+    elif locomotion == "vehicle":
+        mode_label = "3D 레이싱 주행"
+        objective = "주행 라인을 지키며 체크포인트를 연속 통과해 기록을 올리세요."
+        controls = "조향: A/D 또는 ←/→ · 가속/감속: W/S 또는 ↑/↓ · 부스트: Shift · 재시작: R"
+    elif interaction == "ranged_combat":
+        mode_label = "3D 슈팅 전투"
+        objective = "이동 사격으로 적 압박을 관리하고 생존 시간을 늘리세요."
+        controls = "이동: W/A/S/D · 사격: Space · 회피: Shift · 재시작: R"
+    elif interaction == "melee_combat":
+        mode_label = "3D 근접 전투"
+        objective = "거리 조절과 타이밍으로 콤보를 이어가며 아레나를 제압하세요."
+        controls = "이동: W/A/S/D · 공격: Space · 회피: Shift · 재시작: R"
+
+    if plan_rows:
+        objective = plan_rows[0]
+
+    if camera == "first_person" and locomotion == "on_foot":
+        mode_label = "1인칭 전투"
+
+    return {
+        "mode_label": mode_label,
+        "objective": objective,
+        "controls": controls,
+        "genre": genre,
+    }
 
 
 def export_runtime_artifact(
@@ -24,7 +76,6 @@ def export_runtime_artifact(
     contract_bundle: dict[str, Any],
     rqc_version: str,
 ) -> str:
-    module_sources = "\n".join(str(chunk) for chunk in assembled_modules.get("module_sources", []))
     module_signature = str(assembled_modules.get("module_signature", "unknown"))
     camera_model = str(capability_profile.get("camera_model", "third_person"))
     locomotion_model = str(capability_profile.get("locomotion_model", "on_foot"))
@@ -32,25 +83,17 @@ def export_runtime_artifact(
     world_topology = str(capability_profile.get("world_topology", "arena"))
     progression_model = str(capability_profile.get("progression_model", "objective_chain"))
     profile_id = str(capability_profile.get("profile_id", "cp-unknown"))
-    objective_lines = contract_bundle.get("deliverables", {}).get("plan") if isinstance(contract_bundle.get("deliverables"), dict) else []
-    objective_text = " / ".join(str(item) for item in objective_lines[:2]) if isinstance(objective_lines, list) else ""
-    objective_seed = "Engage hostiles and secure interactives"
-    control_guide = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 상호작용: E · 모드전환: C · 재시작: R"
-    if locomotion_model == "flight":
-        objective_seed = "Navigate waypoints and maintain stable vector"
-        control_guide = "자세 제어: W/S 피치 · A/D 롤 · Q/E 요 · 속도 제어: ↑/↓ 스로틀 · Shift 부스트 · 재시작: R"
-    elif locomotion_model == "vehicle":
-        objective_seed = "Hold racing line and clear checkpoints"
-        control_guide = "조향: A/D 또는 ←/→ · 가속/감속: W/S 또는 ↑/↓ · Shift 부스트 · C 모드전환 · 재시작: R"
-    elif interaction_model == "ranged_combat":
-        objective_seed = "Maintain angle and neutralize hostiles"
-        control_guide = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 상호작용: E · 모드전환: C · 재시작: R"
+    runtime_contract = _resolve_runtime_contract(
+        capability_profile=capability_profile,
+        contract_bundle=contract_bundle,
+        genre=genre,
+    )
 
     return f"""<!doctype html>
-<html lang="ko">
+<html lang=\"ko\">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>{title}</title>
     <style>
       :root {{
@@ -64,7 +107,7 @@ def export_runtime_artifact(
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: radial-gradient(circle at 12% 12%, #1e293b 0%, #020617 55%, #020412 100%);
+        background: radial-gradient(circle at 14% 10%, #182237 0%, #050a14 52%, #02040b 100%);
         color: #e2e8f0;
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       }}
@@ -78,7 +121,7 @@ def export_runtime_artifact(
         max-height: 100vh;
         aspect-ratio: 16 / 9;
         display: grid;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto auto 1fr;
         gap: 10px;
         padding: var(--safe-area-padding);
         box-sizing: border-box;
@@ -89,11 +132,16 @@ def export_runtime_artifact(
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        font-size: clamp(13px, 1.4vw, 16px);
       }}
       .title {{
-        font-size: clamp(20px, 2.8vw, 36px);
+        font-size: clamp(20px, 2.8vw, 34px);
         font-weight: 800;
+        letter-spacing: -0.02em;
+      }}
+      .subtitle {{
+        font-size: clamp(12px, 1.25vw, 14px);
+        color: #93c5fd;
+        margin-top: 4px;
       }}
       .hud {{
         display: flex;
@@ -102,17 +150,27 @@ def export_runtime_artifact(
       }}
       .hud span {{
         border: 1px solid rgba(148, 163, 184, 0.3);
-        background: rgba(15, 23, 42, 0.72);
-        padding: 6px 10px;
+        background: rgba(15, 23, 42, 0.74);
         border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 13px;
+      }}
+      #control-guide {{
+        margin: 0;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        background: rgba(15, 23, 42, 0.62);
+        color: #dbeafe;
+        font-size: 13px;
       }}
       .stage {{
         position: relative;
-        border: 1px solid rgba(148, 163, 184, 0.24);
         border-radius: 14px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
         overflow: hidden;
         min-height: 320px;
-        background: linear-gradient(160deg, #020617, #020812 70%, #021229);
+        background: linear-gradient(160deg, #020617 0%, #020a1c 70%, #021228 100%);
       }}
       #game {{
         width: 100%;
@@ -143,55 +201,58 @@ def export_runtime_artifact(
       }}
       #restart-btn {{
         border: 1px solid rgba(125, 211, 252, 0.55);
-        background: rgba(59, 130, 246, 0.22);
+        background: rgba(59, 130, 246, 0.24);
         color: #dbeafe;
         border-radius: 999px;
         padding: 8px 14px;
         cursor: pointer;
         font-weight: 700;
       }}
-      .guide {{
-        font-size: 13px;
-        color: #cbd5e1;
-        opacity: 0.96;
-      }}
     </style>
+    <script type=\"importmap\">
+      {{
+        \"imports\": {{
+          \"three\": \"https://unpkg.com/three@0.160.0/build/three.module.js\"
+        }}
+      }}
+    </script>
   </head>
-  <body data-overflow-policy="{text_overflow_policy}">
-    <div class="overflow-guard" aria-label="game-runtime-shell">
-      <header class="topbar">
+  <body data-overflow-policy=\"{text_overflow_policy}\">
+    <div class=\"overflow-guard\" aria-label=\"game-runtime-shell\">
+      <header class=\"topbar\">
         <div>
-          <div class="title">{title}</div>
-          <div style="font-size:13px;color:#93c5fd">{genre} · {objective_text or "목표를 달성하고 생존 시간을 늘리세요."}</div>
+          <div class=\"title\">{title}</div>
+          <div class=\"subtitle\">{runtime_contract['mode_label']} · {runtime_contract['genre']}</div>
         </div>
-        <div class="hud" aria-live="polite">
-          <span id="score">Score: 0</span>
-          <span id="timer">Time: 90.0s</span>
-          <span id="hp">HP: 3</span>
-          <span id="objective">Objective: {objective_seed}</span>
+        <div class=\"hud\" aria-live=\"polite\">
+          <span id=\"score\">점수 0</span>
+          <span id=\"timer\">남은 시간 90.0초</span>
+          <span id=\"hp\">내구도 100</span>
+          <span id=\"objective\">목표: {runtime_contract['objective']}</span>
         </div>
       </header>
+      <p id=\"control-guide\">{runtime_contract['controls']}</p>
 
-      <main class="stage">
-        <canvas id="game" width="{viewport_width}" height="{viewport_height}" aria-label="게임 캔버스"></canvas>
-        <div id="overlay" role="dialog" aria-modal="true" aria-hidden="true">
-          <div id="overlay-card">
-            <strong style="font-size:28px">Game Over</strong>
-            <p id="overlay-text" style="margin:0;color:#bfdbfe">전투가 종료되었습니다.</p>
-            <button id="restart-btn" type="button">다시 시작 (R)</button>
+      <main class=\"stage\">
+        <canvas id=\"game\" width=\"{viewport_width}\" height=\"{viewport_height}\" aria-label=\"게임 캔버스\"></canvas>
+        <div id=\"overlay\" role=\"dialog\" aria-modal=\"true\" aria-hidden=\"true\">
+          <div id=\"overlay-card\">
+            <strong style=\"font-size:28px\">게임 종료</strong>
+            <p id=\"overlay-text\" style=\"margin:0;color:#bfdbfe\">다시 도전해 기록을 경신하세요.</p>
+            <button id=\"restart-btn\" type=\"button\">다시 시작 (R)</button>
           </div>
         </div>
       </main>
-
-      <footer class="guide">
-        {control_guide}
-      </footer>
     </div>
-    <script>
+
+    <script type=\"module\">
+      import * as THREE from \"three\";
+
       window.__iis_game_boot_ok = true;
       window.IISLeaderboard = window.IISLeaderboard || {{
         submit: async () => ({{ ok: true }}),
       }};
+
       const CONFIG = {{
         title: {_js_string(title)},
         genre: {_js_string(genre)},
@@ -208,11 +269,7 @@ def export_runtime_artifact(
         rqcVersion: {_js_string(rqc_version)},
       }};
 
-      const runtimeModules = {{}};
-{module_sources}
-
       const canvas = document.getElementById("game");
-      const ctx = canvas.getContext("2d", {{ alpha: false }});
       const overlay = document.getElementById("overlay");
       const overlayText = document.getElementById("overlay-text");
       const scoreEl = document.getElementById("score");
@@ -220,358 +277,468 @@ def export_runtime_artifact(
       const hpEl = document.getElementById("hp");
       const objectiveEl = document.getElementById("objective");
       const restartBtn = document.getElementById("restart-btn");
-      const glCanvas = document.createElement("canvas");
-      glCanvas.width = canvas.width;
-      glCanvas.height = canvas.height;
-      const gl = glCanvas.getContext("webgl", {{ antialias: true }});
+      const controlGuideEl = document.getElementById("control-guide");
+
+      const renderer = new THREE.WebGLRenderer({{ canvas, antialias: true, powerPreference: "high-performance" }});
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x060d1b);
+      scene.fog = new THREE.Fog(0x060d1b, 30, 220);
+
+      const camera = new THREE.PerspectiveCamera(CONFIG.cameraModel === "first_person" ? 72 : 62, 16 / 9, 0.1, 420);
+      camera.position.set(0, 4.8, 10);
+
+      const hemi = new THREE.HemisphereLight(0x9cc7ff, 0x061018, 0.9);
+      scene.add(hemi);
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+      keyLight.position.set(10, 18, 8);
+      keyLight.castShadow = true;
+      scene.add(keyLight);
+
+      const ambientMist = new THREE.PointLight(0x1fb6ff, 0.5, 60);
+      ambientMist.position.set(-8, 8, -2);
+      scene.add(ambientMist);
+
+      const worldRoot = new THREE.Group();
+      scene.add(worldRoot);
+
+      const groundGeo = new THREE.PlaneGeometry(120, 240, 1, 1);
+      const groundMat = new THREE.MeshStandardMaterial({{ color: 0x0e1a2f, roughness: 0.87, metalness: 0.08 }});
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI * 0.5;
+      ground.position.y = -0.55;
+      ground.receiveShadow = true;
+      worldRoot.add(ground);
+
+      const laneLines = new THREE.Group();
+      for (let i = -4; i <= 4; i += 2) {{
+        const line = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.02, 240),
+          new THREE.MeshStandardMaterial({{ color: i === 0 ? 0x7dd3fc : 0x2b4265, emissive: i === 0 ? 0x10325b : 0x06101f }})
+        );
+        line.position.set(i, -0.49, 24);
+        laneLines.add(line);
+      }}
+      worldRoot.add(laneLines);
+
+      function makePlayerMesh() {{
+        const group = new THREE.Group();
+        if (CONFIG.locomotionModel === "flight") {{
+          const body = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.8, 10), new THREE.MeshStandardMaterial({{ color: 0x38bdf8, emissive: 0x0e3a62 }}));
+          body.rotation.x = Math.PI * 0.5;
+          group.add(body);
+          const wing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.55), new THREE.MeshStandardMaterial({{ color: 0x93c5fd }}));
+          wing.position.z = -0.1;
+          group.add(wing);
+        }} else if (CONFIG.locomotionModel === "vehicle") {{
+          const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 2.2), new THREE.MeshStandardMaterial({{ color: 0x38bdf8, emissive: 0x06263f }}));
+          body.position.y = 0.1;
+          group.add(body);
+          const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.4, 0.9), new THREE.MeshStandardMaterial({{ color: 0xe2e8f0 }}));
+          cabin.position.set(0, 0.52, -0.1);
+          group.add(cabin);
+        }} else {{
+          const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 1.0, 6, 12), new THREE.MeshStandardMaterial({{ color: 0x22d3ee, emissive: 0x0c3442 }}));
+          torso.castShadow = true;
+          group.add(torso);
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), new THREE.MeshStandardMaterial({{ color: 0xe2e8f0 }}));
+          head.position.y = 0.95;
+          group.add(head);
+        }}
+        return group;
+      }}
+
+      function makeEnemyMesh(kind) {{
+        const color = kind === "heavy" ? 0xf97316 : 0xef4444;
+        const body = new THREE.Mesh(
+          kind === "heavy" ? new THREE.CylinderGeometry(0.55, 0.8, 1.6, 10) : new THREE.BoxGeometry(0.95, 1.2, 0.95),
+          new THREE.MeshStandardMaterial({{ color, emissive: kind === "heavy" ? 0x4a1406 : 0x3f0710 }})
+        );
+        body.castShadow = true;
+        return body;
+      }}
+
+      function makeCheckpointMesh() {{
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(1.1, 0.18, 14, 36),
+          new THREE.MeshStandardMaterial({{ color: 0x22d3ee, emissive: 0x0c4255, metalness: 0.18, roughness: 0.36 }})
+        );
+        ring.rotation.x = Math.PI * 0.5;
+        return ring;
+      }}
+
+      function makePickupMesh() {{
+        return new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.45, 0),
+          new THREE.MeshStandardMaterial({{ color: 0x84cc16, emissive: 0x223f0a }})
+        );
+      }}
 
       const state = {{
         running: true,
-        score: 0,
-        hp: 3,
+        elapsed: 0,
         timeLeft: 90,
-        runtimeSec: 0,
-        lastTs: 0,
-        viewport: {{ w: canvas.width, h: canvas.height }},
-        input: {{
-          left: false, right: false, up: false, down: false,
-          attack: false, sprint: false, interact: false, altAction: false,
-          pitchUp: false, pitchDown: false, rollLeft: false, rollRight: false,
-          yawLeft: false, yawRight: false, throttleUp: false, throttleDown: false,
-          toggleMode: false,
-        }},
-        runtimeProfile: {{
-          cameraModel: CONFIG.cameraModel,
-          locomotionModel: CONFIG.locomotionModel,
-          interactionModel: CONFIG.interactionModel,
-        }},
+        hp: 100,
+        score: 0,
+        combo: 1,
+        speed: 0,
+        objective: { _js_string(runtime_contract["objective"]) },
+        keys: Object.create(null),
         player: {{
-          x: 0, y: 0, z: 4, vx: 0, vy: 0, vz: 0, combo: 1, attackCooldown: 0, mode: "precision",
-        }},
-        camera: {{
-          x: 0, y: 2.2, z: -2.8, focal: 760,
-        }},
-        feedback: {{
-          hitPulse: 0, damagePulse: 0, cameraShake: 0,
-        }},
-        progress: {{
-          wave: 1,
-          waveTimer: 0,
-          spawnCadence: 1.35,
-          objective: "{objective_seed}",
-          time: 0,
-        }},
-        enemies: [],
-        projectiles: [],
-        interactives: [],
-        checkpoints: [],
-        worldObjects: [],
-        statusMachine: "explore",
-        flight: {{
-          throttle: 0.85,
+          mesh: makePlayerMesh(),
+          velocity: new THREE.Vector3(),
+          yaw: 0,
           pitch: 0,
           roll: 0,
-          yaw: 0,
-          speedBase: 11,
+          throttle: CONFIG.locomotionModel === "flight" ? 0.72 : 0.45,
         }},
-        vehicle: {{
-          throttle: 0.72,
-          speed: 9,
-          baseSpeed: 8.5,
-          yaw: 0,
-        }},
+        enemies: [],
+        checkpoints: [],
+        pickups: [],
+        attackCooldown: 0,
+        spawnClock: 0,
       }};
 
-      function drawWebglBackdrop(t) {{
-        if (!gl) return;
-        const r = 0.03 + Math.sin(t * 0.00025) * 0.02;
-        const g = 0.06 + Math.cos(t * 0.0002) * 0.015;
-        const b = 0.12 + Math.sin(t * 0.0003) * 0.025;
-        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-        gl.clearColor(r, g, b, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        ctx.drawImage(glCanvas, 0, 0, canvas.width, canvas.height);
+      state.player.mesh.position.set(0, CONFIG.locomotionModel === "flight" ? 2.2 : 0.2, 0);
+      worldRoot.add(state.player.mesh);
+
+      const pulseMaterial = new THREE.MeshBasicMaterial({{ color: 0x22d3ee, transparent: true, opacity: 0.8 }});
+      const pulses = [];
+
+      function resize() {{
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(640, Math.round(rect.width));
+        const height = Math.max(360, Math.round(rect.height));
+        if (canvas.width !== width || canvas.height !== height) {{
+          canvas.width = width;
+          canvas.height = height;
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        }}
       }}
 
-      function setInputFromKey(key, pressed) {{
-        if (key === "a" || key === "arrowleft") state.input.left = pressed;
-        if (key === "d" || key === "arrowright") state.input.right = pressed;
-        if (key === "w" || key === "arrowup") state.input.up = pressed;
-        if (key === "s" || key === "arrowdown") state.input.down = pressed;
-        if (key === "w") state.input.pitchUp = pressed;
-        if (key === "s") state.input.pitchDown = pressed;
-        if (key === "a") state.input.rollLeft = pressed;
-        if (key === "d") state.input.rollRight = pressed;
-        if (key === "q") state.input.yawLeft = pressed;
-        if (key === "e") state.input.yawRight = pressed;
-        if (key === "arrowup") state.input.throttleUp = pressed;
-        if (key === "arrowdown") state.input.throttleDown = pressed;
-        if (key === " ") state.input.attack = pressed;
-        if (key === "shift") state.input.sprint = pressed;
-        if (key === "e") state.input.interact = pressed;
-        if (key === "c" && pressed) state.input.toggleMode = true;
+      function spawnEnemy() {{
+        if (CONFIG.locomotionModel !== "on_foot") return;
+        const kind = Math.random() < 0.25 ? "heavy" : "light";
+        const mesh = makeEnemyMesh(kind);
+        mesh.position.set((Math.random() - 0.5) * 18, 0.2, 12 + Math.random() * 16);
+        worldRoot.add(mesh);
+        state.enemies.push({{ mesh, kind, hp: kind === "heavy" ? 3 : 2, speed: kind === "heavy" ? 2.4 : 3.3 }});
       }}
 
-      document.addEventListener("keydown", (event) => {{
-        if (!state.running && (event.key === "r" || event.key === "R")) {{
-          restartGame();
+      function spawnCheckpoint() {{
+        const mesh = makeCheckpointMesh();
+        const xRange = CONFIG.locomotionModel === "vehicle" ? 8.2 : 9.5;
+        const yLevel = CONFIG.locomotionModel === "flight" ? 1.2 + Math.random() * 6.5 : 0.9;
+        mesh.position.set((Math.random() - 0.5) * xRange, yLevel, 26 + Math.random() * 40);
+        worldRoot.add(mesh);
+        state.checkpoints.push({{ mesh, radius: CONFIG.locomotionModel === "vehicle" ? 1.8 : 1.4 }});
+      }}
+
+      function spawnPickup() {{
+        const mesh = makePickupMesh();
+        mesh.position.set((Math.random() - 0.5) * 14, 0.8, 10 + Math.random() * 24);
+        worldRoot.add(mesh);
+        state.pickups.push({{ mesh, radius: 0.9 }});
+      }}
+
+      function spawnPulse() {{
+        if (CONFIG.locomotionModel !== "on_foot") return;
+        const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), pulseMaterial.clone());
+        pulse.position.copy(state.player.mesh.position);
+        pulse.position.y += 0.5;
+        pulse.userData = {{ life: 0.35 }};
+        worldRoot.add(pulse);
+        pulses.push(pulse);
+      }}
+
+      function updateControls(dt) {{
+        const keys = state.keys;
+        const left = keys["a"] || keys["arrowleft"];
+        const right = keys["d"] || keys["arrowright"];
+        const up = keys["w"] || keys["arrowup"];
+        const down = keys["s"] || keys["arrowdown"];
+        const sprint = keys["shift"];
+
+        if (CONFIG.locomotionModel === "flight") {{
+          const pitchAxis = (keys["w"] ? 1 : 0) - (keys["s"] ? 1 : 0);
+          const yawAxis = (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0);
+          const rollAxis = (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0);
+          const throttleAxis = (keys["arrowup"] ? 1 : 0) - (keys["arrowdown"] ? 1 : 0);
+          state.player.throttle = THREE.MathUtils.clamp(state.player.throttle + throttleAxis * dt * 0.62, 0.35, 1.75);
+          state.player.pitch = THREE.MathUtils.clamp(state.player.pitch + pitchAxis * dt * 1.7, -0.7, 0.7);
+          state.player.yaw += yawAxis * dt * 1.35;
+          state.player.roll = THREE.MathUtils.clamp(state.player.roll + rollAxis * dt * 1.9, -0.95, 0.95);
+          const speed = 8 + state.player.throttle * 17 + (sprint ? 6 : 0);
+          state.speed = speed;
+          state.player.velocity.x = Math.sin(state.player.yaw) * speed * 0.45;
+          state.player.velocity.y = state.player.pitch * speed * 0.38;
+          state.player.velocity.z = speed;
+          state.player.mesh.position.x = THREE.MathUtils.clamp(state.player.mesh.position.x + state.player.velocity.x * dt, -14, 14);
+          state.player.mesh.position.y = THREE.MathUtils.clamp(state.player.mesh.position.y + state.player.velocity.y * dt, 0.8, 10.5);
+          state.player.mesh.rotation.set(state.player.pitch * 0.8, -state.player.yaw, state.player.roll * 0.85);
           return;
         }}
-        setInputFromKey(event.key.toLowerCase(), true);
-      }});
-      document.addEventListener("keyup", (event) => {{
-        setInputFromKey(event.key.toLowerCase(), false);
-      }});
-      restartBtn.addEventListener("click", restartGame);
 
-      window.addEventListener("message", (event) => {{
-        const data = event.data || {{}};
-        if (data.type === "iis:recover:start" && !state.running && state.runtimeSec < 8.0) {{
-          restartGame();
+        if (CONFIG.locomotionModel === "vehicle") {{
+          const steer = (right ? 1 : 0) - (left ? 1 : 0);
+          const throttle = (up ? 1 : 0) - (down ? 1 : 0);
+          state.player.throttle = THREE.MathUtils.clamp(state.player.throttle + throttle * dt * 1.15, 0.2, 1.85);
+          state.speed = 16 + state.player.throttle * 24 + (sprint ? 10 : 0);
+          state.player.mesh.position.x = THREE.MathUtils.clamp(state.player.mesh.position.x + steer * dt * (6 + state.speed * 0.08), -9.5, 9.5);
+          state.player.mesh.rotation.y = -steer * 0.22;
+          return;
         }}
-      }});
 
-      function restartGame() {{
+        const moveX = (right ? 1 : 0) - (left ? 1 : 0);
+        const moveZ = (down ? 1 : 0) - (up ? 1 : 0);
+        const targetSpeed = (sprint ? 8.7 : 5.8);
+        state.speed = targetSpeed;
+        state.player.velocity.x += (moveX * targetSpeed - state.player.velocity.x * 6.0) * dt;
+        state.player.velocity.z += (moveZ * targetSpeed - state.player.velocity.z * 6.0) * dt;
+        state.player.mesh.position.x = THREE.MathUtils.clamp(state.player.mesh.position.x + state.player.velocity.x * dt, -10.5, 10.5);
+        state.player.mesh.position.z = THREE.MathUtils.clamp(state.player.mesh.position.z + state.player.velocity.z * dt, -18, 18);
+      }}
+
+      function updateCamera(dt) {{
+        if (CONFIG.cameraModel === "first_person" && CONFIG.locomotionModel === "on_foot") {{
+          const eye = new THREE.Vector3(state.player.mesh.position.x, state.player.mesh.position.y + 1.1, state.player.mesh.position.z + 0.1);
+          camera.position.lerp(eye, Math.min(1, dt * 8.5));
+          camera.lookAt(state.player.mesh.position.x, state.player.mesh.position.y + 0.9, state.player.mesh.position.z - 5.2);
+          return;
+        }}
+
+        if (CONFIG.locomotionModel === "flight") {{
+          const target = new THREE.Vector3(state.player.mesh.position.x, state.player.mesh.position.y + 2.2, state.player.mesh.position.z + 11);
+          camera.position.lerp(target, Math.min(1, dt * 3.2));
+          camera.lookAt(state.player.mesh.position.x, state.player.mesh.position.y + 0.5, state.player.mesh.position.z + 32);
+          return;
+        }}
+
+        if (CONFIG.locomotionModel === "vehicle") {{
+          const target = new THREE.Vector3(state.player.mesh.position.x * 0.45, 4.8, 11.5);
+          camera.position.lerp(target, Math.min(1, dt * 4.8));
+          camera.lookAt(state.player.mesh.position.x * 0.65, 0.7, -6.5);
+          return;
+        }}
+
+        const target = new THREE.Vector3(state.player.mesh.position.x * 0.45, 5.1, 10.8);
+        camera.position.lerp(target, Math.min(1, dt * 5.2));
+        camera.lookAt(state.player.mesh.position.x * 0.45, 0.8, state.player.mesh.position.z - 4.5);
+      }}
+
+      function updateActors(dt) {{
+        state.spawnClock += dt;
+        if (state.spawnClock > 1.05) {{
+          state.spawnClock = 0;
+          if (CONFIG.locomotionModel === "on_foot") spawnEnemy();
+          spawnCheckpoint();
+          if (Math.random() < 0.55) spawnPickup();
+        }}
+
+        for (const pulse of pulses) {{
+          pulse.userData.life -= dt;
+          pulse.scale.addScalar(dt * 4.2);
+          pulse.material.opacity = Math.max(0, pulse.userData.life * 2.4);
+        }}
+
+        for (const enemy of state.enemies) {{
+          const dir = new THREE.Vector3().subVectors(state.player.mesh.position, enemy.mesh.position);
+          dir.y = 0;
+          const dist = Math.max(0.001, dir.length());
+          dir.normalize();
+          enemy.mesh.position.addScaledVector(dir, enemy.speed * dt);
+          enemy.mesh.lookAt(state.player.mesh.position.x, enemy.mesh.position.y, state.player.mesh.position.z);
+
+          if (state.elapsed > 3 && dist < 1.35) {{
+            state.hp = Math.max(0, state.hp - (enemy.kind === "heavy" ? 22 : 12) * dt);
+          }}
+        }}
+
+        for (const checkpoint of state.checkpoints) {{
+          checkpoint.mesh.rotation.z += dt * 0.9;
+          checkpoint.mesh.rotation.y += dt * 1.1;
+          if (CONFIG.locomotionModel === "vehicle") {{
+            checkpoint.mesh.position.z -= state.speed * dt * 0.68;
+          }} else if (CONFIG.locomotionModel === "flight") {{
+            checkpoint.mesh.position.z -= state.speed * dt * 0.75;
+          }}
+        }}
+
+        for (const pickup of state.pickups) {{
+          pickup.mesh.rotation.x += dt * 0.9;
+          pickup.mesh.rotation.y += dt * 1.2;
+          pickup.mesh.position.y = 0.7 + Math.sin(state.elapsed * 2.4 + pickup.mesh.position.x) * 0.22;
+          if (CONFIG.locomotionModel !== "on_foot") {{
+            pickup.mesh.position.z -= state.speed * dt * 0.68;
+          }}
+        }}
+
+        state.checkpoints = state.checkpoints.filter((checkpoint) => checkpoint.mesh.position.z > -22);
+        state.pickups = state.pickups.filter((pickup) => pickup.mesh.position.z > -20);
+
+        for (let i = pulses.length - 1; i >= 0; i -= 1) {{
+          if (pulses[i].userData.life <= 0) {{
+            worldRoot.remove(pulses[i]);
+            pulses.splice(i, 1);
+          }}
+        }}
+      }}
+
+      function resolveCombat(dt) {{
+        if (CONFIG.locomotionModel !== "on_foot") return;
+        state.attackCooldown = Math.max(0, state.attackCooldown - dt);
+        if (state.keys[" "] && state.attackCooldown <= 0) {{
+          state.attackCooldown = 0.28;
+          spawnPulse();
+          for (const enemy of state.enemies) {{
+            const dist = enemy.mesh.position.distanceTo(state.player.mesh.position);
+            if (dist < 5.2) {{
+              enemy.hp -= 1;
+              if (enemy.hp <= 0) {{
+                state.score += enemy.kind === "heavy" ? 160 : 90;
+                state.combo = Math.min(6, state.combo + 0.2);
+              }}
+            }}
+          }}
+        }}
+        state.enemies = state.enemies.filter((enemy) => {{
+          if (enemy.hp > 0) return true;
+          worldRoot.remove(enemy.mesh);
+          return false;
+        }});
+      }}
+
+      function resolveInteractions() {{
+        const playerPos = state.player.mesh.position;
+        state.checkpoints = state.checkpoints.filter((checkpoint) => {{
+          const dist = checkpoint.mesh.position.distanceTo(playerPos);
+          if (dist <= checkpoint.radius + 0.7) {{
+            state.score += CONFIG.locomotionModel === "on_foot" ? 70 : 110;
+            state.timeLeft = Math.min(120, state.timeLeft + 2.8);
+            worldRoot.remove(checkpoint.mesh);
+            return false;
+          }}
+          return true;
+        }});
+
+        state.pickups = state.pickups.filter((pickup) => {{
+          const dist = pickup.mesh.position.distanceTo(playerPos);
+          if (dist <= pickup.radius + 0.7) {{
+            state.score += 45;
+            state.hp = Math.min(100, state.hp + 18);
+            worldRoot.remove(pickup.mesh);
+            return false;
+          }}
+          return true;
+        }});
+      }}
+
+      function updateHud() {{
+        scoreEl.textContent = `점수 ${{Math.floor(state.score)}} · 콤보 x${{state.combo.toFixed(1)}}`;
+        timerEl.textContent = `남은 시간 ${{Math.max(0, state.timeLeft).toFixed(1)}}초`;
+        hpEl.textContent = `내구도 ${{Math.max(0, Math.round(state.hp))}}`;
+        objectiveEl.textContent = `목표: ${{state.objective}}`;
+      }}
+
+      function endGame(reason) {{
+        if (!state.running) return;
+        state.running = false;
+        overlay.classList.add("show");
+        overlay.setAttribute("aria-hidden", "false");
+        overlayText.textContent = `사유: ${{reason}} · 최종 점수 ${{Math.floor(state.score)}}`;
+      }}
+
+      function resetGame() {{
         state.running = true;
-        state.score = 0;
-        state.hp = 3;
+        state.elapsed = 0;
         state.timeLeft = 90;
-        state.runtimeSec = 0;
-        state.lastTs = 0;
-        state.player.x = 0;
-        state.player.z = 4;
-        state.player.vx = 0;
-        state.player.vy = 0;
-        state.player.vz = 0;
-        state.player.combo = 1;
-        state.progress.wave = 1;
-        state.progress.waveTimer = 0;
-        state.progress.time = 0;
-        state.progress.objective = "{objective_seed}";
-        state.enemies = [];
-        state.projectiles = [];
-        state.interactives = [];
-        state.checkpoints = [];
-        state.flight.throttle = 0.85;
-        state.flight.pitch = 0;
-        state.flight.roll = 0;
-        state.flight.yaw = 0;
-        state.vehicle.throttle = 0.72;
-        state.vehicle.speed = 9;
-        state.vehicle.yaw = 0;
-        runtimeModules.scene_world?.buildWorld(state);
+        state.hp = 100;
+        state.score = 0;
+        state.combo = 1;
+        state.speed = 0;
+        state.attackCooldown = 0;
+        state.spawnClock = 0;
+        state.player.mesh.position.set(0, CONFIG.locomotionModel === "flight" ? 2.2 : 0.2, 0);
+        state.player.mesh.rotation.set(0, 0, 0);
+        state.player.velocity.set(0, 0, 0);
+        state.player.yaw = 0;
+        state.player.pitch = 0;
+        state.player.roll = 0;
+        state.player.throttle = CONFIG.locomotionModel === "flight" ? 0.72 : 0.45;
+
+        for (const enemy of state.enemies) worldRoot.remove(enemy.mesh);
+        for (const checkpoint of state.checkpoints) worldRoot.remove(checkpoint.mesh);
+        for (const pickup of state.pickups) worldRoot.remove(pickup.mesh);
+        for (const pulse of pulses) worldRoot.remove(pulse);
+        pulses.length = 0;
+        state.enemies.length = 0;
+        state.checkpoints.length = 0;
+        state.pickups.length = 0;
+
         overlay.classList.remove("show");
         overlay.setAttribute("aria-hidden", "true");
       }}
 
-      function damagePlayer(amount) {{
-        state.hp = Math.max(0, state.hp - amount);
-        runtimeModules.feedback_stack?.emitDamage(state);
-      }}
-
-      function updateStatusMachine() {{
-        if (!state.running) {{
-          state.statusMachine = "recover";
-          return;
-        }}
-        if (state.feedback.damagePulse > 0.45) {{
-          state.statusMachine = "combat";
-          return;
-        }}
-        if (state.input.sprint) {{
-          state.statusMachine = "dash";
-          return;
-        }}
-        state.statusMachine = "explore";
-      }}
-
-      function updateEnemies(dt) {{
-        if (state.runtimeProfile.locomotionModel === "flight" || state.runtimeProfile.locomotionModel === "vehicle") {{
-          return;
-        }}
-        for (const enemy of state.enemies) {{
-          const dx = state.player.x - enemy.x;
-          const dz = state.player.z - enemy.z;
-          const dist = Math.max(0.001, Math.hypot(dx, dz));
-          enemy.x += (dx / dist) * enemy.speed * dt;
-          enemy.z += (dz / dist) * enemy.speed * dt;
-          if (dist < 1.15) {{
-            damagePlayer(enemy.kind === "elite" ? 1.2 : 0.5);
-          }}
-        }}
-      }}
-
-      function resolveProjectiles() {{
-        for (const bullet of state.projectiles) {{
-          for (const enemy of state.enemies) {{
-            if (enemy.hp <= 0) continue;
-            const dx = enemy.x - bullet.x;
-            const dz = enemy.z - bullet.z;
-            if ((dx * dx + dz * dz) < 1.1) {{
-              enemy.hp -= 1;
-              state.score += enemy.kind === "elite" ? 50 : 20;
-              state.player.combo = Math.min(8, state.player.combo + 0.15);
-              state.feedback.hitPulse = 1;
-              bullet.ttl = 0;
-            }}
-          }}
-        }}
-        state.enemies = state.enemies.filter((enemy) => enemy.hp > 0);
-      }}
-
-      function resolveInteractives() {{
-        for (const item of state.interactives) {{
-          const dx = item.x - state.player.x;
-          const dz = item.z - state.player.z;
-          if ((dx * dx + dz * dz) < 1.2) {{
-            state.score += item.reward;
-            state.timeLeft = Math.min(120, state.timeLeft + 3);
-            item.taken = true;
-          }}
-        }}
-        state.interactives = state.interactives.filter((item) => !item.taken);
-      }}
-
-      function drawObject(point, kind, scale = 1) {{
-        const projected = runtimeModules.camera_stack.project(state, point);
-        const radius = Math.max(2, 16 * projected.s * scale);
-        if (projected.x < -60 || projected.x > canvas.width + 60) return;
-        if (projected.y < -60 || projected.y > canvas.height + 60) return;
-        ctx.save();
-        ctx.translate(projected.x, projected.y);
-        if (kind === "enemy") {{
-          ctx.fillStyle = "#ef4444";
-          ctx.fillRect(-radius * 0.55, -radius * 0.65, radius * 1.1, radius * 1.3);
-        }} else if (kind === "elite") {{
-          ctx.fillStyle = "#f97316";
-          ctx.beginPath();
-          ctx.moveTo(0, -radius);
-          ctx.lineTo(radius * 0.95, radius * 0.35);
-          ctx.lineTo(-radius * 0.95, radius * 0.35);
-          ctx.closePath();
-          ctx.fill();
-        }} else if (kind === "interactive") {{
-          ctx.fillStyle = "#22d3ee";
-          ctx.beginPath();
-          ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
-          ctx.fill();
-        }} else if (kind === "checkpoint") {{
-          ctx.strokeStyle = "rgba(34, 211, 238, 0.95)";
-          ctx.lineWidth = Math.max(2, radius * 0.15);
-          ctx.beginPath();
-          ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
-          ctx.stroke();
-        }} else if (kind === "player") {{
-          ctx.fillStyle = "#38bdf8";
-          ctx.fillRect(-radius * 0.42, -radius * 0.72, radius * 0.84, radius * 1.44);
-          ctx.fillStyle = "#e2e8f0";
-          ctx.fillRect(-radius * 0.2, -radius * 0.8, radius * 0.4, radius * 0.26);
-        }} else {{
-          ctx.fillStyle = "#334155";
-          ctx.fillRect(-radius * 0.5, -radius * 0.5, radius, radius);
-        }}
-        ctx.restore();
-      }}
-
-      function drawGround() {{
-        if (state.runtimeProfile.locomotionModel === "flight") {{
-          ctx.save();
-          const horizonY = canvas.height * 0.58;
-          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-          gradient.addColorStop(0, "rgba(30, 64, 175, 0.35)");
-          gradient.addColorStop(0.58, "rgba(15, 23, 42, 0.12)");
-          gradient.addColorStop(1, "rgba(2, 6, 23, 0.75)");
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.strokeStyle = "rgba(125, 211, 252, 0.28)";
-          ctx.beginPath();
-          ctx.moveTo(0, horizonY);
-          ctx.lineTo(canvas.width, horizonY);
-          ctx.stroke();
-          ctx.restore();
-          return;
-        }}
-        ctx.save();
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.18)";
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 20; i++) {{
-          const z = 4 + i * 3.2;
-          const p0 = runtimeModules.camera_stack.project(state, {{ x: -12, y: 0, z }});
-          const p1 = runtimeModules.camera_stack.project(state, {{ x: 12, y: 0, z }});
-          ctx.beginPath();
-          ctx.moveTo(p0.x, p0.y);
-          ctx.lineTo(p1.x, p1.y);
-          ctx.stroke();
-        }}
-        for (let i = 0; i < 12; i++) {{
-          const x = -11 + i * 2;
-          const p0 = runtimeModules.camera_stack.project(state, {{ x, y: 0, z: 4 }});
-          const p1 = runtimeModules.camera_stack.project(state, {{ x, y: 0, z: 52 }});
-          ctx.beginPath();
-          ctx.moveTo(p0.x, p0.y);
-          ctx.lineTo(p1.x, p1.y);
-          ctx.stroke();
-        }}
-        ctx.restore();
-      }}
-
-      function renderFrame() {{
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawGround();
-        for (const obj of state.worldObjects) drawObject(obj, obj.kind, 0.8);
-        for (const checkpoint of state.checkpoints) drawObject(checkpoint, "checkpoint", 1.0);
-        for (const item of state.interactives) drawObject(item, "interactive", 1.0);
-        for (const enemy of state.enemies) drawObject(enemy, enemy.kind, 1.1);
-        for (const bullet of state.projectiles) drawObject(bullet, "interactive", 0.5);
-        drawObject({{ x: state.player.x, y: 0, z: state.player.z }}, "player", 1.2);
-
-        if (state.feedback.hitPulse > 0.01) {{
-          ctx.fillStyle = `rgba(34, 211, 238, ${{state.feedback.hitPulse * 0.18}})`;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }}
-        if (state.feedback.damagePulse > 0.01) {{
-          ctx.fillStyle = `rgba(239, 68, 68, ${{state.feedback.damagePulse * 0.2}})`;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }}
-      }}
-
-      function endGame() {{
-        state.running = false;
-        overlay.classList.add("show");
-        overlay.setAttribute("aria-hidden", "false");
-        overlayText.textContent = `최종 점수 ${{Math.floor(state.score)}} · 상태 ${{state.statusMachine}}`;
-      }}
-
-      function step(ts) {{
-        if (!state.lastTs) state.lastTs = ts;
-        const dt = Math.min(0.05, Math.max(0.001, (ts - state.lastTs) / 1000));
-        state.lastTs = ts;
-
-        drawWebglBackdrop(ts);
+      function animate(ts) {{
+        resize();
+        const dt = Math.min(0.05, Math.max(0.001, (ts - (animate.lastTs || ts)) / 1000));
+        animate.lastTs = ts;
 
         if (state.running) {{
-          state.runtimeSec += dt;
+          state.elapsed += dt;
           state.timeLeft = Math.max(0, state.timeLeft - dt);
-          runtimeModules.controller_stack.update(state, dt);
-          runtimeModules.combat_stack.update(state, dt);
-          runtimeModules.progression_stack.update(state, dt);
-          updateEnemies(dt);
-          resolveProjectiles();
-          resolveInteractives();
-          runtimeModules.feedback_stack.update(state, dt);
-          updateStatusMachine();
-          if (state.hp <= 0 || state.timeLeft <= 0) {{
-            endGame();
+          updateControls(dt);
+          resolveCombat(dt);
+          updateActors(dt);
+          resolveInteractions();
+          updateCamera(dt);
+
+          if (state.timeLeft <= 0) {{
+            endGame("시간 초과");
+          }} else if (state.hp <= 0 && state.elapsed > 3) {{
+            endGame("내구도 고갈");
           }}
         }}
 
-        renderFrame();
-        runtimeModules.hud_stack.render(state, scoreEl, timerEl, hpEl, objectiveEl);
-        requestAnimationFrame(step);
+        updateHud();
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
       }}
 
-      runtimeModules.scene_world?.buildWorld(state);
-      requestAnimationFrame(step);
+      function keydownHandler(event) {{
+        const key = event.key.toLowerCase();
+        state.keys[key] = true;
+        if (key === "r" && !state.running) {{
+          resetGame();
+        }}
+      }}
+
+      function keyupHandler(event) {{
+        const key = event.key.toLowerCase();
+        state.keys[key] = false;
+      }}
+
+      window.addEventListener("keydown", keydownHandler, {{ passive: true }});
+      window.addEventListener("keyup", keyupHandler, {{ passive: true }});
+      window.addEventListener("resize", resize);
+      window.addEventListener("message", (event) => {{
+        const data = event.data || {{}};
+        if (data.type === "iis:recover:start" && !state.running && state.elapsed < 8) {{
+          resetGame();
+        }}
+      }});
+
+      restartBtn.addEventListener("click", resetGame);
+      controlGuideEl.textContent = { _js_string(runtime_contract["controls"]) };
+
+      resize();
+      updateHud();
+      requestAnimationFrame(animate);
     </script>
   </body>
 </html>
