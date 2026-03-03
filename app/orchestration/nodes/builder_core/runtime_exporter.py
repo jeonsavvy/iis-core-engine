@@ -17,13 +17,9 @@ def _resolve_runtime_contract(
     locomotion = str(capability_profile.get("locomotion_model", "on_foot"))
     interaction = str(capability_profile.get("interaction_model", "action"))
     camera = str(capability_profile.get("camera_model", "third_person"))
-
-    plan_rows = []
-    deliverables = contract_bundle.get("deliverables")
-    if isinstance(deliverables, dict):
-        plan = deliverables.get("plan")
-        if isinstance(plan, list):
-            plan_rows = [str(item).strip() for item in plan if str(item).strip()]
+    core_loop_type = str(capability_profile.get("core_loop_type", "modular"))
+    _ = contract_bundle
+    _ = genre
 
     objective = "핵심 루프를 유지하면서 점수를 누적하세요."
     controls = "이동: W/A/S/D 또는 방향키 · 액션: Space · 회피: Shift · 재시작: R"
@@ -46,8 +42,22 @@ def _resolve_runtime_contract(
         objective = "거리 조절과 타이밍으로 콤보를 이어가며 아레나를 제압하세요."
         controls = "이동: W/A/S/D · 공격: Space · 회피: Shift · 재시작: R"
 
-    if plan_rows:
-        objective = plan_rows[0]
+    if core_loop_type in {"lane_dodge_racer", "webgl_three_runner"}:
+        mode_label = "3D 레이싱 주행"
+        objective = "체크포인트를 연속 통과하며 사고 없이 최고 기록을 갱신하세요."
+        controls = "조향: A/D 또는 ←/→ · 가속/감속: W/S 또는 ↑/↓ · 부스트: Shift · 재시작: R"
+    elif core_loop_type == "f1_formula_circuit_3d":
+        mode_label = "F1 서킷 레이싱"
+        objective = "브레이크-턴인-재가속 리듬으로 랩 타임을 단축하세요."
+        controls = "조향: A/D 또는 ←/→ · 가속/브레이크: W/S 또는 ↑/↓ · 오버테이크 부스트: Shift · 재시작: R"
+    elif core_loop_type == "topdown_roguelike_shooter":
+        mode_label = "탑다운 로그라이크 슈팅"
+        objective = "웨이브를 돌파하며 생존 시간을 늘리고 처치 점수를 누적하세요."
+        controls = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 재시작: R"
+    elif core_loop_type in {"comic_action_brawler_3d", "duel_brawler"}:
+        mode_label = "3D 아레나 격투"
+        objective = "거리 조절과 연속 공격으로 상대 압박을 유지하며 승리하세요."
+        controls = "이동: W/A/S/D 또는 방향키 · 공격: Space · 회피: Shift · 재시작: R"
 
     if camera == "first_person" and locomotion == "on_foot":
         mode_label = "1인칭 전투"
@@ -222,7 +232,7 @@ def _export_phaser_runtime_artifact(
       <header class=\"topbar\">
         <div>
           <div class=\"title\">{title}</div>
-          <div class=\"subtitle\">{runtime_contract['mode_label']} · {genre}</div>
+          <div class=\"subtitle\">{runtime_contract['mode_label']}</div>
         </div>
         <div class=\"hud\" aria-live=\"polite\">
           <span id=\"score\">점수 0</span>
@@ -702,7 +712,7 @@ def export_runtime_artifact(
       <header class=\"topbar\">
         <div>
           <div class=\"title\">{title}</div>
-          <div class=\"subtitle\">{runtime_contract['mode_label']} · {runtime_contract['genre']}</div>
+          <div class=\"subtitle\">{runtime_contract['mode_label']}</div>
         </div>
         <div class=\"hud\" aria-live=\"polite\">
           <span id=\"score\">점수 0</span>

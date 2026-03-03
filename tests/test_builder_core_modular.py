@@ -174,6 +174,26 @@ def test_build_modular_artifact_enforces_phaser_for_explicit_2d_prompt() -> None
     assert result.selfcheck_result["passed"] is True
 
 
+def test_build_modular_artifact_uses_readable_objective_and_hides_slug_like_genre() -> None:
+    result = build_modular_artifact(
+        keyword="오토바이 서킷 레이싱",
+        title="Apex Rider: Moto Simulator",
+        genre="motorcycle-circuit-sim",
+        slug="apex-rider-moto-sim",
+        accent_color="#38BDF8",
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=20,
+        text_overflow_policy="ellipsis-clamp",
+        core_loop_type="lane_dodge_racer",
+        rqc_version="rqc-1",
+    )
+    assert "목표: directional movement + timing" not in result.artifact_html
+    assert '<div class="subtitle">3D 레이싱 주행</div>' in result.artifact_html
+    assert result.selfcheck_result["checks"]["objective_text_quality"] is True
+    assert result.selfcheck_result["checks"]["subtitle_no_slug_noise"] is True
+
+
 def test_build_production_artifact_uses_modular_core_when_enabled() -> None:
     deps = SimpleNamespace(
         vertex_service=SimpleNamespace(

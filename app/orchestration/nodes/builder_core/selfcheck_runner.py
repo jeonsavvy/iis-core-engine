@@ -97,8 +97,18 @@ def run_builder_selfcheck(
     controls_text_match = re.search(r"<p id=\"control-guide\">([^<]+)</p>", html_content, flags=re.IGNORECASE)
     controls_text = controls_text_match.group(1).strip() if controls_text_match else ""
     controls_lower = controls_text.casefold()
+    objective_text_match = re.search(r"<span id=\"objective\">([^<]+)</span>", html_content, flags=re.IGNORECASE)
+    objective_text = objective_text_match.group(1).strip() if objective_text_match else ""
+    objective_lower = objective_text.casefold()
+    subtitle_match = re.search(r"<div class=\"subtitle\">([^<]+)</div>", html_content, flags=re.IGNORECASE)
+    subtitle_text = subtitle_match.group(1).strip() if subtitle_match else ""
+    subtitle_slug_like = bool(re.search(r"\b[a-z0-9]+(?:-[a-z0-9]+){2,}\b", subtitle_text.casefold()))
 
     jargon_pattern = re.compile(r"\b(?:relic|synergy|syn\s*\d|build\(|lv\.?\s*\d+|xp\s*[:/\d]|w\d+)\b")
+    objective_placeholder_pattern = re.compile(
+        r"(directional movement|core movement|primary action loop|objective_chain|timing\b)",
+        flags=re.IGNORECASE,
+    )
 
     checks: dict[str, bool] = {
         "rqc_version_declared": bool(rqc_version.strip()),
@@ -121,6 +131,8 @@ def run_builder_selfcheck(
         "boot_flag_and_leaderboard": "window.__iis_game_boot_ok = true" in lowered and "window.iisleaderboard" in lowered,
         "no_start_gate": "tap to start" not in lowered and "click to start" not in lowered and "press start" not in lowered,
         "no_hud_jargon": not bool(jargon_pattern.search(lowered)),
+        "objective_text_quality": bool(objective_text) and not bool(objective_placeholder_pattern.search(objective_lower)),
+        "subtitle_no_slug_noise": not subtitle_slug_like,
         "overflow_guard": "overflow: hidden" in lowered and "overflow-guard" in lowered,
         "controls_single_source": controls_text != "" and 2 <= lowered.count("control-guide") <= 4,
         "required_modules_present": all(module_id in all_modules for module_id in required_primary),
@@ -167,4 +179,6 @@ def run_builder_selfcheck(
         "feedback_coverage": feedback_coverage,
         "mesh_variety": mesh_variety,
         "profile_id": capability_profile.get("profile_id"),
+        "objective_text": objective_text,
+        "subtitle_text": subtitle_text,
     }
