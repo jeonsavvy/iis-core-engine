@@ -13,6 +13,7 @@ def evaluate_quality_contract(
     design_spec: dict[str, Any] | None = None,
     genre: str | None = None,
     genre_engine: str | None = None,
+    runtime_engine_mode: str | None = None,
     keyword: str | None = None,
 ) -> QualityGateResult:
     spec = design_spec or {}
@@ -55,11 +56,22 @@ def evaluate_quality_contract(
     if "addEventListener(\"click\")" in html_content and "keydown" not in lowered and "<canvas" not in lowered:
         hard_failures.append("click_only_interaction")
 
-    # --- Quality Floor: 3D rendering engine required ---
+    # --- Runtime engine contract ---
     has_threejs = "three.js" in lowered or "three.module" in lowered or "three.min.js" in lowered
     has_webgl = "getcontext(\"webgl" in lowered or "getcontext('webgl" in lowered or "webglrenderer" in lowered
-    if not has_threejs and not has_webgl:
-        hard_failures.append("no_3d_rendering_engine")
+    has_phaser = "phaser.min.js" in lowered or "new phaser.game" in lowered or "class mainscene extends phaser.scene" in lowered
+    normalized_engine_mode = str(runtime_engine_mode or "").strip().casefold()
+    if normalized_engine_mode not in {"2d_phaser", "3d_three"}:
+        if str(genre_engine or "").strip().casefold() in {"topdown_roguelike_shooter", "platformer_2d", "puzzle_2d"}:
+            normalized_engine_mode = "2d_phaser"
+        else:
+            normalized_engine_mode = "3d_three"
+    if normalized_engine_mode == "2d_phaser":
+        if not has_phaser:
+            hard_failures.append("engine_contract_2d_phaser_missing")
+    else:
+        if not has_threejs and not has_webgl:
+            hard_failures.append("engine_contract_3d_three_missing")
 
     resolved_genre = resolve_genre_engine(
         genre_engine or genre or "",
@@ -121,6 +133,9 @@ def evaluate_quality_contract(
     check_map["quality_floor_min_lines"] = line_count >= min_line_count
     check_map["quality_floor_min_shaders"] = shader_token_count >= min_shader_count
     check_map["quality_floor_min_states"] = state_token_count >= min_state_count
+    check_map["engine_contract_match"] = (
+        has_phaser if normalized_engine_mode == "2d_phaser" else (has_threejs or has_webgl)
+    )
 
     if hard_failures:
         failed_checks.extend(hard_failures)

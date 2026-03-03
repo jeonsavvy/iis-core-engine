@@ -174,6 +174,7 @@ class QualityService:
         design_spec: dict[str, Any] | None = None,
         genre: str | None = None,
         genre_engine: str | None = None,
+        runtime_engine_mode: str | None = None,
         keyword: str | None = None,
     ) -> QualityGateResult:
         return evaluate_quality_contract_gate(
@@ -182,6 +183,7 @@ class QualityService:
             design_spec=design_spec,
             genre=genre,
             genre_engine=genre_engine,
+            runtime_engine_mode=runtime_engine_mode,
             keyword=keyword,
         )
 

@@ -217,6 +217,7 @@ def build_codegen_prompt(
     genre: str,
     objective: str,
     core_loop_type: str,
+    runtime_engine_mode: str,
     variation_hint: str,
     design_spec: dict[str, Any],
     asset_pack: dict[str, Any],
@@ -224,10 +225,8 @@ def build_codegen_prompt(
 ) -> str:
     design_spec_json = json.dumps(design_spec, ensure_ascii=False)
     asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
-    lowered_mode = str(core_loop_type).strip().casefold()
-    runtime_stack = "three.js"
-    if any(token in lowered_mode for token in ("2d", "phaser", "topdown", "card", "board")):
-        runtime_stack = "phaser.js"
+    lowered_engine_mode = str(runtime_engine_mode).strip().casefold()
+    runtime_stack = "phaser.js" if lowered_engine_mode == "2d_phaser" else "three.js"
     return (
         "You are a senior web game engineer. Rewrite and deepen this game artifact.\n"
         "Generation policy:\n"

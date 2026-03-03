@@ -9,6 +9,7 @@ from app.orchestration.nodes.builder import (
     _build_request_capability_hint,
     _infer_core_loop_profile,
     _infer_core_loop_type,
+    _resolve_runtime_engine_mode,
     _resolve_asset_pack,
     _synthesize_genre_profile,
 )
@@ -82,7 +83,9 @@ def test_infer_core_loop_profile_uses_capability_routing_for_unusual_3d_combat_p
     )
     assert profile["core_loop_type"] == "comic_action_brawler_3d"
     assert profile["reason"] in {"explicit_3d_brawler_tokens", "capability_routing"}
-    assert float(profile["confidence"]) >= 0.65
+    confidence = profile.get("confidence", 0.0)
+    assert isinstance(confidence, (int, float))
+    assert float(confidence) >= 0.65
 
 
 def test_request_capability_hint_keeps_original_intent_text() -> None:
@@ -129,6 +132,26 @@ def test_infer_core_loop_profile_never_returns_request_faithful_generic() -> Non
         genre="experimental",
     )
     assert profile["core_loop_type"] != "request_faithful_generic"
+
+
+def test_resolve_runtime_engine_mode_uses_phaser_for_topdown_mode() -> None:
+    engine_mode = _resolve_runtime_engine_mode(
+        keyword="탑다운 로그라이크 슈팅",
+        title="Rune Sink",
+        genre="arcade",
+        core_loop_type="topdown_roguelike_shooter",
+    )
+    assert engine_mode == "2d_phaser"
+
+
+def test_resolve_runtime_engine_mode_uses_three_for_3d_puzzle_request() -> None:
+    engine_mode = _resolve_runtime_engine_mode(
+        keyword="이세계 3D 퍼즐 시뮬레이터",
+        title="Isekai Puzzle",
+        genre="simulation",
+        core_loop_type="comic_action_brawler_3d",
+    )
+    assert engine_mode == "3d_three"
 
 
 def test_topdown_builder_html_contains_asset_pack_and_progression_hooks() -> None:

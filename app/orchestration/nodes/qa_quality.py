@@ -43,6 +43,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             design_spec=typed_design_spec,
             genre=str(state["outputs"].get("game_genre", "")),
             genre_engine=str(state["outputs"].get("genre_engine", "")),
+            runtime_engine_mode=str(state["outputs"].get("runtime_engine_mode", "")),
             keyword=str(state.get("keyword", "")),
         )
     except TypeError:

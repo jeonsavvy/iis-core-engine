@@ -203,6 +203,7 @@ def _assess_artifact_quality(
     design_spec: dict[str, Any],
     genre: str,
     core_loop_type: str,
+    runtime_engine_mode: str,
     keyword: str,
     artifact_files: list[dict[str, str]],
     slug: str,
@@ -214,6 +215,7 @@ def _assess_artifact_quality(
             design_spec=design_spec,
             genre=genre,
             genre_engine=core_loop_type,
+            runtime_engine_mode=runtime_engine_mode,
             keyword=keyword,
         )
     except TypeError:
@@ -341,6 +343,7 @@ def _build_scaffold_first_production_artifact(
     slug: str,
     accent_color: str,
     core_loop_type: str,
+    runtime_engine_mode: str,
     asset_pack: dict[str, Any],
     asset_bank_files: list[dict[str, str]],
     runtime_asset_manifest: dict[str, Any],
@@ -378,6 +381,7 @@ def _build_scaffold_first_production_artifact(
         min_font_size_px=design_spec.min_font_size_px,
         text_overflow_policy=design_spec.text_overflow_policy,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
         asset_pack=asset_pack,
     )
     genre_engine = resolve_genre_engine(genre, state["keyword"])
@@ -397,6 +401,7 @@ def _build_scaffold_first_production_artifact(
         metadata={
             "iteration": state["build_iteration"],
             "core_loop_type": core_loop_type,
+            "runtime_engine_mode": runtime_engine_mode,
             "asset_pack": asset_pack["name"],
             "generation_engine_version": "scaffold_v3",
             "generation_passes": 1,
@@ -416,6 +421,7 @@ def _build_scaffold_first_production_artifact(
         genre=genre,
         objective=gdd.objective,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
         variation_hint=effective_variation_hint,
         design_spec=design_spec_dump,
         asset_pack=asset_pack,
@@ -449,6 +455,7 @@ def _build_scaffold_first_production_artifact(
             genre=genre,
             objective=gdd.objective,
             core_loop_type=core_loop_type,
+            runtime_engine_mode=runtime_engine_mode,
             variation_hint=recovery_variation_hint,
             design_spec=design_spec_dump,
             asset_pack=asset_pack,
@@ -536,6 +543,7 @@ def _build_scaffold_first_production_artifact(
         design_spec=design_spec_dump,
         genre=genre,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
         keyword=state["keyword"],
         artifact_files=asset_bank_files,
         slug=slug,
@@ -546,6 +554,7 @@ def _build_scaffold_first_production_artifact(
         design_spec=design_spec_dump,
         genre=genre,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
         keyword=state["keyword"],
         artifact_files=asset_bank_files,
         slug=slug,
@@ -683,6 +692,7 @@ def _build_scaffold_first_production_artifact(
     metadata = {
         "builder_strategy": "scaffold_first_codegen_v3",
         "generation_engine_version": "scaffold_v3",
+        "runtime_engine_mode": runtime_engine_mode,
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "codegen_enabled": True,
         "codegen_generation_attempts": 2 if recovery_attempted else 1,
@@ -766,6 +776,7 @@ def build_production_artifact(
     slug: str,
     accent_color: str,
     core_loop_type: str,
+    runtime_engine_mode: str,
     asset_pack: dict[str, Any],
     asset_bank_files: list[dict[str, str]],
     runtime_asset_manifest: dict[str, Any],
@@ -775,6 +786,7 @@ def build_production_artifact(
     generated_genre_directive: str = "",
 ) -> ProductionBuildResult:
     core_loop_type = _normalize_core_loop_type(core_loop_type)
+    normalized_runtime_engine_mode = str(runtime_engine_mode or "").strip() or "3d_three"
     return _build_scaffold_first_production_artifact(
         state=state,
         deps=deps,
@@ -785,6 +797,7 @@ def build_production_artifact(
         slug=slug,
         accent_color=accent_color,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=normalized_runtime_engine_mode,
         asset_pack=asset_pack,
         asset_bank_files=asset_bank_files,
         runtime_asset_manifest=runtime_asset_manifest,

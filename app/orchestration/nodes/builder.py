@@ -14,6 +14,7 @@ from app.orchestration.nodes.builder_parts.mode import (
     _infer_core_loop_profile,
     _infer_core_loop_type,
     _is_safe_slug,
+    _resolve_runtime_engine_mode,
     _synthesize_genre_profile,
     _slugify,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "_build_request_capability_hint",
     "_infer_core_loop_profile",
     "_infer_core_loop_type",
+    "_resolve_runtime_engine_mode",
     "_synthesize_genre_profile",
 ]
 
@@ -348,6 +350,13 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     core_loop_type = _normalize_core_loop_type(
         str(core_loop_profile.get("core_loop_type", _infer_core_loop_type(keyword=state["keyword"], title=title, genre=genre)))
     )
+    runtime_engine_mode = _resolve_runtime_engine_mode(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        core_loop_type=core_loop_type,
+    )
+    state["outputs"]["runtime_engine_mode"] = runtime_engine_mode
     request_capability_hint = _build_request_capability_hint(keyword=state["keyword"], title=title, genre=genre)
     generated_genre_profile = _synthesize_genre_profile(
         keyword=state["keyword"],
@@ -410,6 +419,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         message="Asset memory retriever composed prior successes/failures.",
         metadata={
             "core_loop_type": core_loop_type,
+            "runtime_engine_mode": runtime_engine_mode,
             "core_loop_profile": core_loop_profile,
             "request_capability_hint_applied": bool(request_capability_hint),
             "generated_genre_profile": generated_genre_profile,
@@ -477,6 +487,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         slug=slug,
         accent_color=accent_color,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
         asset_pack=asset_pack,
         asset_bank_files=asset_bank_files,
         runtime_asset_manifest=runtime_asset_manifest,

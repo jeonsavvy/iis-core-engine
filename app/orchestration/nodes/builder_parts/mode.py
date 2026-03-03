@@ -183,6 +183,68 @@ def _infer_core_loop_type(*, keyword: str, title: str, genre: str) -> str:
     return str(profile.get("core_loop_type", "comic_action_brawler_3d"))
 
 
+def _resolve_runtime_engine_mode(
+    *,
+    keyword: str,
+    title: str,
+    genre: str,
+    core_loop_type: str,
+) -> str:
+    lowered_loop = str(core_loop_type).strip().casefold()
+    if lowered_loop in {"topdown_roguelike_shooter", "platformer_2d", "puzzle_2d"}:
+        return "2d_phaser"
+    if lowered_loop in {
+        "f1_formula_circuit_3d",
+        "flight_sim_3d",
+        "webgl_three_runner",
+        "comic_action_brawler_3d",
+        "lane_dodge_racer",
+        "arena_shooter",
+        "duel_brawler",
+    }:
+        return "3d_three"
+
+    haystack = " ".join([keyword, title, genre, lowered_loop]).casefold()
+    explicit_3d_tokens = (
+        "3d",
+        "webgl",
+        "three",
+        "three.js",
+        "flight",
+        "비행",
+        "f1",
+        "formula",
+        "레이싱",
+        "racing",
+        "cockpit",
+    )
+    if _contains_any(haystack, explicit_3d_tokens):
+        return "3d_three"
+
+    explicit_2d_tokens = (
+        "2d",
+        "topdown",
+        "top-down",
+        "탑다운",
+        "pixel",
+        "도트",
+        "puzzle",
+        "퍼즐",
+        "card",
+        "board",
+        "platformer",
+        "플랫포머",
+    )
+    if _contains_any(haystack, explicit_2d_tokens):
+        return "2d_phaser"
+
+    profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
+    capabilities = profile.get("capabilities")
+    if isinstance(capabilities, dict) and bool(capabilities.get("is_3d")):
+        return "3d_three"
+    return "3d_three"
+
+
 def _build_request_capability_hint(*, keyword: str, title: str, genre: str) -> str:
     profile = _infer_core_loop_profile(keyword=keyword, title=title, genre=genre)
     capabilities = profile.get("capabilities")

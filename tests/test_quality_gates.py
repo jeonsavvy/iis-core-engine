@@ -154,3 +154,66 @@ def test_evaluate_gameplay_gate_does_not_force_genre_engine_match_when_mode_toke
     )
 
     assert "genre_engine_mismatch" not in result.failed_checks
+
+
+def test_evaluate_quality_contract_accepts_phaser_for_2d_engine_contract() -> None:
+    settings = Settings(qa_min_quality_score=40)
+    html = """
+    <html>
+      <head><meta name="viewport" content="width=device-width" /></head>
+      <body class="overflow-guard" data-overflow-policy="clamp">
+        <canvas id="game"></canvas>
+        <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+        <script>
+          window.__iis_game_boot_ok = true;
+          window.IISLeaderboard = {};
+          function update() {}
+          function draw() {}
+          requestAnimationFrame(() => {});
+          document.addEventListener("keydown", () => {});
+          const overlay = "game over";
+        </script>
+      </body>
+    </html>
+    """
+    html = html + "\n" + "\n".join(f"function q{i}() {{}}" for i in range(24))
+    html = html + "\n" + "\n".join(f"// line {i}" for i in range(900))
+    result = evaluate_quality_contract(
+        settings,
+        html,
+        genre_engine="topdown_roguelike_shooter",
+        runtime_engine_mode="2d_phaser",
+    )
+
+    assert "engine_contract_2d_phaser_missing" not in result.failed_checks
+
+
+def test_evaluate_quality_contract_rejects_when_2d_engine_contract_is_missing() -> None:
+    settings = Settings(qa_min_quality_score=40)
+    html = """
+    <html>
+      <head><meta name="viewport" content="width=device-width" /></head>
+      <body class="overflow-guard" data-overflow-policy="clamp">
+        <canvas id="game"></canvas>
+        <script>
+          window.__iis_game_boot_ok = true;
+          window.IISLeaderboard = {};
+          function update() {}
+          function draw() {}
+          requestAnimationFrame(() => {});
+          document.addEventListener("keydown", () => {});
+          const overlay = "game over";
+        </script>
+      </body>
+    </html>
+    """
+    html = html + "\n" + "\n".join(f"function q{i}() {{}}" for i in range(24))
+    html = html + "\n" + "\n".join(f"// line {i}" for i in range(900))
+    result = evaluate_quality_contract(
+        settings,
+        html,
+        genre_engine="topdown_roguelike_shooter",
+        runtime_engine_mode="2d_phaser",
+    )
+
+    assert "engine_contract_2d_phaser_missing" in result.failed_checks
