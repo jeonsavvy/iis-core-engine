@@ -43,6 +43,16 @@ class FakeQualityService:
             checks={"artifact_contract": True},
         )
 
+    def evaluate_intent_gate(self, _html: str, *, intent_contract=None, **_kwargs) -> dict[str, Any]:
+        _ = intent_contract
+        return {
+            "ok": True,
+            "score": 92,
+            "threshold": 75,
+            "failed_items": [],
+            "checks": {"intent_contract": True},
+        }
+
 
 class FakeLowQualityService(FakeQualityService):
     def __init__(self, *, hard_gate: bool = False) -> None:

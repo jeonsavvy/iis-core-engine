@@ -17,22 +17,21 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     if gated_state is not None:
         return gated_state
 
-    try:
-        artifact = BuildArtifactPayload.model_validate(
-            state["outputs"].get("build_artifact")
-            or {
-                "game_slug": str(state["outputs"].get("game_slug", "untitled")),
-                "game_name": str(state["outputs"].get("game_name", "untitled")),
-                "game_genre": str(state["outputs"].get("game_genre", "arcade")),
-                "artifact_path": str(state["outputs"].get("artifact_path", "games/untitled/index.html")),
-                "artifact_html": str(
-                    state["outputs"].get(
-                        "artifact_html",
-                        "<!doctype html><html><body><h1>Untitled</h1><script>window.__iis_game_boot_ok=true;</script></body></html>",
-                    )
-                ),
-            }
+    raw_artifact = state["outputs"].get("build_artifact")
+    if not isinstance(raw_artifact, dict):
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "build_artifact_missing"
+        return append_log(
+            state,
+            stage=PipelineStage.RELEASE,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.RELEASER,
+            message="Publish failed: build artifact is missing.",
+            reason=state["reason"],
         )
+
+    try:
+        artifact = BuildArtifactPayload.model_validate(raw_artifact)
     except ValidationError as exc:
         state["status"] = PipelineStatus.ERROR
         state["reason"] = "invalid_build_artifact_payload"

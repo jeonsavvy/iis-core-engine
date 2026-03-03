@@ -35,12 +35,14 @@ def _base_state() -> dict[str, Any]:
 
 
 class _VertexStub:
-    def __init__(self, *, contract_mode: str = "ok", enforcement: str = "warn_only") -> None:
+    def __init__(self, *, contract_mode: str = "ok", strict_vertex_only: bool = False) -> None:
         self._contract_mode = contract_mode
         self.settings = SimpleNamespace(
             builder_scope_guard_enabled=False,
             builder_asset_memory_enabled=False,
-            pipeline_contract_enforcement=enforcement,
+            strict_vertex_only=strict_vertex_only,
+            allow_stub_fallback=False,
+            pipeline_contract_enforcement="strict",
         )
 
     def generate_analyze_contract(self, *, keyword: str) -> VertexGenerationResult:
@@ -162,7 +164,7 @@ def test_trigger_architect_stylist_populate_contract_outputs() -> None:
 
 def test_builder_contract_validator_blocks_weak_contracts_in_strict_mode() -> None:
     state = _base_state()
-    vertex = _VertexStub(contract_mode="weak", enforcement="strict")
+    vertex = _VertexStub(contract_mode="weak")
     deps = _deps(vertex)
 
     state = trigger.run(cast(Any, state), cast(Any, deps))
@@ -177,7 +179,7 @@ def test_builder_contract_validator_blocks_weak_contracts_in_strict_mode() -> No
 
 def test_builder_stops_when_quality_floor_unmet(monkeypatch) -> None:
     state = _base_state()
-    vertex = _VertexStub(contract_mode="ok", enforcement="warn_only")
+    vertex = _VertexStub(contract_mode="ok")
     deps = _deps(vertex)
 
     state = trigger.run(cast(Any, state), cast(Any, deps))
@@ -214,7 +216,7 @@ def test_builder_stops_when_quality_floor_unmet(monkeypatch) -> None:
 
 def test_builder_stops_when_playability_hard_gate_unmet(monkeypatch) -> None:
     state = _base_state()
-    vertex = _VertexStub(contract_mode="ok", enforcement="warn_only")
+    vertex = _VertexStub(contract_mode="ok")
     vertex.settings.builder_playability_hard_gate = True
     deps = _deps(vertex)
 
@@ -247,3 +249,13 @@ def test_builder_stops_when_playability_hard_gate_unmet(monkeypatch) -> None:
     assert result["status"] == PipelineStatus.ERROR
     assert result["reason"] == "builder_playability_unmet"
     assert any(log.stage.value == "build" and log.status.value == "error" for log in result["logs"])
+
+
+def test_trigger_blocks_when_strict_vertex_only_and_source_is_stub() -> None:
+    state = _base_state()
+    deps = _deps(_VertexStub(strict_vertex_only=True))
+
+    result = trigger.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["reason"] == "analyze_contract_unavailable"

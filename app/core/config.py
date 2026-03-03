@@ -58,9 +58,12 @@ class Settings(BaseSettings):
     builder_candidate_count: int = Field(default=1, ge=1, le=5)
     builder_codegen_enabled: bool = True
     builder_codegen_passes: int = Field(default=1, ge=0, le=5)
-    builder_codegen_max_output_tokens: int = Field(default=32_000, ge=512, le=65_536)
+    builder_codegen_max_output_tokens: int = Field(default=48_000, ge=512, le=65_536)
+    builder_codegen_recovery_enabled: bool = False
     builder_runtime_mutation_enabled: bool = True
     builder_force_pro_model: bool = True
+    strict_vertex_only: bool = True
+    allow_stub_fallback: bool = False
     builder_scope_guard_enabled: bool = True
     builder_asset_memory_enabled: bool = True
     builder_quality_floor_enforced: bool = True
@@ -71,7 +74,7 @@ class Settings(BaseSettings):
     builder_deterministic_fallback_enabled: bool = False
     generation_engine_version: str = Field(default="scaffold_v3", min_length=3, max_length=40)
     rqc_version: str = Field(default="rqc-1", min_length=3, max_length=24)
-    pipeline_contract_enforcement: str = Field(default="warn_only", pattern=r"^(strict|warn_only)$")
+    pipeline_contract_enforcement: str = Field(default="strict", pattern=r"^(strict|warn_only)$")
     qa_retry_source: str = Field(default="builder_only", pattern=r"^(builder_only|qa_or_builder)$")
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
 

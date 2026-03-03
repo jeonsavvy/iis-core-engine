@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.services.quality_gates import (
     evaluate_artifact_contract as evaluate_artifact_contract_gate,
     evaluate_gameplay_gate as evaluate_gameplay_gate_gate,
+    evaluate_intent_gate as evaluate_intent_gate_gate,
     evaluate_quality_contract as evaluate_quality_contract_gate,
     evaluate_visual_gate as evaluate_visual_gate_gate,
 )
@@ -227,4 +228,15 @@ class QualityService:
             self.settings,
             artifact_manifest,
             art_direction_contract=art_direction_contract,
+        )
+
+    def evaluate_intent_gate(
+        self,
+        html_content: str,
+        *,
+        intent_contract: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return evaluate_intent_gate_gate(
+            html_content,
+            intent_contract=intent_contract,
         )

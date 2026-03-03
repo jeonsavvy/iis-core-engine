@@ -35,6 +35,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     artifact_html = str(state["outputs"].get("artifact_html", ""))
     design_spec = state["outputs"].get("design_spec", {})
     typed_design_spec = design_spec if isinstance(design_spec, dict) else None
+    intent_contract = state["outputs"].get("intent_contract")
+    typed_intent_contract = intent_contract if isinstance(intent_contract, dict) else None
 
     evaluate_quality = getattr(deps.quality_service, "evaluate_quality_contract")
     try:
@@ -68,6 +70,20 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         if isinstance(state["outputs"].get("art_direction_contract"), dict)
         else None,
     )
+    evaluate_intent = getattr(deps.quality_service, "evaluate_intent_gate", None)
+    if callable(evaluate_intent):
+        intent_gate_report = evaluate_intent(
+            artifact_html,
+            intent_contract=typed_intent_contract,
+        )
+    else:
+        intent_gate_report = {
+            "ok": True,
+            "score": 100,
+            "threshold": 75,
+            "failed_items": [],
+            "checks": {"intent_gate_unavailable": True},
+        }
 
     existing_rows = state["outputs"].get("qa_improvement_items")
     improvement_items: list[dict[str, object]] = (
@@ -77,6 +93,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gameplay_failed_checks = [str(item).strip() for item in gameplay_result.failed_checks if str(item).strip()]
     visual_failed_checks = [str(item).strip() for item in visual_result.failed_checks if str(item).strip()]
     artifact_failed_checks = [str(item).strip() for item in artifact_result.failed_checks if str(item).strip()]
+    intent_failed_items = _as_str_list(intent_gate_report.get("failed_items"))
 
     blocking_items: list[dict[str, object]] = []
     if not quality_result.ok:
@@ -119,6 +136,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "metrics": {"score": artifact_result.score, "threshold": artifact_result.threshold},
             }
         )
+    if not bool(intent_gate_report.get("ok", False)):
+        blocking_items.append(
+            {
+                "stage": PipelineStage.QA_QUALITY.value,
+                "reason": "intent_contract_unmet",
+                "severity": "high",
+                "tokens": intent_failed_items,
+                "metrics": {
+                    "score": int(intent_gate_report.get("score", 0) or 0),
+                    "threshold": int(intent_gate_report.get("threshold", 75) or 75),
+                },
+            }
+        )
     improvement_items.extend(blocking_items)
 
     runtime_warnings = _as_str_list(runtime_row.get("non_fatal_warnings"))
@@ -157,12 +187,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         "artifact_score": artifact_result.score,
         "artifact_threshold": artifact_result.threshold,
         "artifact_checks": artifact_result.checks,
+        "intent_gate_report": intent_gate_report,
         "visual_metrics": visual_metrics,
     }
+    state["outputs"]["intent_gate_report"] = intent_gate_report
 
     state["needs_rebuild"] = False
     summary_message = "Quality QA passed."
     blocking_reasons = [str(row.get("reason", "")).strip() for row in blocking_items if str(row.get("reason", "")).strip()]
+    if intent_failed_items:
+        blocking_reasons.extend([f"intent:{item}" for item in intent_failed_items])
+    blocking_reasons = list(dict.fromkeys([reason for reason in blocking_reasons if reason]))
     if blocking_items:
         summary_message = f"Quality QA blocked release: {len(blocking_items)} gate(s) failed."
 
@@ -194,6 +229,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "gameplay_checks": gameplay_result.checks,
                 "visual_checks": visual_result.checks,
                 "artifact_checks": artifact_result.checks,
+                "intent_gate_report": intent_gate_report,
                 "visual_metrics": visual_metrics,
                 "non_fatal_warnings": runtime_warnings,
                 "deliverables": ["quality_scorecard", "qa_gate_block_report"],
@@ -227,6 +263,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "gameplay_checks": gameplay_result.checks,
             "visual_checks": visual_result.checks,
             "artifact_checks": artifact_result.checks,
+            "intent_gate_report": intent_gate_report,
             "visual_metrics": visual_metrics,
             "non_fatal_warnings": runtime_warnings,
             "deliverables": ["quality_scorecard"],

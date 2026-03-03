@@ -5,39 +5,6 @@ from app.schemas.payloads import GDDPayload, PlanContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
-def _fallback_plan_contract(keyword: str, gdd: GDDPayload) -> PlanContractPayload:
-    return PlanContractPayload(
-        core_mechanics=[
-            "directional movement + timing",
-            "enemy pressure handling",
-            "score combo through risky plays",
-        ],
-        progression_plan=[
-            "초반 학습 구간",
-            "중반 패턴 확장",
-            "후반 클러치 압박 구간",
-        ],
-        encounter_plan=[
-            "기본 적군 웨이브",
-            "엘리트 등장 주기",
-            "미니보스 이벤트",
-        ],
-        risk_reward_plan=[
-            "고위험 고득점 기회",
-            "안전 플레이 저보상 라인",
-            "실수 후 회복 루트",
-        ],
-        control_model=f"{gdd.genre} / keyboard-centric analog intent",
-        balance_baseline={
-            "base_hp": 3.0,
-            "spawn_rate": 1.0,
-            "difficulty_scale_per_min": 1.15,
-            "session_time_sec": 120.0,
-            "keyword_weight": float(len(keyword.strip()) or 1),
-        },
-    )
-
-
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -49,16 +16,48 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         return gated_state
 
     keyword = state["keyword"]
+    settings = deps.vertex_service.settings
+    strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
     generated = deps.vertex_service.generate_gdd_bundle(keyword)
+    gdd_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
+    if strict_vertex_only and gdd_source != "vertex":
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "gdd_unavailable"
+        return append_log(
+            state,
+            stage=PipelineStage.PLAN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.PLANNER,
+            message="기획 중단: Vertex GDD를 확보하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "generation_source": gdd_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["gdd_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
+        )
     payload = generated.payload
     try:
         gdd = GDDPayload.model_validate(payload.get("gdd", {}))
     except Exception:
-        gdd = GDDPayload(
-            title=f"{keyword.title()} Infinite",
-            genre="arcade",
-            objective="Get highest score possible in 90 seconds.",
-            visual_style="neon-minimal",
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "gdd_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.PLAN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.PLANNER,
+            message="기획 중단: GDD payload 검증 실패.",
+            reason=state["reason"],
+            metadata={
+                "generation_source": gdd_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["gdd_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
         )
     raw_research = payload.get("research_summary")
     if isinstance(raw_research, dict):
@@ -85,16 +84,64 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         }
     state["outputs"]["research_summary"] = research_summary
     state["outputs"]["gdd"] = gdd.model_dump()
+    state["outputs"]["gdd_source"] = gdd_source
+    state["outputs"]["gdd_meta"] = dict(generated.meta)
     generated_contract = deps.vertex_service.generate_plan_contract(
         keyword=keyword,
         gdd=gdd.model_dump(),
         research_summary=research_summary,
     )
+    plan_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
+    if strict_vertex_only and plan_source != "vertex":
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "plan_contract_unavailable"
+        return append_log(
+            state,
+            stage=PipelineStage.PLAN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.PLANNER,
+            message="기획 중단: Vertex plan contract를 확보하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "gdd_source": gdd_source,
+                "plan_source": plan_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["plan_contract_gate"],
+                "contract_status": "fail",
+                **generated_contract.meta,
+            },
+        )
     try:
         plan_contract = PlanContractPayload.model_validate(generated_contract.payload)
     except Exception:
-        plan_contract = _fallback_plan_contract(keyword, gdd)
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "plan_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.PLAN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.PLANNER,
+            message="기획 중단: plan contract payload 검증 실패.",
+            reason=state["reason"],
+            metadata={
+                "gdd_source": gdd_source,
+                "plan_source": plan_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["plan_contract_gate"],
+                "contract_status": "fail",
+                **generated_contract.meta,
+            },
+        )
     state["outputs"]["plan_contract"] = plan_contract.model_dump()
+    state["outputs"]["plan_contract_source"] = plan_source
+    state["outputs"]["plan_contract_meta"] = dict(generated_contract.meta)
+    gdd_usage = generated.meta.get("usage", {}) if isinstance(generated.meta.get("usage", {}), dict) else {}
+    plan_usage = generated_contract.meta.get("usage", {}) if isinstance(generated_contract.meta.get("usage", {}), dict) else {}
+    usage = {
+        "prompt_tokens": int(gdd_usage.get("prompt_tokens", 0) or 0) + int(plan_usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(gdd_usage.get("completion_tokens", 0) or 0) + int(plan_usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(gdd_usage.get("total_tokens", 0) or 0) + int(plan_usage.get("total_tokens", 0) or 0),
+    }
     meta = {
         "reference_count": len(research_summary["references"]),
         "deliverables": [
@@ -106,8 +153,13 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         "contract_status": "pass",
         "contract_summary": f"{len(plan_contract.core_mechanics)} mechanics / {len(plan_contract.progression_plan)} progression beats",
         "contribution_score": 4.3,
-        **generated.meta,
-        **generated_contract.meta,
+        "strict_vertex_only": strict_vertex_only,
+        "gdd_source": gdd_source,
+        "plan_source": plan_source,
+        "gdd_usage": gdd_usage,
+        "plan_usage": plan_usage,
+        "usage": usage,
+        "model": str(generated_contract.meta.get("model") or generated.meta.get("model") or "").strip() or None,
     }
     return append_log(
         state,

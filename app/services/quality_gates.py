@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import re
 from typing import Any
 
 from app.orchestration.nodes.builder_parts.genre_engine import get_genre_quality_floor, resolve_genre_engine
@@ -583,3 +585,146 @@ def evaluate_artifact_contract(
         failed_checks=failed_checks,
         checks=check_map,
     )
+
+
+_INTENT_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "game",
+    "player",
+    "mode",
+    "loop",
+    "intent",
+    "contract",
+    "요청",
+    "게임",
+    "플레이",
+    "루프",
+}
+
+_TOKEN_PATTERN = re.compile(r"[a-z0-9가-힣]+", flags=re.IGNORECASE)
+
+
+def _extract_intent_tokens(value: str, *, limit: int = 8) -> list[str]:
+    tokens: list[str] = []
+    for raw in _TOKEN_PATTERN.findall(str(value).casefold()):
+        token = raw.strip().casefold()
+        if len(token) < 3 or token in _INTENT_STOPWORDS:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+        if len(tokens) >= limit:
+            break
+    return tokens
+
+
+def _ratio(passed: int, total: int) -> float:
+    if total <= 0:
+        return 1.0
+    return max(0.0, min(1.0, passed / total))
+
+
+def evaluate_intent_gate(
+    html_content: str,
+    *,
+    intent_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    contract = intent_contract or {}
+    lowered = html_content.casefold()
+
+    fantasy_tokens = _extract_intent_tokens(str(contract.get("fantasy", "")))
+    fantasy_hits = [token for token in fantasy_tokens if token in lowered]
+    fantasy_ok = _ratio(len(fantasy_hits), max(len(fantasy_tokens), 1)) >= 0.34
+
+    player_verbs = [
+        str(item).strip().casefold()
+        for item in (contract.get("player_verbs") or [])
+        if str(item).strip()
+    ]
+    player_verb_hits = [verb for verb in player_verbs if verb in lowered]
+    player_verbs_ok = _ratio(len(player_verb_hits), max(len(player_verbs), 1)) >= 0.34
+
+    camera_tokens = _extract_intent_tokens(str(contract.get("camera_interaction", "")))
+    camera_hits = [token for token in camera_tokens if token in lowered]
+    camera_ok = _ratio(len(camera_hits), max(len(camera_tokens), 1)) >= 0.25
+
+    progression_rows = [
+        str(item).strip()
+        for item in (contract.get("progression_loop") or [])
+        if str(item).strip()
+    ]
+    progression_tokens: list[str] = []
+    for row in progression_rows:
+        progression_tokens.extend(_extract_intent_tokens(row, limit=4))
+    progression_tokens = list(dict.fromkeys(progression_tokens))[:10]
+    progression_hits = [token for token in progression_tokens if token in lowered]
+    progression_ok = _ratio(len(progression_hits), max(len(progression_tokens), 1)) >= 0.3
+
+    fail_restart_text = str(contract.get("fail_restart_loop", "")).casefold()
+    fail_tokens = _extract_intent_tokens(fail_restart_text, limit=6)
+    fail_hits = [token for token in fail_tokens if token in lowered]
+    restart_signal_ok = any(token in lowered for token in ("restart", "reset", "retry", "game over", "fail"))
+    fail_restart_ok = restart_signal_ok and (_ratio(len(fail_hits), max(len(fail_tokens), 1)) >= 0.25)
+
+    non_negotiables = [
+        str(item).strip()
+        for item in (contract.get("non_negotiables") or [])
+        if str(item).strip()
+    ]
+    non_negotiable_failures: list[str] = []
+    for item in non_negotiables:
+        lowered_item = item.casefold()
+        if lowered_item.startswith("avoid:"):
+            banned = lowered_item.split(":", 1)[1].strip()
+            if banned and banned in lowered:
+                non_negotiable_failures.append(f"forbidden_present:{banned}")
+        elif lowered_item == "preserve_requested_intent_without_generic_substitution":
+            if "generic arcade" in lowered:
+                non_negotiable_failures.append("generic_arcade_substitution")
+        else:
+            intent_tokens = _extract_intent_tokens(lowered_item, limit=4)
+            if intent_tokens and not any(token in lowered for token in intent_tokens):
+                non_negotiable_failures.append(f"missing:{item[:48]}")
+    non_negotiables_ok = len(non_negotiable_failures) == 0
+
+    checks = {
+        "fantasy": fantasy_ok,
+        "player_verbs": player_verbs_ok,
+        "camera_interaction": camera_ok,
+        "progression_loop": progression_ok,
+        "fail_restart_loop": fail_restart_ok,
+        "non_negotiables": non_negotiables_ok,
+    }
+    weights = {
+        "fantasy": 22,
+        "player_verbs": 20,
+        "camera_interaction": 14,
+        "progression_loop": 16,
+        "fail_restart_loop": 18,
+        "non_negotiables": 10,
+    }
+    score = sum(weight for key, weight in weights.items() if checks.get(key))
+    threshold = 75
+    failed_items = [key for key, passed in checks.items() if not passed]
+
+    reason_by_item: dict[str, list[str]] = {
+        "fantasy": [f"missing_tokens:{token}" for token in fantasy_tokens if token not in fantasy_hits][:5],
+        "player_verbs": [f"missing_verb:{token}" for token in player_verbs if token not in player_verb_hits][:6],
+        "camera_interaction": [f"missing_tokens:{token}" for token in camera_tokens if token not in camera_hits][:4],
+        "progression_loop": [f"missing_tokens:{token}" for token in progression_tokens if token not in progression_hits][:6],
+        "fail_restart_loop": [] if fail_restart_ok else ["restart_or_fail_signal_missing"],
+        "non_negotiables": non_negotiable_failures[:8],
+    }
+
+    return {
+        "ok": score >= threshold and not failed_items,
+        "score": score,
+        "threshold": threshold,
+        "failed_items": failed_items,
+        "checks": checks,
+        "reason_by_item": {key: value for key, value in reason_by_item.items() if value},
+    }

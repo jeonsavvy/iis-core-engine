@@ -47,39 +47,6 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
     }
 
 
-def _fallback_design_contract(*, keyword: str, genre: str, visual_style: str) -> DesignContractPayload:
-    return DesignContractPayload(
-        camera_ui_contract=[
-            "camera movement keeps player context stable",
-            "hud keeps score/time/hp readable",
-            "critical interaction not occluded by overlays",
-        ],
-        asset_blueprint_2d3d=[
-            f"{genre} player rig",
-            "enemy archetype set",
-            "projectile and impact VFX",
-            "environment modular kit",
-            f"style profile: {visual_style} / keyword: {keyword}",
-        ],
-        scene_layers=[
-            "foreground gameplay",
-            "midground interaction",
-            "background depth layer",
-            "postfx feedback layer",
-        ],
-        feedback_fx_contract=[
-            "hit confirmation flash",
-            "danger telegraph pulse",
-            "combo escalation response",
-        ],
-        readability_contract=[
-            "player/enemy/projectile silhouette separation",
-            "collision-critical entities maintain edge contrast",
-            "motion effects do not hide hitboxes",
-        ],
-    )
-
-
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -94,21 +61,47 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     visual_style = str(gdd_output.get("visual_style", "neon-minimal"))
     keyword = state["keyword"]
     genre = str(gdd_output.get("genre", "arcade"))
+    settings = deps.vertex_service.settings
+    strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
     generated = deps.vertex_service.generate_design_spec(keyword=keyword, visual_style=visual_style, genre=genre)
+    design_spec_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
+    if strict_vertex_only and design_spec_source != "vertex":
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "design_spec_unavailable"
+        return append_log(
+            state,
+            stage=PipelineStage.DESIGN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DESIGNER,
+            message="디자인 중단: Vertex design spec을 확보하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "design_spec_source": design_spec_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["design_spec_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
+        )
     try:
         design_spec = DesignSpecPayload.model_validate(generated.payload)
     except Exception:
-        design_spec = DesignSpecPayload(
-            visual_style=visual_style,
-            palette=["#0EA5E9", "#111827", "#22C55E", "#F8FAFC"],
-            hud="score-top-left / timer-top-right / combo-bottom",
-            viewport_width=1280,
-            viewport_height=720,
-            safe_area_padding=24,
-            min_font_size_px=14,
-            text_overflow_policy="ellipsis-clamp",
-            typography="inter-bold-hud",
-            thumbnail_concept="Neon particle burst with score counter.",
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "design_spec_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.DESIGN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DESIGNER,
+            message="디자인 중단: design spec payload 검증 실패.",
+            reason=state["reason"],
+            metadata={
+                "design_spec_source": design_spec_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["design_spec_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
         )
     art_direction_contract = _derive_art_direction_contract(
         keyword=keyword,
@@ -121,17 +114,66 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         visual_style=design_spec.visual_style,
         design_spec=design_spec.model_dump(),
     )
+    design_contract_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
+    if strict_vertex_only and design_contract_source != "vertex":
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "design_contract_unavailable"
+        return append_log(
+            state,
+            stage=PipelineStage.DESIGN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DESIGNER,
+            message="디자인 중단: Vertex design contract를 확보하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "design_spec_source": design_spec_source,
+                "design_contract_source": design_contract_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["design_contract_gate"],
+                "contract_status": "fail",
+                **generated_contract.meta,
+            },
+        )
     try:
         design_contract = DesignContractPayload.model_validate(generated_contract.payload)
     except Exception:
-        design_contract = _fallback_design_contract(
-            keyword=keyword,
-            genre=genre,
-            visual_style=design_spec.visual_style,
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "design_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.DESIGN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DESIGNER,
+            message="디자인 중단: design contract payload 검증 실패.",
+            reason=state["reason"],
+            metadata={
+                "design_spec_source": design_spec_source,
+                "design_contract_source": design_contract_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["design_contract_gate"],
+                "contract_status": "fail",
+                **generated_contract.meta,
+            },
         )
     state["outputs"]["design_spec"] = design_spec.model_dump()
     state["outputs"]["art_direction_contract"] = art_direction_contract
     state["outputs"]["design_contract"] = design_contract.model_dump()
+    state["outputs"]["design_spec_source"] = design_spec_source
+    state["outputs"]["design_spec_meta"] = dict(generated.meta)
+    state["outputs"]["design_contract_source"] = design_contract_source
+    state["outputs"]["design_contract_meta"] = dict(generated_contract.meta)
+    design_spec_usage = generated.meta.get("usage", {}) if isinstance(generated.meta.get("usage", {}), dict) else {}
+    design_contract_usage = (
+        generated_contract.meta.get("usage", {}) if isinstance(generated_contract.meta.get("usage", {}), dict) else {}
+    )
+    usage = {
+        "prompt_tokens": int(design_spec_usage.get("prompt_tokens", 0) or 0)
+        + int(design_contract_usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(design_spec_usage.get("completion_tokens", 0) or 0)
+        + int(design_contract_usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(design_spec_usage.get("total_tokens", 0) or 0)
+        + int(design_contract_usage.get("total_tokens", 0) or 0),
+    }
     return append_log(
         state,
         stage=PipelineStage.DESIGN,
@@ -153,7 +195,12 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "contract_status": "pass",
             "contract_summary": f"{len(design_contract.asset_blueprint_2d3d)} asset blueprint entries",
             "contribution_score": 4.2,
-            **generated.meta,
-            **generated_contract.meta,
+            "strict_vertex_only": strict_vertex_only,
+            "design_spec_source": design_spec_source,
+            "design_contract_source": design_contract_source,
+            "design_spec_usage": design_spec_usage,
+            "design_contract_usage": design_contract_usage,
+            "usage": usage,
+            "model": str(generated_contract.meta.get("model") or generated.meta.get("model") or "").strip() or None,
         },
     )

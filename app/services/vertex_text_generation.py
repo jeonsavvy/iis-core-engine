@@ -263,6 +263,7 @@ def generate_codegen_candidate_artifact(
     variation_hint: str,
     design_spec: dict[str, Any],
     asset_pack: dict[str, Any],
+    intent_contract: dict[str, Any] | None,
     html_content: str,
 ) -> VertexGenerationResult:
     if not service.settings.builder_codegen_enabled:
@@ -286,6 +287,7 @@ def generate_codegen_candidate_artifact(
         variation_hint=variation_hint,
         design_spec=design_spec,
         asset_pack=asset_pack,
+        intent_contract=intent_contract,
         html_content=html_content,
     )
     started = time.perf_counter()
@@ -320,6 +322,9 @@ def generate_codegen_candidate_artifact(
                 "model": builder_model,
                 "latency_ms": latency_ms,
                 "usage": usage,
+                "model_name": builder_model,
+                "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
+                "prompt_contract_version": "intent_v1",
             },
         )
     except Exception as exc:
@@ -338,6 +343,9 @@ def generate_codegen_candidate_artifact(
                 "vertex_error": str(exc),
                 "model": builder_model,
                 "validation_failures": validation_failures,
+                "model_name": builder_model,
+                "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
+                "prompt_contract_version": "intent_v1",
             },
         )
 

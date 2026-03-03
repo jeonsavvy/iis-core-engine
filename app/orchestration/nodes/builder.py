@@ -18,10 +18,17 @@ from app.orchestration.nodes.builder_parts.mode import (
     _synthesize_genre_profile,
     _slugify,
 )
+from app.orchestration.nodes.builder_parts.intent_contract import build_intent_contract, compute_intent_contract_hash
 from app.orchestration.nodes.builder_parts.production_pipeline import build_production_artifact
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
-from app.schemas.payloads import AnalyzeContractPayload, DesignContractPayload, DesignSpecPayload, GDDPayload, PlanContractPayload
+from app.schemas.payloads import (
+    AnalyzeContractPayload,
+    DesignContractPayload,
+    DesignSpecPayload,
+    GDDPayload,
+    PlanContractPayload,
+)
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 __all__ = [
@@ -161,64 +168,10 @@ def _normalize_core_loop_type(core_loop_type: str) -> str:
     return str(core_loop_type).strip() or "comic_action_brawler_3d"
 
 
-def _ensure_analyze_contract(state: PipelineState) -> tuple[AnalyzeContractPayload, bool]:
-    existing = state["outputs"].get("analyze_contract")
-    if isinstance(existing, dict):
-        try:
-            return AnalyzeContractPayload.model_validate(existing), False
-        except ValidationError:
-            pass
-    contract = AnalyzeContractPayload(
-        intent=f"{state['keyword']} 요청을 실행 가능한 제작 작업으로 분해",
-        scope_in=["browser runtime", "deployable artifact", "traceable logs"],
-        scope_out=["manual approval workflow", "external paid asset dependency"],
-        hard_constraints=["leaderboard contract", "no secret leakage", "boot stability"],
-        forbidden_patterns=["single-button score toy", "placeholder-only visuals", "uncaught runtime error"],
-        success_outcome="업스트림 계약을 기반으로 조립 가능한 빌드 입력이 준비된다.",
-    )
-    state["outputs"]["analyze_contract"] = contract.model_dump()
-    return contract, True
-
-
-def _ensure_plan_contract(state: PipelineState, *, genre: str) -> tuple[PlanContractPayload, bool]:
-    existing = state["outputs"].get("plan_contract")
-    if isinstance(existing, dict):
-        try:
-            return PlanContractPayload.model_validate(existing), False
-        except ValidationError:
-            pass
-    contract = PlanContractPayload(
-        core_mechanics=["movement", "timed action", "enemy pressure response"],
-        progression_plan=["intro pacing", "mid escalation", "late clutch window"],
-        encounter_plan=["baseline wave", "elite cadence", "miniboss checkpoint"],
-        risk_reward_plan=["safe lane", "high-risk combo lane", "recovery branch"],
-        control_model=f"{genre} / keyboard analog intent",
-        balance_baseline={
-            "base_hp": 3.0,
-            "base_spawn_rate": 1.0,
-            "difficulty_scale_per_min": 1.15,
-        },
-    )
-    state["outputs"]["plan_contract"] = contract.model_dump()
-    return contract, True
-
-
-def _ensure_design_contract(state: PipelineState) -> tuple[DesignContractPayload, bool]:
-    existing = state["outputs"].get("design_contract")
-    if isinstance(existing, dict):
-        try:
-            return DesignContractPayload.model_validate(existing), False
-        except ValidationError:
-            pass
-    contract = DesignContractPayload(
-        camera_ui_contract=["stable camera framing", "glanceable HUD", "non-blocking overlays"],
-        asset_blueprint_2d3d=["player rig", "enemy archetypes", "projectile pack", "scene prop kit"],
-        scene_layers=["foreground", "interaction midground", "background depth", "postfx"],
-        feedback_fx_contract=["hit flash", "danger telegraph", "combo response"],
-        readability_contract=["silhouette contrast", "projectile visibility", "collision-shape clarity"],
-    )
-    state["outputs"]["design_contract"] = contract.model_dump()
-    return contract, True
+def _require_contract_payload(raw: object, model_cls):
+    if not isinstance(raw, dict):
+        raise ValueError(f"{model_cls.__name__}_missing")
+    return model_cls.model_validate(raw)
 
 
 def _validate_prebuild_contracts(
@@ -243,6 +196,23 @@ def _validate_prebuild_contracts(
     return issues
 
 
+def _validate_intent_contract(intent_contract) -> list[str]:
+    issues: list[str] = []
+    if not str(intent_contract.fantasy).strip():
+        issues.append("fantasy_missing")
+    if not intent_contract.player_verbs:
+        issues.append("player_verbs_missing")
+    if not str(intent_contract.camera_interaction).strip():
+        issues.append("camera_interaction_missing")
+    if not intent_contract.progression_loop:
+        issues.append("progression_loop_missing")
+    if not str(intent_contract.fail_restart_loop).strip():
+        issues.append("fail_restart_loop_missing")
+    if not intent_contract.non_negotiables:
+        issues.append("non_negotiables_missing")
+    return issues
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -256,34 +226,78 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["build_iteration"] += 1
 
     try:
-        gdd = GDDPayload.model_validate(state["outputs"].get("gdd", {}))
-    except ValidationError:
-        gdd = GDDPayload(
-            title=f"{state['keyword'].title()} Infinite",
-            genre="arcade",
-            objective="Survive escalating pressure while chaining skill actions for a high score.",
-            visual_style="neon-minimal",
-        )
-
-    try:
-        design_spec = DesignSpecPayload.model_validate(state["outputs"].get("design_spec", {}))
-    except ValidationError:
-        design_spec = DesignSpecPayload(
-            visual_style=gdd.visual_style or "neon-minimal",
-            palette=["#22C55E"],
-            hud="score-top-left / timer-top-right",
-            viewport_width=1280,
-            viewport_height=720,
-            safe_area_padding=24,
-            min_font_size_px=14,
-            text_overflow_policy="ellipsis-clamp",
+        gdd = _require_contract_payload(state["outputs"].get("gdd"), GDDPayload)
+        design_spec = _require_contract_payload(state["outputs"].get("design_spec"), DesignSpecPayload)
+    except (ValidationError, ValueError) as exc:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "upstream_contract_missing_or_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: GDD 또는 Design spec 계약이 누락되었거나 형식이 올바르지 않습니다.",
+            reason=state["reason"],
+            metadata={
+                "strict_vertex_only": bool(getattr(deps.vertex_service.settings, "strict_vertex_only", True)),
+                "contract_status": "fail",
+                "contract_error": str(exc),
+                "deliverables": ["prebuild_contract_validator"],
+            },
         )
 
     title = gdd.title
     genre = gdd.genre
-    analyze_contract, analyze_repaired = _ensure_analyze_contract(state)
-    plan_contract, plan_repaired = _ensure_plan_contract(state, genre=genre)
-    design_contract, design_repaired = _ensure_design_contract(state)
+    settings = deps.vertex_service.settings
+    strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    try:
+        analyze_contract = _require_contract_payload(state["outputs"].get("analyze_contract"), AnalyzeContractPayload)
+        plan_contract = _require_contract_payload(state["outputs"].get("plan_contract"), PlanContractPayload)
+        design_contract = _require_contract_payload(state["outputs"].get("design_contract"), DesignContractPayload)
+    except (ValidationError, ValueError) as exc:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "upstream_contract_missing_or_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 업스트림 계약이 누락되었거나 형식이 올바르지 않습니다.",
+            reason=state["reason"],
+            metadata={
+                "strict_vertex_only": strict_vertex_only,
+                "contract_status": "fail",
+                "contract_error": str(exc),
+                "deliverables": ["prebuild_contract_validator"],
+            },
+        )
+    if strict_vertex_only:
+        source_rows = {
+            "analyze_contract_source": str(state["outputs"].get("analyze_contract_source", "")).strip().casefold(),
+            "gdd_source": str(state["outputs"].get("gdd_source", "")).strip().casefold(),
+            "plan_contract_source": str(state["outputs"].get("plan_contract_source", "")).strip().casefold(),
+            "design_spec_source": str(state["outputs"].get("design_spec_source", "")).strip().casefold(),
+            "design_contract_source": str(state["outputs"].get("design_contract_source", "")).strip().casefold(),
+        }
+        violated = [key for key, source in source_rows.items() if source != "vertex"]
+        if violated:
+            state["status"] = PipelineStatus.ERROR
+            state["reason"] = "upstream_contract_source_untrusted"
+            return append_log(
+                state,
+                stage=PipelineStage.BUILD,
+                status=PipelineStatus.ERROR,
+                agent_name=PipelineAgentName.DEVELOPER,
+                message="빌드 중단: Vertex source 계약이 충족되지 않았습니다.",
+                reason=state["reason"],
+                metadata={
+                    "strict_vertex_only": strict_vertex_only,
+                    "violated_sources": violated,
+                    "source_rows": source_rows,
+                    "contract_status": "fail",
+                    "deliverables": ["prebuild_contract_validator"],
+                },
+            )
     analyze_contract, plan_contract, design_contract = _expand_prompt_contracts(
         keyword=state["keyword"],
         title=title,
@@ -300,9 +314,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         plan_contract=plan_contract,
         design_contract=design_contract,
     )
-    contract_enforcement = str(getattr(deps.vertex_service.settings, "pipeline_contract_enforcement", "warn_only"))
-    repaired_any = analyze_repaired or plan_repaired or design_repaired
-    if contract_issues and contract_enforcement != "warn_only":
+    if contract_issues:
         state["status"] = PipelineStatus.ERROR
         state["reason"] = "builder_contract_validation_failed"
         return append_log(
@@ -317,24 +329,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "contract_status": "fail",
                 "deliverables": ["prebuild_contract_validator"],
                 "contribution_score": 1.2,
-                "contract_enforcement": contract_enforcement,
-            },
-        )
-
-    if contract_issues:
-        append_log(
-            state,
-            stage=PipelineStage.BUILD,
-            status=PipelineStatus.RUNNING,
-            agent_name=PipelineAgentName.DEVELOPER,
-            message="계약 검증 경고: warn-only 모드로 빌드를 계속합니다.",
-            metadata={
-                "contract_issues": contract_issues,
-                "contract_status": "warn",
-                "deliverables": ["prebuild_contract_validator"],
-                "contribution_score": 2.8,
-                "contract_enforcement": contract_enforcement,
-                "contract_repaired": repaired_any,
+                "contract_enforcement": "strict",
+                "strict_vertex_only": strict_vertex_only,
             },
         )
 
@@ -370,6 +366,36 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre=genre,
         genre_profile=generated_genre_profile,
     )
+    intent_contract = build_intent_contract(
+        keyword=state["keyword"],
+        title=title,
+        gdd=gdd,
+        analyze_contract=analyze_contract,
+        plan_contract=plan_contract,
+        design_contract=design_contract,
+    )
+    intent_issues = _validate_intent_contract(intent_contract)
+    if intent_issues:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "intent_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 의도 계약 필수 항목이 충족되지 않았습니다.",
+            reason=state["reason"],
+            metadata={
+                "intent_issues": intent_issues,
+                "contract_status": "fail",
+                "deliverables": ["intent_contract_validator"],
+                "contribution_score": 1.3,
+                "strict_vertex_only": strict_vertex_only,
+            },
+        )
+    intent_contract_hash = compute_intent_contract_hash(intent_contract)
+    state["outputs"]["intent_contract"] = intent_contract.model_dump()
+    state["outputs"]["intent_contract_hash"] = intent_contract_hash
     unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
     if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
         state["status"] = PipelineStatus.ERROR
@@ -424,6 +450,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "request_capability_hint_applied": bool(request_capability_hint),
             "generated_genre_profile": generated_genre_profile,
             "generated_genre_directive_applied": bool(generated_genre_directive),
+            "intent_contract_hash": intent_contract_hash,
             "asset_memory_hint_applied": bool(asset_memory_context.hint),
             "asset_memory_profile": asset_memory_context.retrieval_profile,
             "asset_memory_snapshot": asset_memory_context.registry_snapshot,
@@ -495,6 +522,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         memory_tokens=asset_memory_context.recurring_failures,
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
+        intent_contract=intent_contract.model_dump(),
     )
     playability_hard_gate = bool(getattr(deps.vertex_service.settings, "builder_playability_hard_gate", True))
     playability_passed = bool(production_result.metadata.get("playability_passed", True))
@@ -643,7 +671,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             **{
                 key: value
                 for key, value in selected_generation_meta.items()
-                if key in {"model", "latency_ms", "reason", "vertex_error"}
+                if key
+                in {
+                    "model",
+                    "latency_ms",
+                    "reason",
+                    "vertex_error",
+                    "model_name",
+                    "max_output_tokens",
+                    "prompt_contract_version",
+                    "usage",
+                }
             },
             "deliverables": [
                 "build_artifact",
@@ -651,11 +689,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "runtime_guard",
                 "candidate_scoreboard",
             ],
-            "contract_status": "pass" if not contract_issues else "warn",
+            "contract_status": "pass",
             "contract_summary": "upstream contracts consumed for assembly build",
             "contribution_score": 4.6,
             "contract_issues": contract_issues,
-            "contract_repaired": repaired_any,
             "generated_genre_profile": generated_genre_profile,
             "generated_genre_directive_applied": bool(generated_genre_directive),
             **production_result.metadata,

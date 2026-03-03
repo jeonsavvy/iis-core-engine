@@ -38,6 +38,15 @@ class DesignContractPayload(BaseModel):
     readability_contract: list[str] = Field(default_factory=list, min_length=1, max_length=12)
 
 
+class IntentContractPayload(BaseModel):
+    fantasy: str = Field(min_length=1, max_length=260)
+    player_verbs: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    camera_interaction: str = Field(min_length=1, max_length=200)
+    progression_loop: list[str] = Field(default_factory=list, min_length=1, max_length=10)
+    fail_restart_loop: str = Field(min_length=1, max_length=240)
+    non_negotiables: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+
+
 class DesignSpecPayload(BaseModel):
     visual_style: str = Field(min_length=1, max_length=80)
     palette: list[str] = Field(min_length=1, max_length=8)

@@ -50,6 +50,9 @@ class _VertexServiceWithCodegen:
             rqc_version="rqc-1",
             builder_codegen_enabled=True,
             builder_codegen_passes=1,
+            builder_codegen_recovery_enabled=False,
+            strict_vertex_only=True,
+            allow_stub_fallback=False,
         )
         self.calls = 0
 
@@ -65,8 +68,10 @@ class _VertexServiceWithCodegen:
         variation_hint: str,
         design_spec: dict[str, Any],
         asset_pack: dict[str, Any],
+        intent_contract: dict[str, Any] | None,
         html_content: str,
     ) -> Any:
+        _ = intent_contract
         self.calls += 1
         refined_html = f"{html_content}\n<!-- codegen-refined -->"
         return SimpleNamespace(

@@ -6,14 +6,12 @@ from typing import Any
 
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
-from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
+from app.orchestration.nodes.builder_parts.intent_contract import compute_intent_contract_hash
 from app.orchestration.nodes.builder_parts.scaffold_builder import build_scaffold_html
-from app.orchestration.nodes.builder_parts.genre_engine import resolve_genre_engine, get_genre_reference_prompt
 from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
-from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload
+from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload, IntentContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
-from app.services.vertex_models import GameConfigModel
 from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
 
 
@@ -264,72 +262,40 @@ def _assess_artifact_quality(
     )
 
 
-def _build_codegen_recovery_hint(*, failed_requirements: list[str]) -> str:
-    requirement_prompts = {
-        "html_document": "Return one complete HTML document with <html>, <head>, <body>.",
-        "boot_flag": "Set window.__iis_game_boot_ok = true after runtime boot completes.",
-        "leaderboard_contract": "Define window.IISLeaderboard contract object in global scope.",
-        "realtime_loop": "Implement requestAnimationFrame-based realtime update loop.",
-        "canvas_or_render_runtime": "Create playable canvas runtime (<canvas> or createElement('canvas') / WebGL renderer).",
-    }
-    hints = [
-        requirement_prompts[item]
-        for item in failed_requirements
-        if item in requirement_prompts
-    ]
-    if not hints:
-        return (
-            "Structural recovery required. Return full playable HTML artifact with boot flag, leaderboard contract, "
-            "requestAnimationFrame game loop, and active canvas runtime."
-        )
-    return "Structural recovery required. " + " ".join(hints)
+def _build_intent_prompt_fragment(intent_contract: dict[str, Any] | None) -> str:
+    contract = intent_contract if isinstance(intent_contract, dict) else {}
+    fantasy = str(contract.get("fantasy", "")).strip()
+    camera_interaction = str(contract.get("camera_interaction", "")).strip()
+    fail_restart_loop = str(contract.get("fail_restart_loop", "")).strip()
+    player_verbs = [str(item).strip() for item in (contract.get("player_verbs") or []) if str(item).strip()]
+    progression_loop = [str(item).strip() for item in (contract.get("progression_loop") or []) if str(item).strip()]
+    non_negotiables = [str(item).strip() for item in (contract.get("non_negotiables") or []) if str(item).strip()]
+    rows: list[str] = []
+    if fantasy:
+        rows.append(f"Fantasy: {fantasy}")
+    if player_verbs:
+        rows.append(f"Player verbs: {', '.join(player_verbs[:8])}")
+    if camera_interaction:
+        rows.append(f"Camera/Interaction: {camera_interaction}")
+    if progression_loop:
+        rows.append("Progression loop: " + " -> ".join(progression_loop[:6]))
+    if fail_restart_loop:
+        rows.append(f"Fail/Restart loop: {fail_restart_loop}")
+    if non_negotiables:
+        rows.append(f"Non-negotiables: {', '.join(non_negotiables[:8])}")
+    if not rows:
+        return "Intent contract missing. Preserve the user request exactly without generic substitution."
+    return "Intent contract:\n" + "\n".join(f"- {row}" for row in rows)
 
 
-def _resolve_deterministic_game_config(
-    *,
-    deps: NodeDependencies,
-    keyword: str,
-    title: str,
-    genre: str,
-    objective: str,
-    design_spec: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    generate_game_config = getattr(deps.vertex_service, "generate_game_config", None)
-    if callable(generate_game_config):
-        try:
-            result = generate_game_config(
-                keyword=keyword,
-                title=title,
-                genre=genre,
-                objective=objective,
-                design_spec=design_spec,
-                variation_hint="deterministic_runtime_recovery",
-            )
-            payload = getattr(result, "payload", None)
-            meta = getattr(result, "meta", None)
-            if isinstance(payload, dict) and payload:
-                return payload, dict(meta) if isinstance(meta, dict) else {}
-        except Exception as exc:
-            return (
-                GameConfigModel().model_dump(),
-                {"generation_source": "stub", "reason": f"config_recovery_error:{type(exc).__name__}", "vertex_error": str(exc)},
-            )
-    return GameConfigModel().model_dump(), {"generation_source": "stub", "reason": "config_recovery_default"}
-
-
-def _normalize_runtime_asset_pack(asset_pack: dict[str, Any]) -> dict[str, str]:
-    defaults = {
-        "name": "neon_arcade",
-        "bg_top": "#08122f",
-        "bg_bottom": "#050915",
-        "hud_primary": "#e2e8f0",
-        "hud_muted": "#93c5fd",
-    }
-    normalized = {key: str(value) for key, value in defaults.items()}
-    for key, value in (asset_pack or {}).items():
-        if isinstance(value, str) and value.strip():
-            normalized[str(key)] = value.strip()
-    return normalized
+def compute_intent_contract_hash_from_map(intent_contract: dict[str, Any] | None) -> str:
+    if not isinstance(intent_contract, dict) or not intent_contract:
+        return "missing"
+    try:
+        typed = IntentContractPayload.model_validate(intent_contract)
+    except Exception:
+        return "invalid"
+    return compute_intent_contract_hash(typed)
 
 
 def _build_scaffold_first_production_artifact(
@@ -351,6 +317,7 @@ def _build_scaffold_first_production_artifact(
     memory_tokens: list[str] | None = None,
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
+    intent_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     design_spec_dump = design_spec.model_dump()
     rebuild_feedback_hint = ""
@@ -384,12 +351,12 @@ def _build_scaffold_first_production_artifact(
         runtime_engine_mode=runtime_engine_mode,
         asset_pack=asset_pack,
     )
-    genre_engine = resolve_genre_engine(genre, state["keyword"])
-    genre_ref_prompt = get_genre_reference_prompt(genre_engine)
+    intent_prompt = _build_intent_prompt_fragment(intent_contract)
+    intent_contract_hash = compute_intent_contract_hash_from_map(intent_contract)
     effective_variation_hint = (
-        f"single_pass_generation | {combined_feedback_hint}\n{genre_ref_prompt}"
+        f"single_pass_generation | {combined_feedback_hint}\n{intent_prompt}"
         if combined_feedback_hint
-        else f"single_pass_generation\n{genre_ref_prompt}"
+        else f"single_pass_generation\n{intent_prompt}"
     )
 
     append_log(
@@ -412,6 +379,7 @@ def _build_scaffold_first_production_artifact(
             "generated_genre_directive_applied": bool(normalized_generated_genre_directive),
             "memory_feedback_tokens": memory_feedback_tokens,
             "qa_mode": "verify_only",
+            "intent_contract_hash": intent_contract_hash,
         },
     )
 
@@ -426,6 +394,7 @@ def _build_scaffold_first_production_artifact(
         design_spec=design_spec_dump,
         asset_pack=asset_pack,
         html_content=scaffold_html,
+        intent_contract=intent_contract if isinstance(intent_contract, dict) else {},
     )
     generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
     generation_source = str(codegen_result.meta.get("generation_source", "stub")).strip().lower()
@@ -440,105 +409,21 @@ def _build_scaffold_first_production_artifact(
     initial_generation_reason = generation_reason
     initial_generation_error = generation_error
     initial_generation_validation_failures = list(generation_validation_failures)
-
     recovery_attempted = False
     recovery_success = False
-    recovery_meta: dict[str, Any] = {}
-    recovery_failures: list[str] = []
-    if not codegen_available:
-        recovery_attempted = True
-        recovery_hint = _build_codegen_recovery_hint(failed_requirements=generation_validation_failures)
-        recovery_variation_hint = f"{effective_variation_hint}\n{recovery_hint}"
-        recovery_result = deps.vertex_service.generate_codegen_candidate_artifact(
-            keyword=state["keyword"],
-            title=title,
-            genre=genre,
-            objective=gdd.objective,
-            core_loop_type=core_loop_type,
-            runtime_engine_mode=runtime_engine_mode,
-            variation_hint=recovery_variation_hint,
-            design_spec=design_spec_dump,
-            asset_pack=asset_pack,
-            html_content=scaffold_html,
-        )
-        recovery_html = str(recovery_result.payload.get("artifact_html", "")).strip()
-        recovery_source = str(recovery_result.meta.get("generation_source", "stub")).strip().lower()
-        recovery_reason = str(recovery_result.meta.get("reason", "")).strip()
-        recovery_error = str(recovery_result.meta.get("vertex_error", "")).strip()
-        recovery_validation_failures = [
-            str(item).strip()
-            for item in (recovery_result.meta.get("validation_failures") or [])
-            if str(item).strip()
-        ]
-        recovery_success = bool(recovery_html) and recovery_source == "vertex"
-        recovery_failures = recovery_validation_failures
-        recovery_meta = {
-            "generation_source": recovery_source,
-            "reason": recovery_reason,
-            "vertex_error": recovery_error,
-            "validation_failures": recovery_validation_failures,
-        }
-        if recovery_success:
-            codegen_result = recovery_result
-            generated_html = recovery_html
-            generation_source = recovery_source
-            generation_reason = recovery_reason
-            generation_error = recovery_error
-            generation_validation_failures = recovery_validation_failures
-            codegen_available = True
-
+    recovery_enabled = False
+    recovery_meta: dict[str, Any] = {
+        "generation_source": "disabled",
+        "reason": "single_pass_only",
+        "recovery_enabled": recovery_enabled,
+    }
+    strict_vertex_only = bool(getattr(deps.vertex_service.settings, "strict_vertex_only", True))
+    allow_stub_fallback = bool(getattr(deps.vertex_service.settings, "allow_stub_fallback", False))
+    deterministic_fallback_enabled = False
     deterministic_fallback_used = False
-    deterministic_fallback_meta: dict[str, Any] = {}
-    deterministic_fallback_enabled = bool(
-        getattr(deps.vertex_service.settings, "builder_deterministic_fallback_enabled", False)
-    )
-    if not codegen_available and deterministic_fallback_enabled:
-        primary_reason = generation_reason.casefold()
-        recovery_reason = str(recovery_meta.get("reason", "")).strip().casefold()
-        should_use_deterministic_fallback = (
-            ("vertex_error:valueerror" in primary_reason)
-            or ("vertex_error:valueerror" in recovery_reason)
-        )
-        if should_use_deterministic_fallback:
-            runtime_config, runtime_config_meta = _resolve_deterministic_game_config(
-                deps=deps,
-                keyword=state["keyword"],
-                title=title,
-                genre=genre,
-                objective=gdd.objective,
-                design_spec=design_spec_dump,
-            )
-            runtime_asset_pack = _normalize_runtime_asset_pack(asset_pack)
-            fallback_html = _build_hybrid_engine_html(
-                title=title,
-                genre=genre,
-                slug=slug,
-                accent_color=accent_color,
-                viewport_width=design_spec.viewport_width,
-                viewport_height=design_spec.viewport_height,
-                safe_area_padding=design_spec.safe_area_padding,
-                min_font_size_px=design_spec.min_font_size_px,
-                text_overflow_policy=design_spec.text_overflow_policy,
-                core_loop_type=core_loop_type,
-                game_config=runtime_config,
-                asset_pack=runtime_asset_pack,
-                asset_manifest=runtime_asset_manifest,
-            ).strip()
-            if fallback_html:
-                generated_html = fallback_html
-                generation_source = "deterministic_fallback"
-                generation_reason = "codegen_valueerror_runtime_recovery"
-                generation_error = ""
-                generation_validation_failures = []
-                codegen_available = True
-                deterministic_fallback_used = True
-                deterministic_fallback_meta = {
-                    "reason": generation_reason,
-                    "config_generation_source": str(runtime_config_meta.get("generation_source", "stub")),
-                    "config_reason": str(runtime_config_meta.get("reason", "")),
-                }
+    deterministic_fallback_meta: dict[str, Any] = {"reason": "disabled_single_pass"}
 
-    final_html = generated_html if generated_html else scaffold_html
+    final_html = generated_html if codegen_available and generated_html else scaffold_html
 
     scaffold_assessment = _assess_artifact_quality(
         deps=deps,
@@ -572,19 +457,11 @@ def _build_scaffold_first_production_artifact(
     quality_floor_fail_reasons: list[str] = []
     if not codegen_available:
         quality_floor_fail_reasons.append("codegen_generation_failed")
-        if recovery_attempted and not recovery_success:
-            quality_floor_fail_reasons.append("codegen_recovery_failed")
-            recovery_reason = str(recovery_meta.get("reason", "")).strip()
-            recovery_error = str(recovery_meta.get("vertex_error", "")).strip()
-            if recovery_reason:
-                quality_floor_fail_reasons.append(f"codegen_recovery_reason:{recovery_reason}")
-            if recovery_error:
-                quality_floor_fail_reasons.append(f"codegen_recovery_error:{recovery_error[:120]}")
         if generation_reason:
             quality_floor_fail_reasons.append(f"codegen_reason:{generation_reason}")
         if generation_error:
             quality_floor_fail_reasons.append(f"codegen_error:{generation_error[:120]}")
-        for token in (generation_validation_failures or recovery_failures)[:6]:
+        for token in generation_validation_failures[:6]:
             quality_floor_fail_reasons.append(f"codegen_missing:{token}")
     if codegen_available:
         if not final_assessment.smoke.ok:
@@ -685,13 +562,13 @@ def _build_scaffold_first_production_artifact(
     }
 
     selected_generation_meta = dict(codegen_result.meta or {})
-    if deterministic_fallback_used:
-        selected_generation_meta = {
-            "generation_source": "deterministic_fallback",
-            "reason": "codegen_valueerror_runtime_recovery",
-            "upstream_reason": initial_generation_reason,
-            "upstream_validation_failures": initial_generation_validation_failures,
-        }
+    codegen_usage = (
+        selected_generation_meta.get("usage")
+        if isinstance(selected_generation_meta.get("usage"), dict)
+        else codegen_result.meta.get("usage")
+        if isinstance(codegen_result.meta, dict) and isinstance(codegen_result.meta.get("usage"), dict)
+        else {}
+    )
 
     metadata = {
         "builder_strategy": "scaffold_first_codegen_v3",
@@ -699,7 +576,8 @@ def _build_scaffold_first_production_artifact(
         "runtime_engine_mode": runtime_engine_mode,
         "artifact_file_count": len(build_artifact.artifact_files or []),
         "codegen_enabled": True,
-        "codegen_generation_attempts": 2 if recovery_attempted else 1,
+        "codegen_generation_attempts": 1,
+        "codegen_recovery_enabled": recovery_enabled,
         "codegen_recovery_attempted": recovery_attempted,
         "codegen_recovery_success": recovery_success,
         "codegen_initial_reason": initial_generation_reason,
@@ -735,6 +613,14 @@ def _build_scaffold_first_production_artifact(
         "request_capability_hint_applied": bool(normalized_request_capability_hint),
         "generated_genre_directive_applied": bool(normalized_generated_genre_directive),
         "memory_tokens": memory_feedback_tokens,
+        "intent_contract": intent_contract if isinstance(intent_contract, dict) else {},
+        "intent_contract_hash": intent_contract_hash,
+        "strict_vertex_only": strict_vertex_only,
+        "allow_stub_fallback": allow_stub_fallback,
+        "fallback_blocked": not allow_stub_fallback,
+        "codegen_usage": codegen_usage,
+        "usage": codegen_usage,
+        "model": str(selected_generation_meta.get("model", "")).strip() or None,
         "runtime_guard": {
             "chosen": "single_pass",
             "reason": final_assessment.smoke.reason,
@@ -789,6 +675,7 @@ def build_production_artifact(
     memory_tokens: list[str] | None = None,
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
+    intent_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     core_loop_type = _normalize_core_loop_type(core_loop_type)
     normalized_runtime_engine_mode = str(runtime_engine_mode or "").strip() or "3d_three"
@@ -810,4 +697,5 @@ def build_production_artifact(
         memory_tokens=memory_tokens,
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
+        intent_contract=intent_contract,
     )

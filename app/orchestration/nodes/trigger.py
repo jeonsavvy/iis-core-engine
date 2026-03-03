@@ -5,33 +5,6 @@ from app.schemas.payloads import AnalyzeContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 
 
-def _fallback_analyze_contract(keyword: str) -> AnalyzeContractPayload:
-    return AnalyzeContractPayload(
-        intent=f"{keyword} 요청을 브라우저 게임 제작 파이프라인으로 분해",
-        scope_in=[
-            "playable browser runtime",
-            "single artifact deploy",
-            "ops traceable pipeline logs",
-        ],
-        scope_out=[
-            "manual approval dependency",
-            "external paid asset requirement",
-            "native executable packaging",
-        ],
-        hard_constraints=[
-            "leaderboard contract preserved",
-            "no secret/token exposure",
-            "runtime boot stability required",
-        ],
-        forbidden_patterns=[
-            "click-only trivial score loop",
-            "placeholder-only visual output",
-            "unhandled runtime exception",
-        ],
-        success_outcome="요청 의도와 조작감이 명확한 결과물이 운영실에 단계별 근거와 함께 노출된다.",
-    )
-
-
 def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -45,12 +18,53 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
 
     state["status"] = PipelineStatus.RUNNING
     generated = _deps.vertex_service.generate_analyze_contract(keyword=state["keyword"])
+    generation_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
+    settings = _deps.vertex_service.settings
+    strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    if strict_vertex_only and generation_source != "vertex":
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "analyze_contract_unavailable"
+        return append_log(
+            state,
+            stage=PipelineStage.ANALYZE,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.ANALYZER,
+            message="분석 중단: Vertex analyze contract를 확보하지 못했습니다.",
+            reason=state["reason"],
+            metadata={
+                "generation_source": generation_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["analyze_contract_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
+        )
     try:
         analyze_contract = AnalyzeContractPayload.model_validate(generated.payload)
     except Exception:
-        analyze_contract = _fallback_analyze_contract(state["keyword"])
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "analyze_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.ANALYZE,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.ANALYZER,
+            message="분석 중단: analyze contract payload 검증에 실패했습니다.",
+            reason=state["reason"],
+            metadata={
+                "generation_source": generation_source,
+                "strict_vertex_only": strict_vertex_only,
+                "deliverables": ["analyze_contract_gate"],
+                "contract_status": "fail",
+                **generated.meta,
+            },
+        )
     state["outputs"]["analyze_contract"] = analyze_contract.model_dump()
+    state["outputs"]["analyze_contract_source"] = generation_source
+    state["outputs"]["analyze_contract_meta"] = dict(generated.meta)
     pipeline_version = str(state["outputs"].get("pipeline_version", "forgeflow-v1"))
+    usage = generated.meta.get("usage", {}) if isinstance(generated.meta.get("usage", {}), dict) else {}
+    model_name = str(generated.meta.get("model", "")).strip()
     return append_log(
         state,
         stage=PipelineStage.ANALYZE,
@@ -67,6 +81,9 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
             "contract_status": "pass",
             "contract_summary": analyze_contract.intent,
             "contribution_score": 4.2,
+            "strict_vertex_only": strict_vertex_only,
+            "usage": usage,
+            "model": model_name,
             **generated.meta,
         },
     )

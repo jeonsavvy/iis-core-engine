@@ -2,6 +2,7 @@ from app.core.config import Settings
 from app.services.quality_gates import (
     evaluate_artifact_contract,
     evaluate_gameplay_gate,
+    evaluate_intent_gate,
     evaluate_quality_contract,
     evaluate_visual_gate,
 )
@@ -217,3 +218,60 @@ def test_evaluate_quality_contract_rejects_when_2d_engine_contract_is_missing() 
     )
 
     assert "engine_contract_2d_phaser_missing" in result.failed_checks
+
+
+def test_evaluate_intent_gate_passes_when_intent_tokens_are_present() -> None:
+    html = """
+    <html><body>
+      <canvas id="game"></canvas>
+        <script>
+          const gameState = { mode: "race", checkpoint: 0 };
+          const fantasyLabel = "f1 racing fantasy";
+          function restartGame() {}
+          function gameOver() {}
+          function updateProgression() {}
+        function renderCamera() {}
+        function drift() {}
+        function steer() {}
+      </script>
+    </body></html>
+    """
+    report = evaluate_intent_gate(
+        html,
+        intent_contract={
+            "fantasy": "f1 racing checkpoint fantasy",
+            "player_verbs": ["drift", "steer"],
+            "camera_interaction": "camera follows racer",
+            "progression_loop": ["checkpoint race", "lap pressure"],
+            "fail_restart_loop": "fail and restart quickly",
+            "non_negotiables": ["avoid:placeholder-only visuals"],
+        },
+    )
+
+    assert report["ok"] is True
+    assert int(report["score"]) >= int(report["threshold"])
+
+
+def test_evaluate_intent_gate_fails_when_restart_or_verbs_are_missing() -> None:
+    html = """
+    <html><body>
+      <script>
+        function update() {}
+      </script>
+    </body></html>
+    """
+    report = evaluate_intent_gate(
+        html,
+        intent_contract={
+            "fantasy": "flight simulator mission",
+            "player_verbs": ["pitch", "roll", "yaw"],
+            "camera_interaction": "cockpit camera",
+            "progression_loop": ["mission progression"],
+            "fail_restart_loop": "fail and restart loop",
+            "non_negotiables": ["preserve_requested_intent_without_generic_substitution"],
+        },
+    )
+
+    assert report["ok"] is False
+    assert "player_verbs" in report["failed_items"]
+    assert "fail_restart_loop" in report["failed_items"]
