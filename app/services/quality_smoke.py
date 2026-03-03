@@ -96,8 +96,6 @@ def capture_visual_metrics(page) -> dict[str, float] | None:
             () => {
               const canvas = document.querySelector("canvas");
               if (!canvas) return null;
-              const sourceCtx = canvas.getContext("2d", { willReadFrequently: true });
-              if (!sourceCtx) return null;
               const sampleW = Math.max(1, Math.min(160, canvas.width || 0));
               const sampleH = Math.max(1, Math.min(90, canvas.height || 0));
               const off = document.createElement("canvas");
@@ -105,7 +103,11 @@ def capture_visual_metrics(page) -> dict[str, float] | None:
               off.height = sampleH;
               const offCtx = off.getContext("2d", { willReadFrequently: true });
               if (!offCtx) return null;
-              offCtx.drawImage(canvas, 0, 0, sampleW, sampleH);
+              try {
+                offCtx.drawImage(canvas, 0, 0, sampleW, sampleH);
+              } catch {
+                return null;
+              }
               const data = offCtx.getImageData(0, 0, sampleW, sampleH).data;
 
               let lumSum = 0;

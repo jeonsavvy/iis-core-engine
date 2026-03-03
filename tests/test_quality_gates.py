@@ -1,6 +1,7 @@
 from app.core.config import Settings
 from app.services.quality_gates import (
     evaluate_artifact_contract,
+    evaluate_gameplay_gate,
     evaluate_quality_contract,
     evaluate_visual_gate,
 )
@@ -73,3 +74,83 @@ def test_evaluate_artifact_contract_requires_hybrid_engine_bundle() -> None:
     assert result.ok is False
     assert "unsupported_bundle_kind" in result.failed_checks
 
+
+def test_evaluate_gameplay_gate_uses_racing_profile_without_combat_hard_failures() -> None:
+    settings = Settings(qa_min_gameplay_score=55)
+    html = """
+    <html>
+      <body class="safe-area overflow-guard">
+        <canvas id="game"></canvas>
+        <script>
+          const config = { mode: "webgl_three_runner" };
+          let state = { score: 0 };
+          let steervelocity = 0;
+          let accel_rate = 0.9;
+          let brake_rate = 0.7;
+          let checkpoint = 0;
+          let lap = 1;
+          let boosttimer = 0;
+          function update() {
+            state.score += 2;
+            requestAnimationFrame(update);
+          }
+          function draw() {}
+          function restartGame() {}
+          function endGame() {}
+          function drawPostFx() {}
+          function renderWebglBackground() {}
+          const overlayText = "Game Over";
+          document.addEventListener("keydown", () => {});
+        </script>
+      </body>
+    </html>
+    """
+
+    result = evaluate_gameplay_gate(
+        settings,
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="formula racing",
+        genre_engine="webgl_three_runner",
+        keyword="f1 circuit race",
+    )
+
+    assert "no_enemy_pressure" not in result.failed_checks
+    assert "flat_scoring_loop" not in result.failed_checks
+
+
+def test_evaluate_gameplay_gate_does_not_force_genre_engine_match_when_mode_token_missing() -> None:
+    settings = Settings(qa_min_gameplay_score=55)
+    html = """
+    <html>
+      <body class="safe-area overflow-guard">
+        <canvas id="game"></canvas>
+        <script>
+          let steervelocity = 0;
+          let accel_rate = 0.9;
+          let brake_rate = 0.7;
+          let checkpoint = 0;
+          let lap = 1;
+          function update() { requestAnimationFrame(update); }
+          function draw() {}
+          function restartGame() {}
+          function endGame() {}
+          function drawPostFx() {}
+          function renderWebglBackground() {}
+          const overlayText = "Game Over";
+          document.addEventListener("keydown", () => {});
+        </script>
+      </body>
+    </html>
+    """
+
+    result = evaluate_gameplay_gate(
+        settings,
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="formula racing",
+        genre_engine="webgl_three_runner",
+        keyword="f1 circuit race",
+    )
+
+    assert "genre_engine_mismatch" not in result.failed_checks

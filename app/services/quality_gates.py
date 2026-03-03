@@ -136,6 +136,31 @@ def evaluate_quality_contract(
     )
 
 
+_RACING_GENRE_ENGINES = {
+    "f1_formula_circuit_3d",
+    "webgl_three_runner",
+    "lane_dodge_racer",
+    "racing_3d",
+}
+_FLIGHT_GENRE_ENGINES = {
+    "flight_sim_3d",
+    "space_combat",
+}
+
+
+def _resolve_gameplay_profile(*, genre_engine_hint: str, genre_hint: str, keyword_hint: str) -> str:
+    combined = f"{genre_hint} {keyword_hint}"
+    if genre_engine_hint in _RACING_GENRE_ENGINES:
+        return "racing"
+    if genre_engine_hint in _FLIGHT_GENRE_ENGINES:
+        return "flight"
+    if any(token in combined for token in ("레이싱", "레이스", "racing", "race", "drift", "드리프트", "f1", "formula", "서킷")):
+        return "racing"
+    if any(token in combined for token in ("비행", "flight", "pilot", "aircraft", "dogfight", "cockpit")):
+        return "flight"
+    return "combat"
+
+
 def evaluate_gameplay_gate(
     settings: Settings,
     html_content: str,
@@ -150,48 +175,85 @@ def evaluate_gameplay_gate(
     genre_hint = (genre or "").strip().casefold()
     genre_engine_hint = (genre_engine or "").strip().casefold()
     keyword_hint = (keyword or "").strip().casefold()
+    gameplay_profile = _resolve_gameplay_profile(
+        genre_engine_hint=genre_engine_hint,
+        genre_hint=genre_hint,
+        keyword_hint=keyword_hint,
+    )
 
     checks: list[tuple[str, bool, int]] = [
         ("core_loop_tick", "requestanimationframe" in lowered and "update(" in lowered and "draw(" in lowered, 16),
         ("restart_loop", "game over" in lowered and "restart" in lowered, 10),
-        ("input_depth", lowered.count("keydown") >= 1 and any(key in lowered for key in ("arrowup", "arrowdown", "space")), 15),
-        ("control_tuning_table", "control_presets" in lowered and "const control =" in lowered, 10),
-        ("depth_pack_system", "depth_packs" in lowered and "active_depth_pack" in lowered, 10),
-        ("miniboss_loop", "spawnminiboss" in lowered and "miniboss" in lowered, 10),
-        ("progression_state_machine", "stepprogression(" in lowered and "state.run.level" in lowered, 10),
+        ("input_depth", lowered.count("keydown") >= 1 and any(key in lowered for key in ("arrowup", "arrowdown", "space")), 12),
         ("risk_reward", any(token in lowered for token in ("boost", "combo", "score +=", "state.score +=")), 14),
         ("pacing_control", any(token in lowered for token in ("spawnrate", "enemy_spawn_rate", "difficulty", "speed")), 12),
         ("feedback_fx", any(token in lowered for token in ("shadowblur", "burst(", "particles", "screen")), 13),
-        ("postfx_pipeline", "drawpostfx" in lowered and "vignette" in lowered, 8),
-        ("audio_feedback", "playsfx(" in lowered or "audiocontext" in lowered, 8),
-        ("sprite_pack_usage", "sprite_profile" in lowered or "roundrect" in lowered, 8),
         ("readability_guard", "safe-area" in lowered and "overflow-guard" in lowered, 10),
-        ("mode_branching", lowered.count("config.mode") >= 2, 10),
         ("progression_curve", any(token in lowered for token in ("difficultyscale", "run.level", "leveltimer", "adaptive")), 12),
         ("replay_loop", any(token in lowered for token in ("restartgame", "combo", "timeleft")), 10),
-        ("telegraph_or_counterplay", any(token in lowered for token in ("attackcooldown", "dashcooldown", "kind === \"elite\"", "lanefloat")), 10),
         ("failure_feedback", "overlaytext" in lowered and "endgame(" in lowered, 8),
-        (
-            "mechanical_depth",
-            sum(
-                1
-                for token in ("dash", "jump", "boost", "drift", "reload", "parry", "combo", "overtake", "checkpoint")
-                if token in lowered
-            )
-            >= 3,
-            14,
-        ),
-        (
-            "encounter_variety",
-            sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern", "kind ===") if token in lowered) >= 3,
-            12,
-        ),
-        (
-            "feedback_fidelity",
-            sum(1 for token in ("shake", "flash", "particles", "playsfx", "hit", "impact", "trail") if token in lowered) >= 4,
-            12,
-        ),
     ]
+    if gameplay_profile == "combat":
+        checks.extend(
+            [
+                ("control_tuning_table", "control_presets" in lowered and "const control =" in lowered, 10),
+                ("depth_pack_system", "depth_packs" in lowered and "active_depth_pack" in lowered, 10),
+                ("miniboss_loop", "spawnminiboss" in lowered and "miniboss" in lowered, 10),
+                ("progression_state_machine", "stepprogression(" in lowered and "state.run.level" in lowered, 10),
+                ("postfx_pipeline", "drawpostfx" in lowered and "vignette" in lowered, 8),
+                ("audio_feedback", "playsfx(" in lowered or "audiocontext" in lowered, 8),
+                ("sprite_pack_usage", "sprite_profile" in lowered or "roundrect" in lowered, 8),
+                ("mode_branching", lowered.count("config.mode") >= 2, 10),
+                ("telegraph_or_counterplay", any(token in lowered for token in ("attackcooldown", "dashcooldown", "kind === \"elite\"", "lanefloat")), 10),
+                (
+                    "mechanical_depth",
+                    sum(
+                        1
+                        for token in ("dash", "jump", "boost", "drift", "reload", "parry", "combo", "overtake", "checkpoint")
+                        if token in lowered
+                    )
+                    >= 3,
+                    14,
+                ),
+                (
+                    "encounter_variety",
+                    sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern", "kind ===") if token in lowered) >= 3,
+                    12,
+                ),
+                (
+                    "feedback_fidelity",
+                    sum(1 for token in ("shake", "flash", "particles", "playsfx", "hit", "impact", "trail") if token in lowered) >= 4,
+                    12,
+                ),
+            ]
+        )
+    elif gameplay_profile == "racing":
+        checks.extend(
+            [
+                (
+                    "racing_control_runtime",
+                    any(token in lowered for token in ("steervelocity", "drift", "accel_rate", "brake_rate", "throttle")),
+                    18,
+                ),
+                (
+                    "racing_checkpoint_loop",
+                    "checkpoint" in lowered and any(token in lowered for token in ("lap", "split", "overtake", "roadcurve")),
+                    18,
+                ),
+                ("racing_track_rendering", any(token in lowered for token in ("roadcurve", "roadscroll", "renderwebglbackground(")), 14),
+                ("racing_speed_feedback", any(token in lowered for token in ("boosttimer", "speed", "trail", "vignette")), 10),
+                ("racing_pressure_pattern", any(token in lowered for token in ("hazard", "traffic", "opponent", "spawn")), 10),
+            ]
+        )
+    else:
+        checks.extend(
+            [
+                ("flight_control_runtime", all(token in lowered for token in ("pitch", "roll", "yaw", "throttle")), 18),
+                ("flight_checkpoint_loop", "checkpointcombo" in lowered and "state.flight.speed" in lowered, 14),
+                ("flight_hazard_loop", "kind === \"ring\"" in lowered and "kind === \"hazard\"" in lowered, 14),
+                ("flight_speed_feedback", any(token in lowered for token in ("afterburner", "trail", "speed", "boost")), 10),
+            ]
+        )
 
     if any(token in genre_hint for token in ("racing", "레이싱", "drift", "드리프트")):
         checks.append(("racing_specific_mechanics", any(token in lowered for token in ("boosttimer", "roadcurve", "accel", "brake")), 10))
@@ -257,14 +319,22 @@ def evaluate_gameplay_gate(
 
     if "requestanimationframe" not in lowered:
         hard_failures.append("missing_realtime_loop")
-    if "spawnenemy(" not in lowered and "state.enemies.push" not in lowered:
-        hard_failures.append("no_enemy_pressure")
-    if lowered.count("score +=") <= 1 and "combo" not in lowered:
-        hard_failures.append("flat_scoring_loop")
-    if genre_engine_hint and not (
-        f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered
-    ):
+    declared_mode_matches = bool(
+        genre_engine_hint
+        and (f"config.mode === \"{genre_engine_hint}\"" in lowered or f"config.mode===\"{genre_engine_hint}\"" in lowered)
+    )
+    if genre_engine_hint and "config.mode" in lowered and not declared_mode_matches:
         hard_failures.append("genre_engine_mismatch")
+    if gameplay_profile == "combat":
+        if "spawnenemy(" not in lowered and "state.enemies.push" not in lowered:
+            hard_failures.append("no_enemy_pressure")
+        if lowered.count("score +=") <= 1 and "combo" not in lowered:
+            hard_failures.append("flat_scoring_loop")
+    elif gameplay_profile == "racing":
+        if not any(token in lowered for token in ("steervelocity", "accel_rate", "brake_rate", "drift", "throttle")):
+            hard_failures.append("racing_control_missing")
+        if "checkpoint" not in lowered and "lap" not in lowered:
+            hard_failures.append("racing_progression_missing")
     if "flight" in keyword_hint and genre_engine_hint != "flight_sim_3d":
         hard_failures.append("keyword_engine_mismatch_flight")
     fill_rect_count = lowered.count("fillrect(")
