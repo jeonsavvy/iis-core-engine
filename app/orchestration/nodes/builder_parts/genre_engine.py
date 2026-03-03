@@ -7,8 +7,7 @@ guidance into LLM prompts and enforce quality floors per genre.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

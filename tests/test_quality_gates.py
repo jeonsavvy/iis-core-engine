@@ -8,24 +8,46 @@ from app.services.quality_gates import (
 
 def test_evaluate_quality_contract_accepts_valid_runtime_contract() -> None:
     settings = Settings(qa_min_quality_score=40)
-    html = """
-    <html>
-      <head><meta name="viewport" content="width=device-width"></head>
-      <body class="overflow-guard" data-overflow-policy="clamp">
-        <canvas id="game"></canvas>
-        <script>
-          window.__iis_game_boot_ok = true;
-          window.IISLeaderboard = {};
-          const style = "--safe-area-padding: 8px";
-          function update() {}
-          function draw() {}
-          requestAnimationFrame(() => {});
-          document.addEventListener("keydown", () => {});
-          const overlay = "game over";
-        </script>
-      </body>
-    </html>
-    """
+    html_lines = [
+        '<html>',
+        '  <head><meta name="viewport" content="width=device-width"></head>',
+        '  <body class="overflow-guard" data-overflow-policy="clamp">',
+        '    <canvas id="game"></canvas>',
+        '    <script src="https://unpkg.com/three@0.169.0/build/three.module.js"></script>',
+        '    <script>',
+        '      window.__iis_game_boot_ok = true;',
+        '      window.IISLeaderboard = {};',
+        '      const style = "--safe-area-padding: 8px";',
+        '      const renderer = new THREE.WebGLRenderer();',
+        '      const vertexShader = "void main() { gl_Position = vec4(0); }";',
+        '      const fragmentShader = "void main() { gl_FragColor = vec4(1); }";',
+        '      function update() {}',
+        '      function draw() {}',
+        '      function initScene() {}',
+        '      function createPlayer() {}',
+        '      function createEnemy() {}',
+        '      function spawnWave() {}',
+        '      function handleInput() {}',
+        '      function updatePhysics() {}',
+        '      function checkCollisions() {}',
+        '      function updateScore() {}',
+        '      function renderHUD() {}',
+        '      function gameLoop() {}',
+        '      function resetGame() {}',
+        '      function loadAssets() {}',
+        '      function createParticles() {}',
+        '      function updateCamera() {}',
+        '      function applyShader() {}',
+        '      requestAnimationFrame(() => {});',
+        '      document.addEventListener("keydown", () => {});',
+        '      const overlay = "game over";',
+        '    </script>',
+        '  </body>',
+        '</html>',
+    ]
+    # Pad to 800+ lines to satisfy code_complexity_too_low_line_count
+    html_lines.extend([f'    <!-- padding line {i} -->' for i in range(800)])
+    html = "\n".join(html_lines)
 
     result = evaluate_quality_contract(settings, html)
 
