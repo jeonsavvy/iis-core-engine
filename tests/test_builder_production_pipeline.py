@@ -35,6 +35,7 @@ class _FakeVertexService:
     generated_suffix: str = "CODEGEN"
     generation_sequence: tuple[str, ...] = ()
     validation_failures: tuple[str, ...] = ()
+    stub_reason: str = "vertex_not_configured"
 
     def __post_init__(self) -> None:
         self.calls = 0
@@ -59,12 +60,28 @@ class _FakeVertexService:
             "reason": "test",
         }
         if source != "vertex":
-            meta["reason"] = "vertex_error:ValueError"
+            meta["reason"] = self.stub_reason
             meta["vertex_error"] = "invalid_codegen_artifact:" + ",".join(self.validation_failures or ("unknown",))
             meta["validation_failures"] = list(self.validation_failures)
         return SimpleNamespace(
             payload={"artifact_html": artifact_html},
             meta=meta,
+        )
+
+    def generate_game_config(self, **_kwargs):
+        return SimpleNamespace(
+            payload={
+                "player_hp": 3,
+                "player_speed": 240,
+                "player_attack_cooldown": 0.5,
+                "enemy_hp": 1,
+                "enemy_speed_min": 100,
+                "enemy_speed_max": 220,
+                "enemy_spawn_rate": 1.0,
+                "time_limit_sec": 60,
+                "base_score_value": 10,
+            },
+            meta={"generation_source": "stub", "reason": "config_test_fallback"},
         )
 
 
@@ -215,6 +232,7 @@ def test_build_production_artifact_blocks_when_runtime_smoke_fails() -> None:
 def test_build_production_artifact_runs_single_recovery_attempt_when_codegen_fails() -> None:
     vertex = _FakeVertexService(
         generation_sequence=("stub", "vertex"),
+        stub_reason="vertex_error:ValueError",
         validation_failures=("boot_flag", "canvas_or_render_runtime"),
     )
     result, deps = _build_result_with_vertex(vertex)
@@ -223,3 +241,18 @@ def test_build_production_artifact_runs_single_recovery_attempt_when_codegen_fai
     assert result.metadata["codegen_recovery_attempted"] is True
     assert result.metadata["codegen_recovery_success"] is True
     assert result.metadata["quality_floor_passed"] is True
+
+
+def test_build_production_artifact_uses_deterministic_fallback_on_codegen_value_error() -> None:
+    vertex = _FakeVertexService(
+        generation_sequence=("stub", "stub"),
+        stub_reason="vertex_error:ValueError",
+        validation_failures=("boot_flag", "leaderboard_contract"),
+    )
+    result, deps = _build_result_with_vertex(vertex)
+    assert deps.vertex_service.calls == 2
+    assert result.metadata["codegen_recovery_attempted"] is True
+    assert result.metadata["codegen_recovery_success"] is False
+    assert result.metadata["deterministic_fallback_used"] is True
+    assert result.metadata["quality_floor_passed"] is True
+    assert result.selected_generation_meta["generation_source"] == "deterministic_fallback"

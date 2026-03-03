@@ -6,12 +6,14 @@ from typing import Any
 
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
+from app.orchestration.nodes.builder_parts.html_runtime import _build_hybrid_engine_html
 from app.orchestration.nodes.builder_parts.scaffold_builder import build_scaffold_html
 from app.orchestration.nodes.builder_parts.genre_engine import resolve_genre_engine, get_genre_reference_prompt
 from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+from app.services.vertex_models import GameConfigModel
 from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
 
 
@@ -281,6 +283,53 @@ def _build_codegen_recovery_hint(*, failed_requirements: list[str]) -> str:
     return "Structural recovery required. " + " ".join(hints)
 
 
+def _resolve_deterministic_game_config(
+    *,
+    deps: NodeDependencies,
+    keyword: str,
+    title: str,
+    genre: str,
+    objective: str,
+    design_spec: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    generate_game_config = getattr(deps.vertex_service, "generate_game_config", None)
+    if callable(generate_game_config):
+        try:
+            result = generate_game_config(
+                keyword=keyword,
+                title=title,
+                genre=genre,
+                objective=objective,
+                design_spec=design_spec,
+                variation_hint="deterministic_runtime_recovery",
+            )
+            payload = getattr(result, "payload", None)
+            meta = getattr(result, "meta", None)
+            if isinstance(payload, dict) and payload:
+                return payload, dict(meta) if isinstance(meta, dict) else {}
+        except Exception as exc:
+            return (
+                GameConfigModel().model_dump(),
+                {"generation_source": "stub", "reason": f"config_recovery_error:{type(exc).__name__}", "vertex_error": str(exc)},
+            )
+    return GameConfigModel().model_dump(), {"generation_source": "stub", "reason": "config_recovery_default"}
+
+
+def _normalize_runtime_asset_pack(asset_pack: dict[str, Any]) -> dict[str, str]:
+    defaults = {
+        "name": "neon_arcade",
+        "bg_top": "#08122f",
+        "bg_bottom": "#050915",
+        "hud_primary": "#e2e8f0",
+        "hud_muted": "#93c5fd",
+    }
+    normalized = {key: str(value) for key, value in defaults.items()}
+    for key, value in (asset_pack or {}).items():
+        if isinstance(value, str) and value.strip():
+            normalized[str(key)] = value.strip()
+    return normalized
+
+
 def _build_scaffold_first_production_artifact(
     *,
     state: PipelineState,
@@ -431,6 +480,54 @@ def _build_scaffold_first_production_artifact(
             generation_validation_failures = recovery_validation_failures
             codegen_available = True
 
+    deterministic_fallback_used = False
+    deterministic_fallback_meta: dict[str, Any] = {}
+    if not codegen_available:
+        primary_reason = generation_reason.casefold()
+        recovery_reason = str(recovery_meta.get("reason", "")).strip().casefold()
+        should_use_deterministic_fallback = (
+            ("vertex_error:valueerror" in primary_reason)
+            or ("vertex_error:valueerror" in recovery_reason)
+        )
+        if should_use_deterministic_fallback:
+            runtime_config, runtime_config_meta = _resolve_deterministic_game_config(
+                deps=deps,
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                objective=gdd.objective,
+                design_spec=design_spec_dump,
+            )
+            runtime_asset_pack = _normalize_runtime_asset_pack(asset_pack)
+            fallback_html = _build_hybrid_engine_html(
+                title=title,
+                genre=genre,
+                slug=slug,
+                accent_color=accent_color,
+                viewport_width=design_spec.viewport_width,
+                viewport_height=design_spec.viewport_height,
+                safe_area_padding=design_spec.safe_area_padding,
+                min_font_size_px=design_spec.min_font_size_px,
+                text_overflow_policy=design_spec.text_overflow_policy,
+                core_loop_type=core_loop_type,
+                game_config=runtime_config,
+                asset_pack=runtime_asset_pack,
+                asset_manifest=runtime_asset_manifest,
+            ).strip()
+            if fallback_html:
+                generated_html = fallback_html
+                generation_source = "deterministic_fallback"
+                generation_reason = "codegen_valueerror_runtime_recovery"
+                generation_error = ""
+                generation_validation_failures = []
+                codegen_available = True
+                deterministic_fallback_used = True
+                deterministic_fallback_meta = {
+                    "reason": generation_reason,
+                    "config_generation_source": str(runtime_config_meta.get("generation_source", "stub")),
+                    "config_reason": str(runtime_config_meta.get("reason", "")),
+                }
+
     final_html = generated_html if generated_html else scaffold_html
 
     scaffold_assessment = _assess_artifact_quality(
@@ -574,6 +671,15 @@ def _build_scaffold_first_production_artifact(
         },
     }
 
+    selected_generation_meta = dict(codegen_result.meta or {})
+    if deterministic_fallback_used:
+        selected_generation_meta = {
+            "generation_source": "deterministic_fallback",
+            "reason": "codegen_valueerror_runtime_recovery",
+            "upstream_reason": initial_generation_reason,
+            "upstream_validation_failures": initial_generation_validation_failures,
+        }
+
     metadata = {
         "builder_strategy": "scaffold_first_codegen_v3",
         "generation_engine_version": "scaffold_v3",
@@ -586,6 +692,8 @@ def _build_scaffold_first_production_artifact(
         "codegen_initial_error": initial_generation_error,
         "codegen_initial_validation_failures": initial_generation_validation_failures,
         "codegen_recovery_meta": recovery_meta,
+        "deterministic_fallback_used": deterministic_fallback_used,
+        "deterministic_fallback_meta": deterministic_fallback_meta,
         "effective_codegen_passes_per_candidate": 1,
         "selected_candidate_index": 1,
         "selected_candidate_score": float(final_assessment.builder_score),
@@ -642,7 +750,7 @@ def _build_scaffold_first_production_artifact(
 
     return ProductionBuildResult(
         build_artifact=build_artifact,
-        selected_generation_meta=dict(codegen_result.meta or {}),
+        selected_generation_meta=selected_generation_meta,
         metadata=metadata,
     )
 
