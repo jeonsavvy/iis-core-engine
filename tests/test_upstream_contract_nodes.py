@@ -70,7 +70,16 @@ class _VertexStub:
 
     def generate_plan_contract(self, *, keyword: str, gdd: dict[str, Any], research_summary: dict[str, Any] | None = None) -> VertexGenerationResult:
         _ = (keyword, gdd, research_summary)
-        if self._contract_mode == "weak":
+        if self._contract_mode == "invalid":
+            payload = {
+                "core_mechanics": [],
+                "progression_plan": [],
+                "encounter_plan": ["wave"],
+                "risk_reward_plan": ["safe"],
+                "control_model": "",
+                "balance_baseline": {"base_hp": 3.0},
+            }
+        elif self._contract_mode == "weak":
             payload = {
                 "core_mechanics": ["move"],
                 "progression_plan": ["intro"],
@@ -259,3 +268,17 @@ def test_trigger_blocks_when_strict_vertex_only_and_source_is_stub() -> None:
 
     assert result["status"] == PipelineStatus.ERROR
     assert result["reason"] == "analyze_contract_unavailable"
+
+
+def test_architect_plan_invalid_logs_validation_error_details() -> None:
+    state = _base_state()
+    deps = _deps(_VertexStub(contract_mode="invalid"))
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    result = architect.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.ERROR
+    assert result["reason"] == "plan_contract_invalid"
+    plan_error_logs = [log for log in result["logs"] if log.stage.value == "plan" and log.status.value == "error"]
+    assert plan_error_logs
+    assert "validation_error" in plan_error_logs[-1].metadata

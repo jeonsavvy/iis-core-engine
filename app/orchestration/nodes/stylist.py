@@ -1,8 +1,16 @@
+from pydantic import ValidationError
+
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import DesignContractPayload, DesignSpecPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+
+
+def _validation_error_detail(exc: Exception) -> object:
+    if isinstance(exc, ValidationError):
+        return exc.errors()
+    return str(exc)
 
 
 def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: str) -> dict[str, object]:
@@ -85,7 +93,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
     try:
         design_spec = DesignSpecPayload.model_validate(generated.payload)
-    except Exception:
+    except Exception as exc:
         state["status"] = PipelineStatus.ERROR
         state["reason"] = "design_spec_invalid"
         return append_log(
@@ -98,6 +106,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             metadata={
                 "design_spec_source": design_spec_source,
                 "strict_vertex_only": strict_vertex_only,
+                "validation_error": _validation_error_detail(exc),
                 "deliverables": ["design_spec_gate"],
                 "contract_status": "fail",
                 **generated.meta,
@@ -136,7 +145,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         )
     try:
         design_contract = DesignContractPayload.model_validate(generated_contract.payload)
-    except Exception:
+    except Exception as exc:
         state["status"] = PipelineStatus.ERROR
         state["reason"] = "design_contract_invalid"
         return append_log(
@@ -150,6 +159,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "design_spec_source": design_spec_source,
                 "design_contract_source": design_contract_source,
                 "strict_vertex_only": strict_vertex_only,
+                "validation_error": _validation_error_detail(exc),
                 "deliverables": ["design_contract_gate"],
                 "contract_status": "fail",
                 **generated_contract.meta,

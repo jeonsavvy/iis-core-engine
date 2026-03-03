@@ -1,8 +1,16 @@
+from pydantic import ValidationError
+
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import AnalyzeContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+
+
+def _validation_error_detail(exc: Exception) -> object:
+    if isinstance(exc, ValidationError):
+        return exc.errors()
+    return str(exc)
 
 
 def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
@@ -41,7 +49,7 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
         )
     try:
         analyze_contract = AnalyzeContractPayload.model_validate(generated.payload)
-    except Exception:
+    except Exception as exc:
         state["status"] = PipelineStatus.ERROR
         state["reason"] = "analyze_contract_invalid"
         return append_log(
@@ -54,6 +62,7 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
             metadata={
                 "generation_source": generation_source,
                 "strict_vertex_only": strict_vertex_only,
+                "validation_error": _validation_error_detail(exc),
                 "deliverables": ["analyze_contract_gate"],
                 "contract_status": "fail",
                 **generated.meta,
