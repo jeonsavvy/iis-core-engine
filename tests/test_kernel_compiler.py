@@ -37,6 +37,9 @@ def test_kernel_compiler_builds_runtime_contract_html() -> None:
     assert "lap" in lowered
     assert "throttle" in lowered
     assert "drift" in lowered
+    assert 'visual_profile: "kernel_racing_v1"' in lowered
+    assert "styleprofile: kernel_racing_v1" in lowered
+    assert "accel_rate: 2.1" in lowered
 
 
 def test_kernel_compiler_meets_quality_floor_shape() -> None:
@@ -60,3 +63,4 @@ def test_kernel_compiler_meets_quality_floor_shape() -> None:
     assert line_count >= 360
     assert function_count >= 12
     assert shader_signal_count >= 1
+    assert 'visual_profile: "kernel_flight_v1"' in lowered

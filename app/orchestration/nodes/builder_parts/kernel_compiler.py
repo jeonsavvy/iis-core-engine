@@ -23,6 +23,111 @@ def _escape_js(value: str) -> str:
     return value.replace("\\", "\\\\").replace("`", "\\`")
 
 
+def _resolve_kernel_style_profile(*, core_loop_type: str, keyword: str) -> dict[str, str | float]:
+    mode = core_loop_type.casefold()
+    hint = keyword.casefold()
+
+    profile: dict[str, str | float] = {
+        "profile_id": "kernel_default_v1",
+        "hud_accent": "#5eead4",
+        "bg_radial_a": "rgba(56, 189, 248, 0.26)",
+        "bg_radial_b": "rgba(244, 114, 182, 0.24)",
+        "bg_radial_c": "rgba(250, 204, 21, 0.20)",
+        "sky_top": "#1f3b7e",
+        "sky_mid": "#233f9c",
+        "sky_low": "#3c2d7a",
+        "sky_horizon": "#7a2f66",
+        "sky_bottom": "#181821",
+        "lane_hue_base": 190.0,
+        "hazard_hue_min": 180.0,
+        "hazard_hue_max": 350.0,
+        "ring_hue_base": 165.0,
+        "player_primary": "rgba(14, 165, 233, 0.88)",
+        "player_secondary": "rgba(250, 204, 21, 0.82)",
+        "accel_rate": 1.8,
+        "brake_rate": 2.3,
+        "drift": 0.82,
+    }
+
+    is_racing = any(token in f"{mode} {hint}" for token in ("race", "racing", "f1", "formula", "서킷", "레이싱"))
+    is_flight = any(token in f"{mode} {hint}" for token in ("flight", "pilot", "air", "비행", "조종"))
+    is_combat = any(token in f"{mode} {hint}" for token in ("combat", "shooter", "arena", "격투", "슈팅"))
+
+    if is_racing:
+        profile.update(
+            {
+                "profile_id": "kernel_racing_v1",
+                "hud_accent": "#22d3ee",
+                "bg_radial_a": "rgba(34, 211, 238, 0.28)",
+                "bg_radial_b": "rgba(251, 113, 133, 0.26)",
+                "bg_radial_c": "rgba(250, 204, 21, 0.24)",
+                "sky_top": "#1d3f8c",
+                "sky_mid": "#224cb2",
+                "sky_low": "#472a87",
+                "sky_horizon": "#9a3457",
+                "sky_bottom": "#130d1f",
+                "lane_hue_base": 196.0,
+                "hazard_hue_min": 192.0,
+                "hazard_hue_max": 352.0,
+                "ring_hue_base": 178.0,
+                "player_primary": "rgba(56, 189, 248, 0.92)",
+                "player_secondary": "rgba(250, 204, 21, 0.86)",
+                "accel_rate": 2.1,
+                "brake_rate": 2.45,
+                "drift": 0.88,
+            }
+        )
+    elif is_flight:
+        profile.update(
+            {
+                "profile_id": "kernel_flight_v1",
+                "hud_accent": "#93c5fd",
+                "bg_radial_a": "rgba(125, 211, 252, 0.28)",
+                "bg_radial_b": "rgba(167, 139, 250, 0.22)",
+                "bg_radial_c": "rgba(244, 114, 182, 0.18)",
+                "sky_top": "#14457f",
+                "sky_mid": "#1b6ea8",
+                "sky_low": "#1d4e89",
+                "sky_horizon": "#325e95",
+                "sky_bottom": "#0f1e36",
+                "lane_hue_base": 202.0,
+                "hazard_hue_min": 198.0,
+                "hazard_hue_max": 332.0,
+                "ring_hue_base": 190.0,
+                "player_primary": "rgba(96, 165, 250, 0.9)",
+                "player_secondary": "rgba(45, 212, 191, 0.84)",
+                "accel_rate": 1.9,
+                "brake_rate": 2.2,
+                "drift": 0.78,
+            }
+        )
+    elif is_combat:
+        profile.update(
+            {
+                "profile_id": "kernel_combat_v1",
+                "hud_accent": "#fda4af",
+                "bg_radial_a": "rgba(248, 113, 113, 0.24)",
+                "bg_radial_b": "rgba(244, 114, 182, 0.22)",
+                "bg_radial_c": "rgba(251, 191, 36, 0.16)",
+                "sky_top": "#4c1d2f",
+                "sky_mid": "#7f1d3e",
+                "sky_low": "#7c2d12",
+                "sky_horizon": "#6b1a2f",
+                "sky_bottom": "#160c15",
+                "lane_hue_base": 340.0,
+                "hazard_hue_min": 0.0,
+                "hazard_hue_max": 40.0,
+                "ring_hue_base": 320.0,
+                "player_primary": "rgba(244, 114, 182, 0.9)",
+                "player_secondary": "rgba(250, 204, 21, 0.82)",
+                "accel_rate": 1.7,
+                "brake_rate": 2.35,
+                "drift": 0.84,
+            }
+        )
+    return profile
+
+
 def build_kernel_locked_html(
     *,
     keyword: str,
@@ -57,6 +162,7 @@ def build_kernel_locked_html(
 
     mode = _safe_text(core_loop_type, fallback="webgl_three_runner")
     engine_mode = _safe_text(runtime_engine_mode, fallback="3d_three")
+    style_profile = _resolve_kernel_style_profile(core_loop_type=mode, keyword=keyword)
     title_safe = _escape_js(_safe_text(title, fallback="IIS Kernel Arcade"))
     objective_safe = _escape_js(_safe_text(objective, fallback="Survive and score higher through checkpoints."))
     keyword_safe = _escape_js(_safe_text(keyword, fallback=title_safe))
@@ -67,6 +173,27 @@ def build_kernel_locked_html(
     progression_safe = _escape_js(" | ".join(required_progression[:8]))
     mechanics_safe = _escape_js(" / ".join(required_mechanics[:10]))
     non_negotiables_safe = _escape_js(" | ".join(non_negotiables[:8]))
+    style_profile_id = _escape_js(_safe_text(style_profile.get("profile_id"), fallback="kernel_default_v1"))
+    hud_accent = _safe_text(style_profile.get("hud_accent"), fallback="#5eead4")
+    bg_radial_a = _safe_text(style_profile.get("bg_radial_a"), fallback="rgba(56, 189, 248, 0.26)")
+    bg_radial_b = _safe_text(style_profile.get("bg_radial_b"), fallback="rgba(244, 114, 182, 0.24)")
+    bg_radial_c = _safe_text(style_profile.get("bg_radial_c"), fallback="rgba(250, 204, 21, 0.20)")
+    sky_top = _safe_text(style_profile.get("sky_top"), fallback="#1f3b7e")
+    sky_mid = _safe_text(style_profile.get("sky_mid"), fallback="#233f9c")
+    sky_low = _safe_text(style_profile.get("sky_low"), fallback="#3c2d7a")
+    sky_horizon = _safe_text(style_profile.get("sky_horizon"), fallback="#7a2f66")
+    sky_bottom = _safe_text(style_profile.get("sky_bottom"), fallback="#181821")
+    lane_hue_base = float(style_profile.get("lane_hue_base", 190.0) or 190.0)
+    hazard_hue_min = float(style_profile.get("hazard_hue_min", 180.0) or 180.0)
+    hazard_hue_max = float(style_profile.get("hazard_hue_max", 350.0) or 350.0)
+    ring_hue_base = float(style_profile.get("ring_hue_base", 165.0) or 165.0)
+    player_primary = _safe_text(style_profile.get("player_primary"), fallback="rgba(14, 165, 233, 0.88)")
+    player_secondary = _safe_text(style_profile.get("player_secondary"), fallback="rgba(250, 204, 21, 0.82)")
+    accel_rate = float(style_profile.get("accel_rate", 1.8) or 1.8)
+    brake_rate = float(style_profile.get("brake_rate", 2.3) or 2.3)
+    drift = float(style_profile.get("drift", 0.82) or 0.82)
+    lane_hue_step = 1.8
+    ring_hue_spread = 72.0
 
     line_pad = "\n".join([f"// kernel_line_pad_{index:03d}" for index in range(1, 181)])
 
@@ -80,7 +207,7 @@ def build_kernel_locked_html(
     :root {{
       --safe-area-padding: max(16px, env(safe-area-inset-top, 0px));
       --hud-bg: rgba(8, 12, 22, 0.62);
-      --hud-accent: #5eead4;
+      --hud-accent: {hud_accent};
     }}
     * {{ box-sizing: border-box; }}
     html, body {{
@@ -100,9 +227,9 @@ def build_kernel_locked_html(
       display: grid;
       place-items: center;
       background:
-        radial-gradient(circle at 15% 20%, rgba(56, 189, 248, 0.26), transparent 35%),
-        radial-gradient(circle at 82% 16%, rgba(244, 114, 182, 0.24), transparent 32%),
-        radial-gradient(circle at 45% 78%, rgba(250, 204, 21, 0.20), transparent 40%),
+        radial-gradient(circle at 15% 20%, {bg_radial_a}, transparent 35%),
+        radial-gradient(circle at 82% 16%, {bg_radial_b}, transparent 32%),
+        radial-gradient(circle at 45% 78%, {bg_radial_c}, transparent 40%),
         linear-gradient(180deg, #091022 0%, #050811 48%, #03050a 100%);
     }}
     #stage {{
@@ -112,7 +239,7 @@ def build_kernel_locked_html(
       box-shadow:
         0 30px 90px rgba(0, 0, 0, 0.55),
         0 0 0 1px rgba(255, 255, 255, 0.08),
-        inset 0 0 90px rgba(14, 165, 233, 0.12);
+        inset 0 0 90px {player_primary};
       background: #0b1020;
     }}
     #overlay {{
@@ -187,7 +314,8 @@ def build_kernel_locked_html(
   <div id="hud-note">Intent: {fantasy_safe}
 Verbs: {verbs_safe}
 Progression: {progression_safe}
-Camera: {camera_safe}</div>
+Camera: {camera_safe}
+StyleProfile: {style_profile_id}</div>
   <div id="overlay"><div id="overlay-card"><div id="overlay-text"></div></div></div>
 
   <script>
@@ -201,9 +329,10 @@ Camera: {camera_safe}</div>
       objective: "{objective_safe}",
       mechanics: "{mechanics_safe}",
       non_negotiables: "{non_negotiables_safe}",
-      accel_rate: 1.8,
-      brake_rate: 2.3,
-      drift: 0.82,
+      visual_profile: "{style_profile_id}",
+      accel_rate: {accel_rate},
+      brake_rate: {brake_rate},
+      drift: {drift},
       throttle: 0
     }};
 
@@ -330,7 +459,7 @@ Camera: {camera_safe}</div>
           z: rand(0.2, 1),
           w: rand(24, 52),
           h: rand(28, 90),
-          hue: rand(190, 340),
+          hue: rand({hazard_hue_min}, {hazard_hue_max}),
           speed: rand(0.12, 0.28) * state.difficulty
         }});
       }}
@@ -373,7 +502,7 @@ Camera: {camera_safe}</div>
         if (hz.z < -0.08) {{
           hz.z = 1.08;
           hz.x = rand(-1, 1);
-          hz.hue = rand(180, 350);
+          hz.hue = rand({hazard_hue_min}, {hazard_hue_max});
           state.score += 6;
           continue;
         }}
@@ -401,7 +530,7 @@ Camera: {camera_safe}</div>
             state.checkpointCombo = Math.min(8, state.checkpointCombo + 1);
             state.score += 120 + state.checkpointCombo * 28;
             state.hp = clamp(state.hp + 6, 0, 100);
-            burstParticles(canvas.width * 0.5, canvas.height * 0.55, 40, 168);
+            burstParticles(canvas.width * 0.5, canvas.height * 0.55, 40, {ring_hue_base});
             if (state.checkpoint % 8 === 0) {{
               state.lap += 1;
               state.score += 320;
@@ -428,11 +557,11 @@ Camera: {camera_safe}</div>
     function drawSky(time) {{
       const w = canvas.width, h = canvas.height;
       const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, "#1f3b7e");
-      grad.addColorStop(0.22, "#233f9c");
-      grad.addColorStop(0.48, "#3c2d7a");
-      grad.addColorStop(0.72, "#7a2f66");
-      grad.addColorStop(1, "#181821");
+      grad.addColorStop(0, "{sky_top}");
+      grad.addColorStop(0.22, "{sky_mid}");
+      grad.addColorStop(0.48, "{sky_low}");
+      grad.addColorStop(0.72, "{sky_horizon}");
+      grad.addColorStop(1, "{sky_bottom}");
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
@@ -460,7 +589,7 @@ Camera: {camera_safe}</div>
         const left = center - width * 0.5;
         const right = center + width * 0.5;
         const pulse = (Math.sin(time * 5.2 - i * 0.7) + 1) * 0.5;
-        const laneColor = `hsla(${{190 + i * 1.6}}, 84%, ${{44 + pulse * 20}}%, ${{0.08 + z * 0.2}})`;
+        const laneColor = `hsla(${{{lane_hue_base} + i * {lane_hue_step}}}, 84%, ${{44 + pulse * 20}}%, ${{0.08 + z * 0.2}})`;
         ctx.strokeStyle = laneColor;
         ctx.lineWidth = 1 + z * 2.6;
         ctx.beginPath();
@@ -506,7 +635,7 @@ Camera: {camera_safe}</div>
         const x = projectLaneX(ring.x, ring.z);
         const y = projectLaneY(ring.z);
         const radius = ring.radius * (1 + (1 - ring.z) * 1.5);
-        const hue = 165 + (index * 7) % 70;
+        const hue = {ring_hue_base} + (index * 7) % {ring_hue_spread};
         ctx.strokeStyle = `hsla(${{hue}}, 96%, 62%, 0.86)`;
         ctx.lineWidth = 4.5;
         ctx.shadowColor = "rgba(34,211,238,0.55)";
@@ -524,7 +653,7 @@ Camera: {camera_safe}</div>
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(state.steerVelocity * 0.2 + Math.sin(time * 4.2) * 0.02);
-      ctx.fillStyle = "rgba(14, 165, 233, 0.88)";
+      ctx.fillStyle = "{player_primary}";
       ctx.beginPath();
       ctx.moveTo(0, -34 * scale);
       ctx.lineTo(30 * scale, 18 * scale);
@@ -535,7 +664,7 @@ Camera: {camera_safe}</div>
       ctx.strokeStyle = "rgba(248,250,252,0.86)";
       ctx.lineWidth = 2;
       ctx.stroke();
-      ctx.fillStyle = "rgba(250, 204, 21, 0.82)";
+      ctx.fillStyle = "{player_secondary}";
       ctx.fillRect(-8 * scale, 14 * scale, 16 * scale, 20 * scale);
       ctx.restore();
     }}
