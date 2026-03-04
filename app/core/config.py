@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     builder_deterministic_fallback_enabled: bool = False
     builder_visual_precheck_enabled: bool = True
     builder_deterministic_visual_fix: bool = True
+    builder_kernel_locked_compiler_enabled: bool = True
     visual_contract_version: str = Field(default="v2", pattern=r"^(v1|v2)$")
     generation_engine_version: str = Field(default="scaffold_v3", min_length=3, max_length=40)
     rqc_version: str = Field(default="rqc-1", min_length=3, max_length=24)

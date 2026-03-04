@@ -7,6 +7,7 @@ from typing import Any
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.intent_contract import compute_intent_contract_hash
+from app.orchestration.nodes.builder_parts.kernel_compiler import build_kernel_locked_html
 from app.orchestration.nodes.builder_parts.synapse_contract import compute_synapse_contract_hash
 from app.orchestration.nodes.builder_parts.scaffold_builder import build_scaffold_html
 from app.orchestration.nodes.common import append_log
@@ -366,6 +367,40 @@ def _should_prefer_fixed_candidate(*, raw: _ArtifactAssessment, fixed: _Artifact
     if fixed.visual.score > raw.visual.score and fixed.playability.ok:
         return True
     if (not raw.visual.ok) and fixed.visual.ok:
+        return True
+    return False
+
+
+def _visual_runtime_collapsed(assessment: _ArtifactAssessment) -> bool:
+    visual_metrics = assessment.smoke.visual_metrics if isinstance(assessment.smoke.visual_metrics, dict) else {}
+    if not visual_metrics:
+        return True
+    luminance_std = _metric_value(visual_metrics, "luminance_std")
+    edge_energy = _metric_value(visual_metrics, "edge_energy")
+    motion_delta = _metric_value(visual_metrics, "motion_delta")
+    color_bucket_count = _metric_value(visual_metrics, "color_bucket_count")
+    non_dark_ratio = _metric_value(visual_metrics, "non_dark_ratio")
+    return (
+        luminance_std <= 0.0001
+        and edge_energy <= 0.000001
+        and motion_delta <= 0.000001
+        and color_bucket_count <= 1.0
+        and non_dark_ratio <= 0.0001
+    )
+
+
+def _should_prefer_kernel_candidate(
+    *,
+    baseline: _ArtifactAssessment,
+    kernel: _ArtifactAssessment,
+) -> bool:
+    baseline_score = _preflight_selection_score(baseline)
+    kernel_score = _preflight_selection_score(kernel)
+    if kernel_score > baseline_score + 0.6:
+        return True
+    if (not baseline.visual.ok) and kernel.visual.ok and kernel.smoke.ok and kernel.playability.ok:
+        return True
+    if _visual_runtime_collapsed(baseline) and kernel.smoke.ok and kernel.visual.score > baseline.visual.score:
         return True
     return False
 
@@ -740,6 +775,11 @@ def _build_scaffold_first_production_artifact(
         "enabled": bool(getattr(deps.vertex_service.settings, "builder_visual_precheck_enabled", True)),
         "selection_reason": "generated_default" if codegen_available else "scaffold_default",
     }
+    kernel_locked_compiler_enabled = bool(
+        getattr(deps.vertex_service.settings, "builder_kernel_locked_compiler_enabled", True)
+    )
+    kernel_locked_compiler_used = False
+    kernel_locked_compiler_reason = ""
 
     scaffold_assessment = _assess_artifact_quality(
         deps=deps,
@@ -844,6 +884,56 @@ def _build_scaffold_first_production_artifact(
             intent_contract=intent_contract,
             synapse_contract=synapse_contract,
         )
+
+    if codegen_available and kernel_locked_compiler_enabled:
+        baseline_assessment = final_assessment
+        if (not baseline_assessment.visual.ok) or _visual_runtime_collapsed(baseline_assessment):
+            kernel_html = build_kernel_locked_html(
+                keyword=state["keyword"],
+                title=title,
+                genre=genre,
+                core_loop_type=core_loop_type,
+                runtime_engine_mode=runtime_engine_mode,
+                objective=gdd.objective,
+                intent_contract=intent_contract if isinstance(intent_contract, dict) else None,
+                synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else None,
+            )
+            kernel_assessment = _assess_artifact_quality(
+                deps=deps,
+                html_content=kernel_html,
+                design_spec=design_spec_dump,
+                genre=genre,
+                core_loop_type=core_loop_type,
+                runtime_engine_mode=runtime_engine_mode,
+                keyword=state["keyword"],
+                artifact_files=asset_bank_files,
+                slug=slug,
+                intent_contract=intent_contract,
+                synapse_contract=synapse_contract,
+            )
+            preflight_report["kernel"] = {
+                "quality": kernel_assessment.quality.score,
+                "gameplay": kernel_assessment.gameplay.score,
+                "visual": kernel_assessment.visual.score,
+                "playability": kernel_assessment.playability.score,
+                "smoke_ok": kernel_assessment.smoke.ok,
+                "builder": kernel_assessment.builder_score,
+            }
+            if _should_prefer_kernel_candidate(
+                baseline=baseline_assessment,
+                kernel=kernel_assessment,
+            ):
+                final_html = kernel_html
+                final_assessment = kernel_assessment
+                kernel_locked_compiler_used = True
+                kernel_locked_compiler_reason = "kernel_candidate_better"
+                preflight_report["selection_reason"] = "kernel_candidate_better"
+                compile_meta_for_report = {
+                    "transforms_applied": ["kernel_locked_compiler"],
+                    "kernel_mode": core_loop_type,
+                    "kernel_runtime_engine_mode": runtime_engine_mode,
+                    "kernel_reason": kernel_locked_compiler_reason,
+                }
     visual_contract = resolve_visual_contract_profile(
         core_loop_type=core_loop_type,
         runtime_engine_mode=runtime_engine_mode,
@@ -999,6 +1089,9 @@ def _build_scaffold_first_production_artifact(
     selected_generation_meta = dict(codegen_result.meta or {})
     if isinstance(compile_meta_for_report, dict) and compile_meta_for_report:
         selected_generation_meta["runtime_compiler"] = compile_meta_for_report
+    selected_generation_meta["kernel_locked_compiler_used"] = kernel_locked_compiler_used
+    if kernel_locked_compiler_reason:
+        selected_generation_meta["kernel_locked_compiler_reason"] = kernel_locked_compiler_reason
     codegen_usage = (
         selected_generation_meta.get("usage")
         if isinstance(selected_generation_meta.get("usage"), dict)
@@ -1025,6 +1118,9 @@ def _build_scaffold_first_production_artifact(
         "deterministic_fallback_used": deterministic_fallback_used,
         "deterministic_fallback_meta": deterministic_fallback_meta,
         "effective_codegen_passes_per_candidate": 1,
+        "kernel_locked_compiler_enabled": kernel_locked_compiler_enabled,
+        "kernel_locked_compiler_used": kernel_locked_compiler_used,
+        "kernel_locked_compiler_reason": kernel_locked_compiler_reason or None,
         "selected_candidate_index": 1,
         "selected_candidate_score": float(final_assessment.builder_score),
         "final_quality_score": final_assessment.quality.score,
