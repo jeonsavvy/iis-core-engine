@@ -114,11 +114,13 @@ def build_synapse_contract(
         _to_str_list(design.get("camera_ui_contract")),
         _to_str_list(design.get("scene_layers")),
         _to_str_list(design.get("readability_contract")),
+        _to_str_list(base.get("required_visual_signals")),
         limit=10,
         item_limit=96,
     )
     asset_tokens = _merge_unique(
         _to_str_list(design.get("asset_blueprint_2d3d")),
+        _to_str_list(base.get("required_asset_usage")),
         limit=10,
         item_limit=80,
     )
@@ -194,4 +196,3 @@ def compute_synapse_contract_hash(contract: dict[str, Any] | None) -> str:
         return "missing"
     normalized = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
-

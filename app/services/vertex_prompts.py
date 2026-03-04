@@ -250,9 +250,13 @@ def build_codegen_prompt(
     synapse_contract: dict[str, Any] | None,
     shared_generation_contract: dict[str, Any] | None,
     html_content: str,
+    asset_manifest: dict[str, Any] | None = None,
+    asset_files_index: dict[str, str] | None = None,
 ) -> str:
     design_spec_json = json.dumps(design_spec, ensure_ascii=False)
     asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
+    asset_manifest_json = json.dumps(asset_manifest or {}, ensure_ascii=False)
+    asset_files_index_json = json.dumps(asset_files_index or {}, ensure_ascii=False)
     intent_contract_json = json.dumps(intent_contract or {}, ensure_ascii=False)
     synapse_contract_json = json.dumps(synapse_contract or {}, ensure_ascii=False)
     shared_generation_contract_json = json.dumps(shared_generation_contract or {}, ensure_ascii=False)
@@ -264,6 +268,17 @@ def build_codegen_prompt(
         keyword=keyword,
     )
     visual_contract_json = json.dumps(visual_contract.as_dict(), ensure_ascii=False)
+    required_asset_usage = []
+    visual_rows = shared_generation_contract.get("visual") if isinstance(shared_generation_contract, dict) else None
+    if isinstance(visual_rows, dict):
+        required_asset_usage = [
+            str(item).strip()
+            for item in (visual_rows.get("required_asset_usage") or [])
+            if str(item).strip()
+        ]
+    if not required_asset_usage:
+        required_asset_usage = ["player", "enemy", "boost", "hud_frame", "track_grid"]
+
     return (
         "You are a principal web game engineer. Produce one complete, high-quality game artifact.\n"
         "Single-pass policy: one response only, no iterative refinement assumptions.\n\n"
@@ -279,6 +294,13 @@ def build_codegen_prompt(
         f"{shared_generation_contract_json}\n"
         "- Treat checklist fields as mandatory output checks before QA.\n"
         "- Maintain exact runtime + visual numeric targets across all stages.\n\n"
+        "=== Asset Manifest Contract ===\n"
+        f"AssetManifest JSON: {asset_manifest_json}\n"
+        f"AssetFilesIndex JSON: {asset_files_index_json}\n"
+        f"- Required asset keys to actively use in runtime scene: {', '.join(required_asset_usage)}.\n"
+        "- Use at least 4 distinct asset keys from AssetManifest/AssetFilesIndex.\n"
+        "- Do NOT produce rectangle-only / single-color placeholder rendering.\n"
+        "- If an asset key is missing, synthesize equivalent silhouette layers in code and annotate fallback in comments.\n\n"
         "=== Runtime Contract ===\n"
         f"- Runtime stack is fixed: {runtime_stack}. Do not switch frameworks.\n"
         "- Keep `window.IISLeaderboard` and `window.__iis_game_boot_ok`.\n"
@@ -294,6 +316,7 @@ def build_codegen_prompt(
         "=== Mandatory Output Checklist ===\n"
         "- Must satisfy: boot_flag, leaderboard_contract, realtime_loop, input_reaction, state_transition, restart_loop.\n"
         "- Must satisfy: visual_contrast, visual_diversity, visual_edge, visual_motion.\n"
+        f"- Must satisfy asset_usage: {', '.join(required_asset_usage[:8])} (minimum 4 keys actively rendered).\n"
         "- If any checklist item cannot be met, rewrite implementation before final output.\n\n"
         "=== Visual Contract ===\n"
         f"{visual_contract_json}\n"

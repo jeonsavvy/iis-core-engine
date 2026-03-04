@@ -460,7 +460,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "quality_min": int(getattr(settings, "qa_min_quality_score", 50)),
                 "gameplay_min": int(getattr(settings, "qa_min_gameplay_score", 55)),
                 "visual_min": int(getattr(settings, "qa_min_visual_score", 45)),
-            }
+            },
+            "required_visual_signals": (
+                typed_shared_contract.get("required_visual_signals", [])
+                if isinstance(typed_shared_contract, dict)
+                else []
+            ),
+            "required_asset_usage": (
+                typed_shared_contract.get("required_asset_usage", [])
+                if isinstance(typed_shared_contract, dict)
+                else []
+            ),
         },
     )
     synapse_issues = validate_synapse_contract(synapse_contract)
@@ -494,6 +504,10 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         non_negotiables=intent_contract.non_negotiables,
         runtime_engine_mode=runtime_engine_mode,
         visual_profile_hint=core_loop_type,
+        required_visual_signals=synapse_contract.get("required_visual_signals")
+        if isinstance(synapse_contract, dict)
+        else None,
+        required_asset_usage=synapse_contract.get("required_assets") if isinstance(synapse_contract, dict) else None,
     )
     shared_contract_hash = compute_shared_generation_contract_hash(shared_contract)
     state["outputs"]["shared_generation_contract"] = shared_contract

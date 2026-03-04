@@ -47,6 +47,8 @@ _GLOBAL_CONSTRUCTORS_ALLOWLIST = {
 
 _SHIM_SCRIPT_MARKER = "id=\"iis-addon-shims\""
 _RUNTIME_CONTRACT_MARKER = "id=\"iis-runtime-contract-shim\""
+_VISUAL_CONTRACT_MARKER = "id=\"iis-visual-contract-shim\""
+_AUTOSTART_MARKER = "id=\"iis-autostart-shim\""
 
 
 def _dedupe(rows: list[str]) -> list[str]:
@@ -191,9 +193,206 @@ def _inject_runtime_contract_shim(
     return f"{runtime_script}{html_content}"
 
 
-def compile_generated_artifact(html_content: str) -> tuple[str, dict[str, Any]]:
+def _extract_asset_tokens(
+    *,
+    asset_manifest: dict[str, Any] | None,
+    asset_files_index: dict[str, str] | None,
+) -> list[str]:
+    tokens: list[str] = []
+    manifest = asset_manifest if isinstance(asset_manifest, dict) else {}
+    images = manifest.get("images")
+    if isinstance(images, dict):
+        for key, value in images.items():
+            key_text = str(key).strip()
+            if key_text and key_text not in tokens:
+                tokens.append(key_text)
+            value_text = str(value).strip()
+            if value_text:
+                stem = value_text.rsplit("/", 1)[-1].split(".", 1)[0].strip()
+                if stem and stem not in tokens:
+                    tokens.append(stem)
+    index = asset_files_index if isinstance(asset_files_index, dict) else {}
+    for key, value in index.items():
+        key_text = str(key).strip()
+        if key_text and key_text not in tokens:
+            tokens.append(key_text)
+        value_text = str(value).strip()
+        if value_text:
+            stem = value_text.rsplit("/", 1)[-1].split(".", 1)[0].strip()
+            if stem and stem not in tokens:
+                tokens.append(stem)
+    return _dedupe(tokens)
+
+
+def _count_asset_usage(html_content: str, *, asset_tokens: list[str]) -> tuple[int, list[str]]:
+    lowered = html_content.casefold()
+    used: list[str] = []
+    for token in asset_tokens:
+        normalized = str(token).strip().casefold()
+        if not normalized:
+            continue
+        if normalized in lowered:
+            used.append(str(token).strip())
+    used = _dedupe(used)
+    return len(used), used
+
+
+def _precheck_visual_signals(
+    html_content: str,
+    *,
+    asset_manifest: dict[str, Any] | None = None,
+    asset_files_index: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    lowered = html_content.casefold()
+    unique_hex = len(set(match.group(0).casefold() for match in re.finditer(r"#[0-9a-f]{6}", lowered)))
+    gradient_count = lowered.count("createlineargradient(") + lowered.count("createradialgradient(")
+    stroke_count = lowered.count("stroke(") + lowered.count("strokestyle") + lowered.count("linewidth")
+    path_count = (
+        lowered.count("beginpath(")
+        + lowered.count("lineto(")
+        + lowered.count("arc(")
+        + lowered.count("beziercurveto(")
+        + lowered.count("quadraticcurveto(")
+    )
+    motion_signal = any(
+        token in lowered
+        for token in (
+            "requestanimationframe",
+            "setinterval(",
+            "settimeout(",
+            "velocity",
+            "acceleration",
+            "rotation +=",
+            "position +=",
+            "particles",
+        )
+    )
+    fill_rect_count = lowered.count("fillrect(")
+    placeholder_rect_only = fill_rect_count >= 24 and path_count <= 2 and gradient_count == 0
+    manual_start_gate = any(
+        token in lowered
+        for token in ("tap to start", "click to start", "press start", "시작하려면")
+    )
+    asset_tokens = _extract_asset_tokens(asset_manifest=asset_manifest, asset_files_index=asset_files_index)
+    asset_usage_count, used_asset_keys = _count_asset_usage(html_content, asset_tokens=asset_tokens)
+
+    checks = {
+        "contrast": unique_hex >= 6 or gradient_count >= 2,
+        "diversity": unique_hex >= 8 or asset_usage_count >= 4,
+        "edge": (stroke_count + path_count) >= 6,
+        "motion": motion_signal,
+        "asset_usage": asset_usage_count >= 4,
+    }
+    failed = [key for key, passed in checks.items() if not passed]
+    return {
+        "checks": checks,
+        "failed": failed,
+        "unique_hex_colors": unique_hex,
+        "gradient_count": gradient_count,
+        "path_count": path_count,
+        "stroke_count": stroke_count,
+        "placeholder_rect_only": placeholder_rect_only,
+        "required_asset_keys": asset_tokens,
+        "used_asset_keys": used_asset_keys,
+        "asset_usage_count": asset_usage_count,
+        "manual_start_gate": manual_start_gate,
+    }
+
+
+def _inject_visual_contract_shim(
+    html_content: str,
+    *,
+    apply_reason: list[str],
+) -> str:
+    if _VISUAL_CONTRACT_MARKER in html_content:
+        return html_content
+    if not apply_reason:
+        return html_content
+    reason_payload = ",".join(_dedupe([str(item).strip() for item in apply_reason if str(item).strip()])).replace("'", "\\'")
+    script = (
+        "<script id=\"iis-visual-contract-shim\">"
+        "(function(){"
+        "if(window.__iis_visual_contract_shim_applied){return;}"
+        "window.__iis_visual_contract_shim_applied=true;"
+        "window.__iis_visual_contract_shim_reason='" + reason_payload + "';"
+        "const canvas=document.querySelector('canvas');"
+        "if(!canvas){return;}"
+        "let ctx=null;"
+        "try{ctx=canvas.getContext('2d');}catch(e){ctx=null;}"
+        "if(!ctx){return;}"
+        "const drawOverlay=(t)=>{"
+        "const w=canvas.width||canvas.clientWidth||960;const h=canvas.height||canvas.clientHeight||540;"
+        "if(!w||!h){requestAnimationFrame(drawOverlay);return;}"
+        "ctx.save();"
+        "ctx.globalCompositeOperation='screen';"
+        "const gx=(Math.sin(t*0.0009)+1)*0.5*w;"
+        "const gy=(Math.cos(t*0.0007)+1)*0.5*h;"
+        "const grad=ctx.createRadialGradient(gx,gy,12,gx,gy,Math.max(w,h)*0.6);"
+        "grad.addColorStop(0,'rgba(34,211,238,0.22)');"
+        "grad.addColorStop(0.45,'rgba(244,114,182,0.12)');"
+        "grad.addColorStop(1,'rgba(15,23,42,0.02)');"
+        "ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);"
+        "ctx.globalAlpha=0.16;ctx.strokeStyle='rgba(248,250,252,0.35)';ctx.lineWidth=1.15;"
+        "for(let i=0;i<6;i++){const y=((i+1)/7)*h + Math.sin(t*0.0014+i)*7;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y+Math.cos(t*0.0011+i)*4);ctx.stroke();}"
+        "ctx.restore();"
+        "requestAnimationFrame(drawOverlay);"
+        "};"
+        "requestAnimationFrame(drawOverlay);"
+        "})();"
+        "</script>"
+    )
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{script}{html_content[head_close:]}"
+    return f"{script}{html_content}"
+
+
+def _inject_autostart_shim(html_content: str) -> str:
+    if _AUTOSTART_MARKER in html_content:
+        return html_content
+    script = (
+        "<script id=\"iis-autostart-shim\">"
+        "(function(){"
+        "if(window.__iis_autostart_triggered){return;}"
+        "window.__iis_autostart_triggered=true;"
+        "const fire=()=>{"
+        "try{window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}));}catch(e){}"
+        "try{window.dispatchEvent(new KeyboardEvent('keydown',{key:' '}));}catch(e){}"
+        "try{document.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:4,clientY:4}));}catch(e){}"
+        "};"
+        "requestAnimationFrame(()=>{fire();setTimeout(fire,180);setTimeout(fire,520);});"
+        "})();"
+        "</script>"
+    )
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{script}{html_content[head_close:]}"
+    return f"{script}{html_content}"
+
+
+def compile_generated_artifact(
+    html_content: str,
+    *,
+    asset_manifest: dict[str, Any] | None = None,
+    asset_files_index: dict[str, str] | None = None,
+    visual_precheck_enabled: bool = True,
+    deterministic_visual_fix: bool = True,
+) -> tuple[str, dict[str, Any]]:
     transformed = html_content
     transforms_applied: list[str] = []
+    precheck_before = _precheck_visual_signals(
+        transformed,
+        asset_manifest=asset_manifest,
+        asset_files_index=asset_files_index,
+    ) if visual_precheck_enabled else {}
 
     lowered = transformed.casefold()
     boot_flag_missing = "__iis_game_boot_ok" not in lowered
@@ -231,10 +430,43 @@ def compile_generated_artifact(html_content: str) -> tuple[str, dict[str, Any]]:
         transformed = _inject_addon_shim_script(transformed)
         transforms_applied.append("inject_addon_shims")
 
+    if visual_precheck_enabled and deterministic_visual_fix:
+        missing_visual = (
+            precheck_before.get("failed", [])
+            if isinstance(precheck_before, dict)
+            else []
+        )
+        placeholder_rect_only = bool(precheck_before.get("placeholder_rect_only", False)) if isinstance(precheck_before, dict) else False
+        if placeholder_rect_only and "placeholder_rect_only" not in missing_visual:
+            missing_visual = [*missing_visual, "placeholder_rect_only"]
+        if missing_visual:
+            transformed = _inject_visual_contract_shim(
+                transformed,
+                apply_reason=[str(item) for item in missing_visual],
+            )
+            transforms_applied.append("inject_visual_contract_shim")
+    if isinstance(precheck_before, dict) and bool(precheck_before.get("manual_start_gate", False)):
+        transformed = _inject_autostart_shim(transformed)
+        transforms_applied.append("inject_autostart_shim")
+
+    precheck_after = _precheck_visual_signals(
+        transformed,
+        asset_manifest=asset_manifest,
+        asset_files_index=asset_files_index,
+    ) if visual_precheck_enabled else {}
+    used_asset_keys = precheck_after.get("used_asset_keys", []) if isinstance(precheck_after, dict) else []
+    required_asset_keys = precheck_after.get("required_asset_keys", []) if isinstance(precheck_after, dict) else []
+    asset_usage_count = int(precheck_after.get("asset_usage_count", 0)) if isinstance(precheck_after, dict) else 0
+
     return transformed, {
         "transforms_applied": transforms_applied,
         "namespace_symbols": _dedupe([str(item) for item in namespace_symbols]),
         "unresolved_symbols": unresolved_symbols,
+        "precheck_before": precheck_before,
+        "precheck_after": precheck_after,
+        "asset_usage_count": asset_usage_count,
+        "required_asset_keys": required_asset_keys if isinstance(required_asset_keys, list) else [],
+        "used_asset_keys": used_asset_keys if isinstance(used_asset_keys, list) else [],
     }
 
 

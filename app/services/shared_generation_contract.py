@@ -43,6 +43,11 @@ def build_shared_generation_contract(
         runtime_engine_mode=resolved_mode,
         keyword=keyword,
     )
+    required_visual_signals = ["contrast", "diversity", "edge", "motion"]
+    required_asset_usage = ["player", "enemy", "boost", "hud_frame", "track_grid"]
+    visual_payload = visual.as_dict()
+    visual_payload["required_visual_signals"] = required_visual_signals
+    visual_payload["required_asset_usage"] = required_asset_usage
     quality = quality_bar or {}
     return {
         "schema_version": "shared_generation_contract_v1",
@@ -58,12 +63,14 @@ def build_shared_generation_contract(
             "runtime_stack": "phaser.js" if resolved_mode == "2d_phaser" else "three.js",
             "single_artifact_html": True,
         },
-        "visual": visual.as_dict(),
+        "visual": visual_payload,
         "quality_bar": {
             "quality_min": int(quality.get("quality_min", 50) or 50),
             "gameplay_min": int(quality.get("gameplay_min", 55) or 55),
             "visual_min": int(quality.get("visual_min", 45) or 45),
         },
+        "required_visual_signals": required_visual_signals,
+        "required_asset_usage": required_asset_usage,
         "checklist": {
             "boot_flag": True,
             "leaderboard_contract": True,
@@ -99,6 +106,16 @@ def validate_shared_generation_contract(contract: dict[str, Any] | None) -> list
             value = visual.get(key)
             if not isinstance(value, (int, float)):
                 issues.append(f"visual_{key}_invalid")
+        signal_rows = visual.get("required_visual_signals")
+        if signal_rows is not None and (
+            not isinstance(signal_rows, list) or len([item for item in signal_rows if str(item).strip()]) < 3
+        ):
+            issues.append("visual_required_signals_invalid")
+        asset_rows = visual.get("required_asset_usage")
+        if asset_rows is not None and (
+            not isinstance(asset_rows, list) or len([item for item in asset_rows if str(item).strip()]) < 3
+        ):
+            issues.append("visual_required_asset_usage_invalid")
     quality_bar = typed.get("quality_bar")
     if not isinstance(quality_bar, dict):
         issues.append("quality_bar_missing")
@@ -118,6 +135,8 @@ def merge_shared_generation_contract(
     non_negotiables: list[str] | None = None,
     runtime_engine_mode: str | None = None,
     visual_profile_hint: str | None = None,
+    required_visual_signals: list[str] | None = None,
+    required_asset_usage: list[str] | None = None,
 ) -> dict[str, Any]:
     merged = build_shared_generation_contract(keyword=keyword)
     if isinstance(contract, dict):
@@ -153,7 +172,17 @@ def merge_shared_generation_contract(
         runtime_engine_mode=normalized_mode,
         keyword=keyword,
     ).as_dict()
+    if isinstance(required_visual_signals, list):
+        visual["required_visual_signals"] = _dedupe([str(item) for item in required_visual_signals], limit=10)
+    elif not isinstance(visual.get("required_visual_signals"), list):
+        visual["required_visual_signals"] = ["contrast", "diversity", "edge", "motion"]
+    if isinstance(required_asset_usage, list):
+        visual["required_asset_usage"] = _dedupe([str(item) for item in required_asset_usage], limit=10)
+    elif not isinstance(visual.get("required_asset_usage"), list):
+        visual["required_asset_usage"] = ["player", "enemy", "boost", "hud_frame", "track_grid"]
     merged["visual"] = visual
+    merged["required_visual_signals"] = visual.get("required_visual_signals", [])
+    merged["required_asset_usage"] = visual.get("required_asset_usage", [])
     return merged
 
 

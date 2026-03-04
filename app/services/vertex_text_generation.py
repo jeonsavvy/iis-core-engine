@@ -268,6 +268,8 @@ def generate_codegen_candidate_artifact(
     synapse_contract: dict[str, Any] | None,
     shared_generation_contract: dict[str, Any] | None,
     html_content: str,
+    asset_manifest: dict[str, Any] | None = None,
+    asset_files_index: dict[str, str] | None = None,
 ) -> VertexGenerationResult:
     if not service.settings.builder_codegen_enabled:
         return VertexGenerationResult(
@@ -290,6 +292,8 @@ def generate_codegen_candidate_artifact(
         variation_hint=variation_hint,
         design_spec=design_spec,
         asset_pack=asset_pack,
+        asset_manifest=asset_manifest,
+        asset_files_index=asset_files_index,
         intent_contract=intent_contract,
         synapse_contract=synapse_contract,
         shared_generation_contract=shared_generation_contract,
@@ -314,7 +318,13 @@ def generate_codegen_candidate_artifact(
             generated_html = strip_code_fences(coerce_message_text(result.content))
 
         normalized = generated_html.strip()
-        compiled_artifact, compile_meta = compile_generated_artifact(normalized)
+        compiled_artifact, compile_meta = compile_generated_artifact(
+            normalized,
+            asset_manifest=asset_manifest if isinstance(asset_manifest, dict) else None,
+            asset_files_index=asset_files_index if isinstance(asset_files_index, dict) else None,
+            visual_precheck_enabled=bool(getattr(service.settings, "builder_visual_precheck_enabled", True)),
+            deterministic_visual_fix=bool(getattr(service.settings, "builder_deterministic_visual_fix", True)),
+        )
         if not looks_like_playable_artifact(compiled_artifact):
             missing_requirements = playable_artifact_missing_requirements(compiled_artifact)
             detail = ",".join(missing_requirements[:8]) if missing_requirements else "unknown"
@@ -322,7 +332,7 @@ def generate_codegen_candidate_artifact(
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         return VertexGenerationResult(
-            payload={"artifact_html": compiled_artifact},
+            payload={"artifact_html": compiled_artifact, "raw_artifact_html": normalized},
             meta={
                 "generation_source": "vertex",
                 "model": builder_model,

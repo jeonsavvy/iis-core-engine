@@ -74,8 +74,11 @@ def _aggregate_visual_metrics(samples: list[dict[str, float]]) -> dict[str, obje
         for index in range(len(frame_hash_values) - 1)
     ]
     if motion_samples:
+        sorted_motion = sorted(motion_samples)
+        p90_index = max(0, min(len(sorted_motion) - 1, int(round((len(sorted_motion) - 1) * 0.9))))
         aggregated["motion_delta_samples"] = motion_samples
         aggregated["motion_delta"] = round(max(motion_samples), 6)
+        aggregated["motion_delta_p90"] = round(sorted_motion[p90_index], 6)
     aggregated["frame_probe_count"] = len(samples)
     return aggregated
 

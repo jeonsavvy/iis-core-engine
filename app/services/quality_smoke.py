@@ -94,76 +94,91 @@ def capture_visual_metrics(page) -> dict[str, float] | None:
         result = page.evaluate(
             """
             () => {
-              const canvas = document.querySelector("canvas");
-              if (!canvas) return null;
-              const sampleW = Math.max(1, Math.min(160, canvas.width || 0));
-              const sampleH = Math.max(1, Math.min(90, canvas.height || 0));
+              const canvases = Array.from(document.querySelectorAll("canvas"));
+              if (!canvases.length) return null;
               const off = document.createElement("canvas");
-              off.width = sampleW;
-              off.height = sampleH;
-              const offCtx = off.getContext("2d", { willReadFrequently: true });
-              if (!offCtx) return null;
-              try {
-                offCtx.drawImage(canvas, 0, 0, sampleW, sampleH);
-              } catch {
-                return null;
-              }
-              const data = offCtx.getImageData(0, 0, sampleW, sampleH).data;
+              let best = null;
+              let bestScore = -Infinity;
+              for (let canvasIndex = 0; canvasIndex < canvases.length; canvasIndex++) {
+                const canvas = canvases[canvasIndex];
+                const sampleW = Math.max(1, Math.min(160, canvas.width || canvas.clientWidth || 0));
+                const sampleH = Math.max(1, Math.min(90, canvas.height || canvas.clientHeight || 0));
+                if (!sampleW || !sampleH) continue;
+                off.width = sampleW;
+                off.height = sampleH;
+                const offCtx = off.getContext("2d", { willReadFrequently: true });
+                if (!offCtx) continue;
+                try {
+                  offCtx.clearRect(0, 0, sampleW, sampleH);
+                  offCtx.drawImage(canvas, 0, 0, sampleW, sampleH);
+                } catch {
+                  continue;
+                }
+                const data = offCtx.getImageData(0, 0, sampleW, sampleH).data;
 
-              let lumSum = 0;
-              let lumSqSum = 0;
-              let nonDark = 0;
-              let edgeAccum = 0;
-              let hashAccum = 0;
-              const buckets = new Set();
+                let lumSum = 0;
+                let lumSqSum = 0;
+                let nonDark = 0;
+                let edgeAccum = 0;
+                let hashAccum = 0;
+                const buckets = new Set();
 
-              for (let y = 0; y < sampleH; y++) {
-                for (let x = 0; x < sampleW; x++) {
-                  const idx = (y * sampleW + x) * 4;
-                  const r = data[idx];
-                  const g = data[idx + 1];
-                  const b = data[idx + 2];
-                  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                  lumSum += lum;
-                  lumSqSum += lum * lum;
-                  if (lum > 24) nonDark += 1;
-                  buckets.add(`${r >> 5}-${g >> 5}-${b >> 5}`);
-                  hashAccum += lum * (1 + (x % 7) + (y % 5));
+                for (let y = 0; y < sampleH; y++) {
+                  for (let x = 0; x < sampleW; x++) {
+                    const idx = (y * sampleW + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const b = data[idx + 2];
+                    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                    lumSum += lum;
+                    lumSqSum += lum * lum;
+                    if (lum > 24) nonDark += 1;
+                    buckets.add(`${r >> 5}-${g >> 5}-${b >> 5}`);
+                    hashAccum += lum * (1 + (x % 7) + (y % 5));
 
-                  if (x > 0) {
-                    const prevIdx = (y * sampleW + (x - 1)) * 4;
-                    const pr = data[prevIdx];
-                    const pg = data[prevIdx + 1];
-                    const pb = data[prevIdx + 2];
-                    const prevLum = 0.2126 * pr + 0.7152 * pg + 0.0722 * pb;
-                    edgeAccum += Math.abs(lum - prevLum);
-                  }
-                  if (y > 0) {
-                    const upIdx = ((y - 1) * sampleW + x) * 4;
-                    const ur = data[upIdx];
-                    const ug = data[upIdx + 1];
-                    const ub = data[upIdx + 2];
-                    const upLum = 0.2126 * ur + 0.7152 * ug + 0.0722 * ub;
-                    edgeAccum += Math.abs(lum - upLum);
+                    if (x > 0) {
+                      const prevIdx = (y * sampleW + (x - 1)) * 4;
+                      const pr = data[prevIdx];
+                      const pg = data[prevIdx + 1];
+                      const pb = data[prevIdx + 2];
+                      const prevLum = 0.2126 * pr + 0.7152 * pg + 0.0722 * pb;
+                      edgeAccum += Math.abs(lum - prevLum);
+                    }
+                    if (y > 0) {
+                      const upIdx = ((y - 1) * sampleW + x) * 4;
+                      const ur = data[upIdx];
+                      const ug = data[upIdx + 1];
+                      const ub = data[upIdx + 2];
+                      const upLum = 0.2126 * ur + 0.7152 * ug + 0.0722 * ub;
+                      edgeAccum += Math.abs(lum - upLum);
+                    }
                   }
                 }
-              }
 
-              const pixels = sampleW * sampleH;
-              const mean = lumSum / pixels;
-              const variance = Math.max(0, (lumSqSum / pixels) - (mean * mean));
-              const std = Math.sqrt(variance);
-              const edgeEnergy = edgeAccum / (pixels * 255);
-              return {
-                canvas_width: canvas.width || sampleW,
-                canvas_height: canvas.height || sampleH,
-                luminance_mean: Number(mean.toFixed(4)),
-                luminance_std: Number(std.toFixed(4)),
-                non_dark_ratio: Number((nonDark / pixels).toFixed(6)),
-                color_bucket_count: buckets.size,
-                edge_energy: Number(edgeEnergy.toFixed(6)),
-                frame_hash: Number((hashAccum / pixels).toFixed(6)),
-              };
+                const pixels = sampleW * sampleH;
+                const mean = lumSum / pixels;
+                const variance = Math.max(0, (lumSqSum / pixels) - (mean * mean));
+                const std = Math.sqrt(variance);
+                const edgeEnergy = edgeAccum / (pixels * 255);
+                const candidate = {
+                  canvas_width: canvas.width || canvas.clientWidth || sampleW,
+                  canvas_height: canvas.height || canvas.clientHeight || sampleH,
+                  luminance_mean: Number(mean.toFixed(4)),
+                  luminance_std: Number(std.toFixed(4)),
+                  non_dark_ratio: Number((nonDark / pixels).toFixed(6)),
+                  color_bucket_count: buckets.size,
+                  edge_energy: Number(edgeEnergy.toFixed(6)),
+                  frame_hash: Number((hashAccum / pixels).toFixed(6)),
+                  sampled_canvas_index: canvasIndex,
+                  sampled_canvas_count: canvases.length,
+                };
+                const score = (candidate.luminance_std * 1.3) + (candidate.color_bucket_count * 0.8) + (candidate.edge_energy * 420);
+                if (!best || score > bestScore) {
+                  best = candidate;
+                  bestScore = score;
+                }
+              }
+              return best;
             }
             """
         )

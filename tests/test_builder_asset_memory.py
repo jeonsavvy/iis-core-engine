@@ -267,3 +267,58 @@ def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -
     assert result.retrieval_profile.get("preferred_asset_pack") == "stable_pack"
     assert result.retrieval_profile.get("preferred_variant_id") == "clarity-first"
     assert cast(int, result.retrieval_profile.get("keyword_match_count", 0)) >= 1
+
+
+def test_collect_asset_memory_context_ignores_low_visual_success_samples() -> None:
+    current_pipeline_id = uuid4()
+    pipeline_a = uuid4()
+    pipeline_b = uuid4()
+    logs = [
+        _log(
+            pipeline_id=pipeline_a,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            metadata={"core_loop_type": "webgl_three_runner"},
+            offset_seconds=1,
+        ),
+        _log(
+            pipeline_id=pipeline_a,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.SUCCESS,
+            metadata={
+                "asset_pack": "bad_visual_pack",
+                "final_composite_score": 96.0,
+                "quality_floor_passed": True,
+                "final_visual_score": 22.0,
+            },
+            offset_seconds=2,
+        ),
+        _log(
+            pipeline_id=pipeline_b,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            metadata={"core_loop_type": "webgl_three_runner"},
+            offset_seconds=3,
+        ),
+        _log(
+            pipeline_id=pipeline_b,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.SUCCESS,
+            metadata={
+                "asset_pack": "good_visual_pack",
+                "final_composite_score": 81.0,
+                "quality_floor_passed": True,
+                "final_visual_score": 57.0,
+            },
+            offset_seconds=4,
+        ),
+    ]
+    deps = cast(Any, SimpleNamespace(repository=_FakeRepository(logs)))
+
+    result = collect_asset_memory_context(
+        state=cast(Any, _state(current_pipeline_id)),
+        deps=deps,
+        core_loop_type="webgl_three_runner",
+    )
+
+    assert result.retrieval_profile.get("preferred_asset_pack") == "good_visual_pack"

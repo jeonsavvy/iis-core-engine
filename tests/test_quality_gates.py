@@ -66,6 +66,25 @@ def test_evaluate_visual_gate_fails_without_metrics() -> None:
     assert "visual_metrics_missing" in result.failed_checks
 
 
+def test_evaluate_visual_gate_marks_probe_insufficient_for_single_frame() -> None:
+    settings = Settings(qa_min_visual_score=45)
+    metrics = {
+        "canvas_width": 1280,
+        "canvas_height": 720,
+        "luminance_std": 20.0,
+        "non_dark_ratio": 0.42,
+        "color_bucket_count": 24.0,
+        "edge_energy": 0.024,
+        "motion_delta": 0.0012,
+        "frame_probe_count": 1,
+    }
+
+    result = evaluate_visual_gate(settings, metrics, genre_engine="webgl_three_runner", runtime_engine_mode="3d_three")
+
+    assert result.ok is False
+    assert "visual_probe_insufficient" in result.failed_checks
+
+
 def test_evaluate_visual_gate_uses_multi_frame_samples_for_motion() -> None:
     settings = Settings(qa_min_visual_score=45)
     metrics = {

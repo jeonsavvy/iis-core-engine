@@ -140,3 +140,25 @@ def test_compile_generated_artifact_injects_runtime_contract_shim_when_missing_r
     assert "IISLeaderboard" in compiled
     assert "requestAnimationFrame" in compiled
     assert "inject_runtime_contract_shim" in meta["transforms_applied"]
+
+
+def test_compile_generated_artifact_reports_visual_precheck_and_asset_usage() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const sprite='./player.svg';"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(
+        html,
+        asset_manifest={"images": {"player": "./player.svg", "enemy": "./enemy.svg", "boost": "./boost.svg"}},
+        asset_files_index={"hud_frame": "./hud-frame.svg", "track_grid": "./track-grid.svg"},
+    )
+    assert isinstance(meta.get("precheck_before"), dict)
+    assert isinstance(meta.get("precheck_after"), dict)
+    assert isinstance(meta.get("asset_usage_count"), int)
+    assert "required_asset_keys" in meta
+    assert "used_asset_keys" in meta
+    assert compiled.startswith("<html")

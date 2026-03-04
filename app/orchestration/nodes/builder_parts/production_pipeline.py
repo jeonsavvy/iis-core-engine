@@ -15,6 +15,7 @@ from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPay
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
 from app.services.shared_generation_contract import compute_shared_generation_contract_hash
+from app.services.vertex_text_utils import compile_generated_artifact
 from app.services.visual_contract import resolve_visual_contract_profile
 
 
@@ -317,6 +318,105 @@ def _is_vertex_resource_exhausted(*values: str) -> bool:
     )
 
 
+def _build_asset_files_index(
+    *,
+    runtime_asset_manifest: dict[str, Any] | None,
+    asset_bank_files: list[dict[str, str]],
+) -> dict[str, str]:
+    index: dict[str, str] = {}
+    manifest = runtime_asset_manifest if isinstance(runtime_asset_manifest, dict) else {}
+    images = manifest.get("images")
+    if isinstance(images, dict):
+        for key, value in images.items():
+            key_text = str(key).strip()
+            value_text = str(value).strip()
+            if key_text and value_text:
+                index[key_text] = value_text
+    for row in asset_bank_files:
+        if not isinstance(row, dict):
+            continue
+        path = str(row.get("path", "")).strip()
+        if not path or "/" not in path:
+            continue
+        filename = path.rsplit("/", 1)[-1]
+        stem = filename.split(".", 1)[0].strip()
+        if stem and stem not in index:
+            index[stem] = f"./{filename}"
+    return index
+
+
+def _preflight_selection_score(assessment: _ArtifactAssessment) -> float:
+    gate_bonus = 0.0
+    if assessment.quality.ok:
+        gate_bonus += 8.0
+    if assessment.gameplay.ok:
+        gate_bonus += 10.0
+    if assessment.visual.ok:
+        gate_bonus += 8.0
+    if assessment.playability.ok and assessment.smoke.ok:
+        gate_bonus += 10.0
+    return round(float(assessment.builder_score) + gate_bonus, 3)
+
+
+def _should_prefer_fixed_candidate(*, raw: _ArtifactAssessment, fixed: _ArtifactAssessment) -> bool:
+    raw_score = _preflight_selection_score(raw)
+    fixed_score = _preflight_selection_score(fixed)
+    if fixed_score > raw_score + 0.15:
+        return True
+    if fixed.visual.score > raw.visual.score and fixed.playability.ok:
+        return True
+    if (not raw.visual.ok) and fixed.visual.ok:
+        return True
+    return False
+
+
+def _classify_blocking_reasons(reasons: list[str]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {
+        "visual": [],
+        "runtime": [],
+        "intent": [],
+        "gameplay": [],
+        "quality": [],
+        "codegen": [],
+        "other": [],
+    }
+
+    for row in reasons:
+        token = str(row).strip()
+        lowered = token.casefold()
+        target = "other"
+        if lowered.startswith("intent:") or lowered.startswith("intent_") or lowered == "intent_gate_unmet":
+            target = "intent"
+        elif lowered.startswith("codegen_") or lowered.startswith("codegen:") or lowered.startswith("codegen_reason:") or lowered.startswith("codegen_error:"):
+            target = "codegen"
+        elif lowered.startswith("runtime_") or lowered in {
+            "runtime_smoke_failed",
+            "builder_playability_unmet",
+            "input_reactivity_missing",
+            "missing_realtime_loop",
+            "restart_loop",
+            "core_loop_tick",
+        }:
+            target = "runtime"
+        elif lowered.startswith("visual_") or lowered in {
+            "visual_gate_unmet",
+            "visual_contrast",
+            "color_diversity",
+            "edge_definition",
+            "motion_presence",
+            "composition_balance",
+            "visual_cohesion",
+        }:
+            target = "visual"
+        elif lowered.startswith("gameplay_") or lowered == "gameplay_gate_unmet":
+            target = "gameplay"
+        elif lowered.startswith("quality_") or lowered == "quality_gate_unmet":
+            target = "quality"
+        groups[target].append(token)
+
+    return {key: value for key, value in groups.items() if value}
+
+
 def _assess_artifact_quality(
     *,
     deps: NodeDependencies,
@@ -586,6 +686,10 @@ def _build_scaffold_first_production_artifact(
         },
     )
 
+    asset_files_index = _build_asset_files_index(
+        runtime_asset_manifest=runtime_asset_manifest,
+        asset_bank_files=asset_bank_files,
+    )
     codegen_result = deps.vertex_service.generate_codegen_candidate_artifact(
         keyword=state["keyword"],
         title=title,
@@ -596,11 +700,14 @@ def _build_scaffold_first_production_artifact(
         variation_hint=effective_variation_hint,
         design_spec=design_spec_dump,
         asset_pack=asset_pack,
+        asset_manifest=runtime_asset_manifest,
+        asset_files_index=asset_files_index,
         html_content=scaffold_html,
         intent_contract=intent_contract if isinstance(intent_contract, dict) else {},
         synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else {},
         shared_generation_contract=shared_generation_contract if isinstance(shared_generation_contract, dict) else {},
     )
+    raw_generated_html = str(codegen_result.payload.get("raw_artifact_html", "")).strip()
     generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
     generation_source = str(codegen_result.meta.get("generation_source", "stub")).strip().lower()
     generation_reason = str(codegen_result.meta.get("reason", "")).strip()
@@ -629,6 +736,10 @@ def _build_scaffold_first_production_artifact(
     deterministic_fallback_meta: dict[str, Any] = {"reason": "disabled_single_pass"}
 
     final_html = generated_html if codegen_available and generated_html else scaffold_html
+    preflight_report: dict[str, Any] = {
+        "enabled": bool(getattr(deps.vertex_service.settings, "builder_visual_precheck_enabled", True)),
+        "selection_reason": "generated_default" if codegen_available else "scaffold_default",
+    }
 
     scaffold_assessment = _assess_artifact_quality(
         deps=deps,
@@ -643,23 +754,101 @@ def _build_scaffold_first_production_artifact(
         intent_contract=intent_contract,
         synapse_contract=synapse_contract,
     )
-    final_assessment = _assess_artifact_quality(
-        deps=deps,
-        html_content=final_html,
-        design_spec=design_spec_dump,
-        genre=genre,
-        core_loop_type=core_loop_type,
-        runtime_engine_mode=runtime_engine_mode,
-        keyword=state["keyword"],
-        artifact_files=asset_bank_files,
-        slug=slug,
-        intent_contract=intent_contract,
-        synapse_contract=synapse_contract,
-    )
+    final_assessment: _ArtifactAssessment
+    compile_meta_for_report = codegen_result.meta.get("runtime_compiler") if isinstance(codegen_result.meta, dict) else {}
+    if codegen_available and bool(getattr(deps.vertex_service.settings, "builder_visual_precheck_enabled", True)):
+        raw_candidate_html = raw_generated_html or generated_html
+        raw_assessment = _assess_artifact_quality(
+            deps=deps,
+            html_content=raw_candidate_html,
+            design_spec=design_spec_dump,
+            genre=genre,
+            core_loop_type=core_loop_type,
+            runtime_engine_mode=runtime_engine_mode,
+            keyword=state["keyword"],
+            artifact_files=asset_bank_files,
+            slug=slug,
+            intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
+        )
+        fixed_candidate_html, fixed_compile_meta = compile_generated_artifact(
+            raw_candidate_html,
+            asset_manifest=runtime_asset_manifest if isinstance(runtime_asset_manifest, dict) else None,
+            asset_files_index=asset_files_index,
+            visual_precheck_enabled=bool(getattr(deps.vertex_service.settings, "builder_visual_precheck_enabled", True)),
+            deterministic_visual_fix=bool(getattr(deps.vertex_service.settings, "builder_deterministic_visual_fix", True)),
+        )
+        fixed_assessment = _assess_artifact_quality(
+            deps=deps,
+            html_content=fixed_candidate_html,
+            design_spec=design_spec_dump,
+            genre=genre,
+            core_loop_type=core_loop_type,
+            runtime_engine_mode=runtime_engine_mode,
+            keyword=state["keyword"],
+            artifact_files=asset_bank_files,
+            slug=slug,
+            intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
+        )
+        prefer_fixed = _should_prefer_fixed_candidate(raw=raw_assessment, fixed=fixed_assessment)
+        if prefer_fixed:
+            final_html = fixed_candidate_html
+            final_assessment = fixed_assessment
+            preflight_report["selection_reason"] = "fixed_candidate_better"
+        else:
+            final_html = raw_candidate_html
+            final_assessment = raw_assessment
+            preflight_report["selection_reason"] = "raw_candidate_kept"
+        compile_meta_for_report = fixed_compile_meta
+        preflight_report.update(
+            {
+                "raw": {
+                    "quality": raw_assessment.quality.score,
+                    "gameplay": raw_assessment.gameplay.score,
+                    "visual": raw_assessment.visual.score,
+                    "playability": raw_assessment.playability.score,
+                    "smoke_ok": raw_assessment.smoke.ok,
+                    "builder": raw_assessment.builder_score,
+                },
+                "fixed": {
+                    "quality": fixed_assessment.quality.score,
+                    "gameplay": fixed_assessment.gameplay.score,
+                    "visual": fixed_assessment.visual.score,
+                    "playability": fixed_assessment.playability.score,
+                    "smoke_ok": fixed_assessment.smoke.ok,
+                    "builder": fixed_assessment.builder_score,
+                },
+                "applied_transforms": fixed_compile_meta.get("transforms_applied", [])
+                if isinstance(fixed_compile_meta, dict)
+                else [],
+                "asset_usage_count": (
+                    fixed_compile_meta.get("asset_usage_count")
+                    if isinstance(fixed_compile_meta, dict)
+                    else 0
+                ),
+                "runtime_compiler": fixed_compile_meta if isinstance(fixed_compile_meta, dict) else {},
+            }
+        )
+    else:
+        final_assessment = _assess_artifact_quality(
+            deps=deps,
+            html_content=final_html,
+            design_spec=design_spec_dump,
+            genre=genre,
+            core_loop_type=core_loop_type,
+            runtime_engine_mode=runtime_engine_mode,
+            keyword=state["keyword"],
+            artifact_files=asset_bank_files,
+            slug=slug,
+            intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
+        )
     visual_contract = resolve_visual_contract_profile(
         core_loop_type=core_loop_type,
         runtime_engine_mode=runtime_engine_mode,
         keyword=state["keyword"],
+        contract_version=getattr(deps.vertex_service.settings, "visual_contract_version", "v2"),
     ).as_dict()
     generation_checklist_report = _evaluate_generation_checklist(
         assessment=final_assessment,
@@ -722,6 +911,7 @@ def _build_scaffold_first_production_artifact(
                     if str(item).strip()
                 )
     quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
+    blocking_reason_groups = _classify_blocking_reasons(quality_floor_fail_reasons)
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
     vertex_resource_exhausted_retryable = (not codegen_available) and _is_vertex_resource_exhausted(
         generation_reason,
@@ -807,6 +997,8 @@ def _build_scaffold_first_production_artifact(
     }
 
     selected_generation_meta = dict(codegen_result.meta or {})
+    if isinstance(compile_meta_for_report, dict) and compile_meta_for_report:
+        selected_generation_meta["runtime_compiler"] = compile_meta_for_report
     codegen_usage = (
         selected_generation_meta.get("usage")
         if isinstance(selected_generation_meta.get("usage"), dict)
@@ -850,9 +1042,35 @@ def _build_scaffold_first_production_artifact(
         "quality_floor_enforced": quality_floor_enforced,
         "quality_floor_passed": quality_floor_passed,
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
+        "blocking_reason_groups": blocking_reason_groups,
+        "blocking_reasons_normalized": [
+            f"{group}:{token}"
+            for group, rows in blocking_reason_groups.items()
+            for token in rows
+        ],
         "visual_contract": visual_contract,
+        "visual_profile_id": str(visual_contract.get("profile_id", "")).strip() or None,
         "visual_metrics": final_assessment.smoke.visual_metrics or {},
         "generation_checklist_report": generation_checklist_report,
+        "builder_preflight_report": preflight_report,
+        "runtime_compiler": compile_meta_for_report if isinstance(compile_meta_for_report, dict) else {},
+        "asset_usage_report": {
+            "asset_usage_count": (
+                compile_meta_for_report.get("asset_usage_count", 0)
+                if isinstance(compile_meta_for_report, dict)
+                else 0
+            ),
+            "required_asset_keys": (
+                compile_meta_for_report.get("required_asset_keys", [])
+                if isinstance(compile_meta_for_report, dict)
+                else []
+            ),
+            "used_asset_keys": (
+                compile_meta_for_report.get("used_asset_keys", [])
+                if isinstance(compile_meta_for_report, dict)
+                else []
+            ),
+        },
         "vertex_resource_exhausted_retryable": vertex_resource_exhausted_retryable,
         "quality_gate_report": quality_gate_report,
         "intent_gate_report": final_assessment.intent_gate_report,

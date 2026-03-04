@@ -457,6 +457,8 @@ class VertexService:
         synapse_contract: dict[str, Any] | None,
         shared_generation_contract: dict[str, Any] | None,
         html_content: str,
+        asset_manifest: dict[str, Any] | None = None,
+        asset_files_index: dict[str, str] | None = None,
     ) -> VertexGenerationResult:
         return generate_codegen_candidate_artifact_text(
             self,
@@ -469,6 +471,8 @@ class VertexService:
             variation_hint=variation_hint,
             design_spec=design_spec,
             asset_pack=asset_pack,
+            asset_manifest=asset_manifest,
+            asset_files_index=asset_files_index,
             intent_contract=intent_contract,
             synapse_contract=synapse_contract,
             shared_generation_contract=shared_generation_contract,

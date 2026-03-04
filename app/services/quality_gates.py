@@ -490,29 +490,49 @@ def evaluate_visual_gate(
     contract = resolve_visual_contract_profile(
         core_loop_type=genre_engine,
         runtime_engine_mode=runtime_engine_mode,
+        contract_version=getattr(settings, "visual_contract_version", "v2"),
     )
     luminance_samples = _metric_series("luminance_std")
     non_dark_samples = _metric_series("non_dark_ratio")
     color_samples = _metric_series("color_bucket_count")
     edge_samples = _metric_series("edge_energy")
     motion_samples = _metric_series("motion_delta")
+    motion_p90_metric = metrics.get("motion_delta_p90")
+    if isinstance(motion_p90_metric, (int, float)) and not isinstance(motion_p90_metric, bool):
+        motion_samples.append(float(motion_p90_metric))
 
     luminance_std = _median(luminance_samples)
     non_dark_ratio = _median(non_dark_samples)
     color_bucket_count = _median(color_samples)
     edge_energy = _median(edge_samples)
     motion_delta = max(motion_samples) if motion_samples else 0.0
+    motion_delta_p90 = 0.0
+    if motion_samples:
+        sorted_motion = sorted(motion_samples)
+        p90_index = max(0, min(len(sorted_motion) - 1, int(round((len(sorted_motion) - 1) * 0.9))))
+        motion_delta_p90 = sorted_motion[p90_index]
+    motion_signal = max(motion_delta, motion_delta_p90)
     width = float(metrics.get("canvas_width", 0.0)) if isinstance(metrics.get("canvas_width"), (int, float)) else 0.0
     height = float(metrics.get("canvas_height", 0.0)) if isinstance(metrics.get("canvas_height"), (int, float)) else 0.0
     frame_probe_count = int(metrics.get("frame_probe_count", 0)) if isinstance(metrics.get("frame_probe_count"), (int, float)) else len(luminance_samples)
 
+    contrast_weight = 20
+    diversity_weight = 16
+    edge_weight = 18
+    motion_weight = 14
+    if contract.advanced_density_enabled:
+        contrast_weight = 18
+        diversity_weight = 18
+        edge_weight = 20
+        motion_weight = 16
+
     checks: list[tuple[str, bool, int]] = [
         ("canvas_size_present", width >= 640 and height >= 360, 10),
-        ("visual_contrast", luminance_std >= contract.contrast_min, 20),
-        ("color_diversity", color_bucket_count >= contract.color_diversity_min, 16),
+        ("visual_contrast", luminance_std >= contract.contrast_min, contrast_weight),
+        ("color_diversity", color_bucket_count >= contract.color_diversity_min, diversity_weight),
         ("composition_balance", contract.composition_non_dark_min <= non_dark_ratio <= contract.composition_non_dark_max, 12),
-        ("edge_definition", edge_energy >= contract.edge_energy_min, 18),
-        ("motion_presence", motion_delta >= contract.motion_delta_min, 14),
+        ("edge_definition", edge_energy >= contract.edge_energy_min, edge_weight),
+        ("motion_presence", motion_signal >= contract.motion_delta_min, motion_weight),
         ("metrics_available", bool(metrics), 10),
         (
             "visual_cohesion",
@@ -542,6 +562,8 @@ def evaluate_visual_gate(
 
     if not metrics:
         hard_failures.append("visual_metrics_missing")
+    if frame_probe_count < 2:
+        hard_failures.append("visual_probe_insufficient")
     if color_bucket_count < max(8.0, contract.color_diversity_min * 0.45):
         hard_failures.append("visual_palette_too_flat")
     if edge_energy < max(0.01, contract.edge_energy_min * 0.6):

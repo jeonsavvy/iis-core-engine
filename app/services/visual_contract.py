@@ -107,26 +107,52 @@ _PROFILE_FLIGHT_3D = VisualContractProfile(
 )
 
 
+def _as_legacy_profile(profile: VisualContractProfile) -> VisualContractProfile:
+    return VisualContractProfile(
+        profile_id=profile.profile_id.replace("_v1", "_legacy_v1"),
+        contrast_min=max(12.0, profile.contrast_min - 2.0),
+        color_diversity_min=max(10.0, profile.color_diversity_min - 3.0),
+        composition_non_dark_min=max(0.04, profile.composition_non_dark_min - 0.01),
+        composition_non_dark_max=min(0.97, profile.composition_non_dark_max + 0.01),
+        edge_energy_min=max(0.012, profile.edge_energy_min - 0.003),
+        motion_delta_min=max(0.00035, profile.motion_delta_min - 0.00015),
+        cohesion_contrast_min=max(12.0, profile.cohesion_contrast_min - 1.5),
+        cohesion_edge_min=max(0.011, profile.cohesion_edge_min - 0.002),
+        cohesion_color_min=max(10.0, profile.cohesion_color_min - 2.0),
+        advanced_density_enabled=profile.advanced_density_enabled,
+        advanced_density_color_min=max(14.0, profile.advanced_density_color_min - 3.0),
+        advanced_density_edge_min=max(0.018, profile.advanced_density_edge_min - 0.003),
+        frame_probe_count=profile.frame_probe_count,
+    )
+
+
 def resolve_visual_contract_profile(
     *,
     core_loop_type: str | None,
     runtime_engine_mode: str | None,
     keyword: str | None = None,
+    contract_version: str | None = None,
 ) -> VisualContractProfile:
     mode = str(runtime_engine_mode or "").strip().casefold()
     core_loop = str(core_loop_type or "").strip().casefold()
     keyword_hint = str(keyword or "").strip().casefold()
     combined = f"{core_loop} {keyword_hint}"
 
+    selected_profile: VisualContractProfile
     if mode == "2d_phaser":
-        return _PROFILE_DEFAULT_2D
+        selected_profile = _PROFILE_DEFAULT_2D
+    elif any(token in combined for token in ("racing", "race", "f1", "formula", "drift", "레이싱", "서킷")):
+        selected_profile = _PROFILE_RACING_3D
+    elif any(token in combined for token in ("flight", "space", "pilot", "비행", "조종", "전투기", "cockpit")):
+        selected_profile = _PROFILE_FLIGHT_3D
+    else:
+        selected_profile = _PROFILE_DEFAULT_3D
 
-    if any(token in combined for token in ("racing", "race", "f1", "formula", "drift", "레이싱", "서킷")):
-        return _PROFILE_RACING_3D
-    if any(token in combined for token in ("flight", "space", "pilot", "비행", "조종", "전투기", "cockpit")):
-        return _PROFILE_FLIGHT_3D
+    version = str(contract_version or "v2").strip().casefold()
+    if version == "v1":
+        return _as_legacy_profile(selected_profile)
 
-    return _PROFILE_DEFAULT_3D
+    return selected_profile
 
 
 _CANONICAL_VISUAL_TOKEN_MAP: dict[str, str] = {

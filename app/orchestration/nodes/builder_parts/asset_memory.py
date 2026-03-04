@@ -134,6 +134,25 @@ def _registry_row_score(
     return max(composed_score, 0.0), keyword_overlap
 
 
+def _is_visual_quality_eligible(metadata: dict[str, object]) -> bool:
+    quality_floor_passed = metadata.get("quality_floor_passed")
+    if isinstance(quality_floor_passed, bool) and not quality_floor_passed:
+        return False
+    visual_score = _to_float(metadata.get("final_visual_score"), -1.0)
+    quality_gate_report = metadata.get("quality_gate_report")
+    if isinstance(quality_gate_report, dict):
+        visual = quality_gate_report.get("visual")
+        if isinstance(visual, dict):
+            if visual_score < 0:
+                visual_score = _to_float(visual.get("score"), -1.0)
+            visual_threshold = _to_float(visual.get("threshold"), 45.0)
+            if visual_score >= 0 and visual_score < visual_threshold:
+                return False
+    if visual_score >= 0 and visual_score < 45.0:
+        return False
+    return True
+
+
 def _build_context_from_registry_entries(
     *,
     entries: list[dict[str, object]],
@@ -153,6 +172,14 @@ def _build_context_from_registry_entries(
 
     substrate_id = resolve_substrate_profile(core_loop_type).substrate_id
     for index, row in enumerate(entries):
+        row_metadata = row.get("metadata")
+        typed_row_metadata = row_metadata if isinstance(row_metadata, dict) else {}
+        eligibility_payload = dict(typed_row_metadata)
+        for key in ("quality_floor_passed", "final_visual_score", "quality_gate_report"):
+            if key in row and key not in eligibility_payload:
+                eligibility_payload[key] = row.get(key)
+        if not _is_visual_quality_eligible(eligibility_payload):
+            continue
         row_score, overlap = _registry_row_score(
             row=row,
             current_keyword_tokens=current_keyword_tokens,
@@ -344,6 +371,8 @@ def collect_asset_memory_context(
 
         metadata = log.metadata if isinstance(log.metadata, dict) else {}
         if log.stage == PipelineStage.BUILD and log.status == PipelineStatus.SUCCESS:
+            if not _is_visual_quality_eligible(metadata):
+                continue
             build_success_samples += 1
             asset_pack = str(metadata.get("asset_pack", "")).strip()
             if asset_pack:

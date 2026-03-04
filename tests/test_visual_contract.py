@@ -39,3 +39,15 @@ def test_canonicalize_visual_tokens_normalizes_aliases() -> None:
 
     assert normalized == ["contrast", "motion", "diversity", "edge"]
     assert canonicalize_visual_token("advanced_visual_density") == "density"
+
+
+def test_resolve_visual_contract_profile_supports_legacy_version() -> None:
+    profile = resolve_visual_contract_profile(
+        core_loop_type="webgl_three_runner",
+        runtime_engine_mode="3d_three",
+        keyword="formula racing",
+        contract_version="v1",
+    )
+
+    assert profile.profile_id.endswith("_legacy_v1")
+    assert profile.contrast_min < 20.0

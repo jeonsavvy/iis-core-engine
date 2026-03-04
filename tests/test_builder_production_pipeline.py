@@ -210,6 +210,8 @@ def test_build_production_artifact_uses_scaffold_v3_single_pass() -> None:
     assert result.metadata["effective_codegen_passes_per_candidate"] == 1
     assert result.metadata["quality_floor_passed"] is True
     assert "quality_gate_report" in result.metadata
+    assert isinstance(result.metadata.get("builder_preflight_report"), dict)
+    assert isinstance(result.metadata.get("runtime_compiler"), dict)
     assert "<!-- CODEGEN -->" in result.build_artifact.artifact_html
 
 

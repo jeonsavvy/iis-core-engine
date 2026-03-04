@@ -159,6 +159,7 @@ def build_intent_contract(
             *analyze_contract.hard_constraints,
             *[f"avoid:{item}" for item in analyze_contract.forbidden_patterns],
             "preserve_requested_intent_without_generic_substitution",
+            "no_placeholder_visual_only",
         ],
         limit=8,
         item_max_length=120,
