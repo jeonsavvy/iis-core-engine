@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     builder_codegen_recovery_enabled: bool = False
     builder_runtime_mutation_enabled: bool = True
     builder_force_pro_model: bool = True
+    pipeline_dual_agent_mode: bool = False
     strict_vertex_only: bool = True
     allow_stub_fallback: bool = False
     builder_scope_guard_enabled: bool = True

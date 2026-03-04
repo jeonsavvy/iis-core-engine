@@ -260,6 +260,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     genre = gdd.genre
     settings = deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    dual_agent_mode = bool(getattr(settings, "pipeline_dual_agent_mode", False))
     shared_contract = state["outputs"].get("shared_generation_contract")
     typed_shared_contract = shared_contract if isinstance(shared_contract, dict) else None
     shared_contract_issues = validate_shared_generation_contract(typed_shared_contract)
@@ -309,7 +310,16 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "design_spec_source": str(state["outputs"].get("design_spec_source", "")).strip().casefold(),
             "design_contract_source": str(state["outputs"].get("design_contract_source", "")).strip().casefold(),
         }
-        violated = [key for key, source in source_rows.items() if source != "vertex"]
+        if dual_agent_mode:
+            allowed_derived_sources = {"vertex", "dual_agent_synth"}
+            violated = []
+            if source_rows["analyze_contract_source"] != "vertex":
+                violated.append("analyze_contract_source")
+            for key in ("gdd_source", "plan_contract_source", "design_spec_source", "design_contract_source"):
+                if source_rows[key] not in allowed_derived_sources:
+                    violated.append(key)
+        else:
+            violated = [key for key, source in source_rows.items() if source != "vertex"]
         if violated:
             state["status"] = PipelineStatus.ERROR
             state["reason"] = "upstream_contract_source_untrusted"
@@ -322,8 +332,14 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 reason=state["reason"],
                 metadata={
                     "strict_vertex_only": strict_vertex_only,
+                    "pipeline_dual_agent_mode": dual_agent_mode,
                     "violated_sources": violated,
                     "source_rows": source_rows,
+                    **(
+                        {"allowed_derived_sources": ["vertex", "dual_agent_synth"]}
+                        if dual_agent_mode
+                        else {}
+                    ),
                     "contract_status": "fail",
                     "deliverables": ["prebuild_contract_validator"],
                 },

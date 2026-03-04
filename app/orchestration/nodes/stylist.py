@@ -3,7 +3,7 @@ from pydantic import ValidationError
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate, classify_vertex_unavailable_reason
 from app.orchestration.nodes.dependencies import NodeDependencies
-from app.schemas.payloads import DesignContractPayload, DesignSpecPayload
+from app.schemas.payloads import DesignContractPayload, DesignSpecPayload, GDDPayload, PlanContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 from app.services.shared_generation_contract import (
     compute_shared_generation_contract_hash,
@@ -60,6 +60,112 @@ def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: st
     }
 
 
+def _dedupe_rows(rows: list[str], *, limit: int) -> list[str]:
+    deduped: list[str] = []
+    for row in rows:
+        text = str(row).strip()
+        if text and text not in deduped:
+            deduped.append(text)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _build_dual_agent_design_bundle(
+    *,
+    keyword: str,
+    gdd: GDDPayload,
+    plan_contract: PlanContractPayload | None,
+) -> tuple[DesignSpecPayload, DesignContractPayload]:
+    genre_hint = f"{gdd.genre} {keyword}".casefold()
+    palette = ["#38bdf8", "#0f172a", "#f472b6", "#facc15"]
+    hud = "score / timer / hp / speed"
+    if any(token in genre_hint for token in ("flight", "비행", "pilot")):
+        palette = ["#60a5fa", "#111827", "#2dd4bf", "#f472b6"]
+        hud = "speed / altitude / checkpoint / hull"
+    elif any(token in genre_hint for token in ("racing", "race", "레이싱", "f1", "formula")):
+        palette = ["#22d3ee", "#0b1020", "#fb7185", "#facc15"]
+        hud = "lap / speed / boost / damage"
+    elif any(token in genre_hint for token in ("shooter", "shoot", "슈팅", "fps")):
+        palette = ["#f97316", "#111827", "#22d3ee", "#f8fafc"]
+        hud = "hp / ammo / wave / score"
+    elif any(token in genre_hint for token in ("brawler", "fight", "격투")):
+        palette = ["#fda4af", "#1f172a", "#fb7185", "#fde047"]
+        hud = "hp / combo / timer / score"
+    elif any(token in genre_hint for token in ("2d", "pixel", "도트", "탑다운")):
+        palette = ["#7dd3fc", "#0f172a", "#a78bfa", "#facc15"]
+        hud = "score / stage / hp / combo"
+
+    design_spec = DesignSpecPayload(
+        visual_style=str(gdd.visual_style or "stylized-high-contrast")[:80],
+        palette=palette,
+        hud=hud[:120],
+        viewport_width=1280,
+        viewport_height=720,
+        safe_area_padding=24,
+        min_font_size_px=14,
+        text_overflow_policy="ellipsis-clamp",
+        typography="inter-semi-bold",
+        thumbnail_concept=f"{keyword} high contrast action frame"[:200],
+    )
+
+    mechanics = plan_contract.core_mechanics if isinstance(plan_contract, PlanContractPayload) else []
+    mechanics_rows = [str(item).strip() for item in mechanics if str(item).strip()]
+    asset_blueprint = _dedupe_rows(
+        [
+            "player",
+            "enemy",
+            "collectible_or_boost",
+            "hazard",
+            "hud_frame",
+            "track_or_path",
+            "sky_or_background_depth",
+            *[f"mechanic:{item}" for item in mechanics_rows[:4]],
+        ],
+        limit=18,
+    )
+    scene_layers = _dedupe_rows(
+        [
+            "foreground gameplay layer",
+            "midground interaction layer",
+            "background depth layer",
+            "feedback fx layer",
+        ],
+        limit=12,
+    )
+    design_contract = DesignContractPayload(
+        camera_ui_contract=_dedupe_rows(
+            [
+                "camera keeps player intent readable",
+                "hud keeps critical stats glanceable",
+                "safe-area anchored overlay layout",
+            ],
+            limit=12,
+        ),
+        asset_blueprint_2d3d=asset_blueprint,
+        scene_layers=scene_layers,
+        feedback_fx_contract=_dedupe_rows(
+            [
+                "hit feedback pulse",
+                "danger telegraph",
+                "objective progress feedback",
+                "checkpoint or combo confirmation",
+            ],
+            limit=12,
+        ),
+        readability_contract=_dedupe_rows(
+            [
+                "player-enemy silhouette separation",
+                "high contrast critical interactive objects",
+                "motion readability under speed",
+                "no placeholder visual only",
+            ],
+            limit=12,
+        ),
+    )
+    return design_spec, design_contract
+
+
 def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     gated_state = apply_operator_control_gate(
         state,
@@ -95,6 +201,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     genre = str(gdd_output.get("genre", "arcade"))
     settings = deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    dual_agent_mode = bool(getattr(settings, "pipeline_dual_agent_mode", False))
     shared_contract = state["outputs"].get("shared_generation_contract")
     typed_shared_contract = shared_contract if isinstance(shared_contract, dict) else None
     shared_contract_issues = validate_shared_generation_contract(typed_shared_contract)
@@ -112,6 +219,94 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "shared_generation_contract_issues": shared_contract_issues,
                 "deliverables": ["shared_generation_contract_gate"],
                 "contract_status": "fail",
+            },
+        )
+
+    if dual_agent_mode:
+        try:
+            gdd = GDDPayload.model_validate(gdd_output)
+        except Exception as exc:
+            state["status"] = PipelineStatus.ERROR
+            state["reason"] = "gdd_missing_for_dual_agent"
+            return append_log(
+                state,
+                stage=PipelineStage.DESIGN,
+                status=PipelineStatus.ERROR,
+                agent_name=PipelineAgentName.DESIGNER,
+                message="디자인 중단: 2-agent 모드에서 GDD가 유효하지 않습니다.",
+                reason=state["reason"],
+                metadata={
+                    "pipeline_dual_agent_mode": True,
+                    "validation_error": _validation_error_detail(exc),
+                    "contract_status": "fail",
+                },
+            )
+        plan_raw = state["outputs"].get("plan_contract", {})
+        typed_plan_contract = None
+        try:
+            typed_plan_contract = PlanContractPayload.model_validate(plan_raw)
+        except Exception:
+            typed_plan_contract = None
+        design_spec, design_contract = _build_dual_agent_design_bundle(
+            keyword=keyword,
+            gdd=gdd,
+            plan_contract=typed_plan_contract,
+        )
+        art_direction_contract = _derive_art_direction_contract(
+            keyword=keyword,
+            genre=genre,
+            visual_style=design_spec.visual_style,
+        )
+        state["outputs"]["design_spec"] = design_spec.model_dump()
+        state["outputs"]["art_direction_contract"] = art_direction_contract
+        state["outputs"]["design_contract"] = design_contract.model_dump()
+        state["outputs"]["design_spec_source"] = "dual_agent_synth"
+        state["outputs"]["design_spec_meta"] = {
+            "generation_source": "dual_agent_synth",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+        state["outputs"]["design_contract_source"] = "dual_agent_synth"
+        state["outputs"]["design_contract_meta"] = {
+            "generation_source": "dual_agent_synth",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+        shared_contract = merge_shared_generation_contract(
+            contract=typed_shared_contract,
+            keyword=keyword,
+            runtime_engine_mode=None,
+            visual_profile_hint=genre,
+        )
+        shared_contract_hash = compute_shared_generation_contract_hash(shared_contract)
+        state["outputs"]["shared_generation_contract"] = shared_contract
+        state["outputs"]["shared_generation_contract_hash"] = shared_contract_hash
+        return append_log(
+            state,
+            stage=PipelineStage.DESIGN,
+            status=PipelineStatus.SUCCESS,
+            agent_name=PipelineAgentName.DESIGNER,
+            message="2-agent 모드: 디자인 계약을 로컬 합성으로 완료했습니다.",
+            metadata={
+                "pipeline_dual_agent_mode": True,
+                "viewport": f"{design_spec.viewport_width}x{design_spec.viewport_height}",
+                "min_font_size_px": design_spec.min_font_size_px,
+                "overflow_policy": design_spec.text_overflow_policy,
+                "art_motif": art_direction_contract.get("motif"),
+                "min_image_assets": art_direction_contract.get("min_image_assets"),
+                "deliverables": [
+                    "design_spec.viewport/palette",
+                    "design_contract.asset_blueprint_2d3d",
+                    "design_contract.scene_layers",
+                    "design_contract.readability_contract",
+                ],
+                "contract_status": "pass",
+                "contract_summary": f"{len(design_contract.asset_blueprint_2d3d)} asset blueprint entries",
+                "contribution_score": 4.0,
+                "shared_generation_contract_hash": shared_contract_hash,
+                "strict_vertex_only": strict_vertex_only,
+                "design_spec_source": "dual_agent_synth",
+                "design_contract_source": "dual_agent_synth",
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "model": "deterministic_contract_synthesizer",
             },
         )
 

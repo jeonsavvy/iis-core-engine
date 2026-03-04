@@ -254,6 +254,109 @@ def test_stylist_reuses_cached_design_contract_on_build_resume(monkeypatch) -> N
     assert "재개" in design_logs[-1].message
 
 
+def test_dual_agent_mode_architect_synthesizes_plan_without_vertex_calls(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub()
+    vertex.settings.pipeline_dual_agent_mode = True
+    deps = _deps(vertex)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_gdd_bundle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("generate_gdd_bundle should not be called")),
+    )
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_plan_contract",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("generate_plan_contract should not be called")),
+    )
+
+    result = architect.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    assert result["outputs"]["gdd_source"] == "dual_agent_synth"
+    assert result["outputs"]["plan_contract_source"] == "dual_agent_synth"
+    assert isinstance(result["outputs"].get("gdd"), dict)
+    assert isinstance(result["outputs"].get("plan_contract"), dict)
+
+
+def test_dual_agent_mode_stylist_synthesizes_design_without_vertex_calls(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub()
+    vertex.settings.pipeline_dual_agent_mode = True
+    deps = _deps(vertex)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    state = architect.run(cast(Any, state), cast(Any, deps))
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_design_spec",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("generate_design_spec should not be called")),
+    )
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_design_contract",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("generate_design_contract should not be called")),
+    )
+
+    result = stylist.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    assert result["outputs"]["design_spec_source"] == "dual_agent_synth"
+    assert result["outputs"]["design_contract_source"] == "dual_agent_synth"
+    assert isinstance(result["outputs"].get("design_spec"), dict)
+    assert isinstance(result["outputs"].get("design_contract"), dict)
+
+
+def test_builder_accepts_dual_agent_sources_when_strict_vertex_only(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub(strict_vertex_only=True)
+    vertex.settings.pipeline_dual_agent_mode = True
+    deps = _deps(vertex)
+
+    def _vertex_analyze_contract(*, keyword: str) -> VertexGenerationResult:
+        return VertexGenerationResult(
+            payload={
+                "intent": f"{keyword} intent",
+                "scope_in": ["browser runtime", "deployable artifact"],
+                "scope_out": ["manual approval"],
+                "hard_constraints": ["no secret leakage"],
+                "forbidden_patterns": ["placeholder-only visuals"],
+                "success_outcome": "playable output",
+            },
+            meta={"generation_source": "vertex"},
+        )
+
+    monkeypatch.setattr(deps.vertex_service, "generate_analyze_contract", _vertex_analyze_contract)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    state = architect.run(cast(Any, state), cast(Any, deps))
+    state = stylist.run(cast(Any, state), cast(Any, deps))
+
+    def _fake_production_artifact(**_kwargs: Any) -> ProductionBuildResult:
+        build_artifact = BuildArtifactPayload(
+            game_slug="arena-pulse",
+            game_name="Arena Pulse",
+            game_genre="shooter",
+            artifact_path="games/arena-pulse/index.html",
+            artifact_html="<!doctype html><html><body><main><canvas id='game'></canvas><script>window.__iis_game_boot_ok=true;function restartGame(){}</script></main></body></html>",
+        )
+        return ProductionBuildResult(
+            build_artifact=build_artifact,
+            selected_generation_meta={"generation_source": "vertex"},
+            metadata={
+                "quality_floor_enforced": True,
+                "quality_floor_passed": True,
+                "playability_passed": True,
+                "playability_score": 100,
+            },
+        )
+
+    monkeypatch.setattr(builder, "build_production_artifact", _fake_production_artifact)
+    result = builder.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    assert isinstance(result["outputs"].get("build_artifact"), dict)
+
+
 def test_builder_contract_validator_blocks_weak_contracts_in_strict_mode() -> None:
     state = _base_state()
     vertex = _VertexStub(contract_mode="weak")
