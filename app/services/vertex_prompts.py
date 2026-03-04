@@ -6,17 +6,25 @@ from typing import Any
 from app.services.visual_contract import resolve_visual_contract_profile
 
 
-def build_analyze_contract_prompt(keyword: str) -> str:
+def _shared_contract_section(shared_contract: dict[str, Any] | None) -> str:
+    if not isinstance(shared_contract, dict) or not shared_contract:
+        return "SharedGenerationContract JSON: {}\n"
+    return f"SharedGenerationContract JSON: {json.dumps(shared_contract, ensure_ascii=False)}\n"
+
+
+def build_analyze_contract_prompt(keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str:
     return (
         "You are a principal game producer. Return JSON only.\n"
         f"Keyword: {keyword}\n"
+        f"{_shared_contract_section(shared_contract)}"
         "Build an execution contract for downstream agents.\n"
         "Output fields exactly: intent, scope_in, scope_out, hard_constraints, forbidden_patterns, success_outcome.\n"
         "Rules:\n"
         "- scope_in/out should be concise actionable lists\n"
         "- hard_constraints must include platform/runtime constraints\n"
         "- forbidden_patterns must include anti-patterns that degrade game quality\n"
-        "- success_outcome should define player-facing completion quality"
+        "- success_outcome should define player-facing completion quality\n"
+        "- Align runtime and visual target language with SharedGenerationContract JSON."
     )
 
 
@@ -25,6 +33,7 @@ def build_plan_contract_prompt(
     keyword: str,
     gdd: dict[str, Any],
     research_summary: dict[str, Any] | None = None,
+    shared_contract: dict[str, Any] | None = None,
 ) -> str:
     gdd_json = json.dumps(gdd, ensure_ascii=False)
     research_json = json.dumps(research_summary or {}, ensure_ascii=False)
@@ -33,11 +42,13 @@ def build_plan_contract_prompt(
         f"Keyword: {keyword}\n"
         f"GDD JSON: {gdd_json}\n"
         f"ResearchSummary JSON: {research_json}\n"
+        f"{_shared_contract_section(shared_contract)}"
         "Output fields exactly: core_mechanics, progression_plan, encounter_plan, risk_reward_plan, control_model, balance_baseline.\n"
         "Rules:\n"
         "- Every list must contain concrete player-action oriented items\n"
         "- balance_baseline must contain numeric values (hp/speed/spawn/timer scale etc.)\n"
-        "- avoid generic filler statements"
+        "- avoid generic filler statements\n"
+        "- control_model must follow SharedGenerationContract.runtime.engine_mode."
     )
 
 
@@ -47,6 +58,7 @@ def build_design_contract_prompt(
     genre: str,
     visual_style: str,
     design_spec: dict[str, Any],
+    shared_contract: dict[str, Any] | None = None,
 ) -> str:
     design_json = json.dumps(design_spec, ensure_ascii=False)
     return (
@@ -55,20 +67,23 @@ def build_design_contract_prompt(
         f"Genre: {genre}\n"
         f"VisualStyle: {visual_style}\n"
         f"DesignSpec JSON: {design_json}\n"
+        f"{_shared_contract_section(shared_contract)}"
         "Output fields exactly: camera_ui_contract, asset_blueprint_2d3d, scene_layers, feedback_fx_contract, readability_contract.\n"
         "Rules:\n"
         "- asset_blueprint_2d3d must include reusable 2D/3D asset categories\n"
         "- scene_layers must describe layered visual composition\n"
-        "- readability_contract must include player/enemy/projectile readability requirements"
+        "- readability_contract must include player/enemy/projectile readability requirements\n"
+        "- readability_contract must explicitly support SharedGenerationContract.visual contrast/diversity/edge/motion targets."
     )
 
 
-def build_gdd_prompt(keyword: str) -> str:
+def build_gdd_prompt(keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str:
     return (
         "You are a principal game designer for high-quality browser games. "
         "Return JSON only.\n"
         "Create a compact but production-usable GDD for an AI-generated browser game.\n"
         f"Keyword: {keyword}\n"
+        f"{_shared_contract_section(shared_contract)}"
         "Constraints:\n"
         "- genre should be a concise free-form tag that matches gameplay fantasy (e.g., formula-racing-3d, arena-shooter)\n"
         "- objective must define an actionable session target; allowed range is 120~1200 seconds when fantasy requires depth\n"
@@ -88,13 +103,20 @@ def build_gdd_prompt(keyword: str) -> str:
     )
 
 
-def build_design_prompt(*, keyword: str, visual_style: str, genre: str) -> str:
+def build_design_prompt(
+    *,
+    keyword: str,
+    visual_style: str,
+    genre: str,
+    shared_contract: dict[str, Any] | None = None,
+) -> str:
     return (
         "You are a senior game UI/UX and visual direction stylist for web games. "
         "Return JSON only.\n"
         f"Keyword: {keyword}\n"
         f"Genre: {genre}\n"
         f"Requested visual style: {visual_style}\n"
+        f"{_shared_contract_section(shared_contract)}"
         "Output fields exactly: visual_style, palette (list of hex colors), hud, viewport_width, "
         "viewport_height, safe_area_padding, min_font_size_px, text_overflow_policy, typography, thumbnail_concept.\n"
         "Constraints:\n"
@@ -109,6 +131,7 @@ def build_design_prompt(*, keyword: str, visual_style: str, genre: str) -> str:
         "- HUD must communicate score + timer/HP/round at a glance\n"
         "- Visual style should match keyword fantasy, not generic dark UI only\n"
         "- Thumbnail concept should describe a dynamic action moment with clear focal point\n"
+        "- Palette/composition must anticipate SharedGenerationContract.visual numeric thresholds.\n"
     )
 
 
@@ -225,12 +248,14 @@ def build_codegen_prompt(
     asset_pack: dict[str, Any],
     intent_contract: dict[str, Any] | None,
     synapse_contract: dict[str, Any] | None,
+    shared_generation_contract: dict[str, Any] | None,
     html_content: str,
 ) -> str:
     design_spec_json = json.dumps(design_spec, ensure_ascii=False)
     asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
     intent_contract_json = json.dumps(intent_contract or {}, ensure_ascii=False)
     synapse_contract_json = json.dumps(synapse_contract or {}, ensure_ascii=False)
+    shared_generation_contract_json = json.dumps(shared_generation_contract or {}, ensure_ascii=False)
     lowered_engine_mode = str(runtime_engine_mode).strip().casefold()
     runtime_stack = "phaser.js" if lowered_engine_mode == "2d_phaser" else "three.js"
     visual_contract = resolve_visual_contract_profile(
@@ -250,6 +275,10 @@ def build_codegen_prompt(
         f"{synapse_contract_json}\n"
         "- Keep analyze/plan/design/build contracts aligned without contradiction.\n"
         "- required_mechanics/progression/visual signals are mandatory implementation targets.\n\n"
+        "=== Shared Generation Contract ===\n"
+        f"{shared_generation_contract_json}\n"
+        "- Treat checklist fields as mandatory output checks before QA.\n"
+        "- Maintain exact runtime + visual numeric targets across all stages.\n\n"
         "=== Runtime Contract ===\n"
         f"- Runtime stack is fixed: {runtime_stack}. Do not switch frameworks.\n"
         "- Keep `window.IISLeaderboard` and `window.__iis_game_boot_ok`.\n"
@@ -262,6 +291,10 @@ def build_codegen_prompt(
         "- Keep explicit fail/restart loop and avoid unavoidable death in first 3 seconds.\n"
         "- Keep analog/time-based movement; avoid one-step quantized controls.\n"
         "- Keep HUD concise and player-facing.\n\n"
+        "=== Mandatory Output Checklist ===\n"
+        "- Must satisfy: boot_flag, leaderboard_contract, realtime_loop, input_reaction, state_transition, restart_loop.\n"
+        "- Must satisfy: visual_contrast, visual_diversity, visual_edge, visual_motion.\n"
+        "- If any checklist item cannot be met, rewrite implementation before final output.\n\n"
         "=== Visual Contract ===\n"
         f"{visual_contract_json}\n"
         "- Hit or exceed contrast/diversity/edge/motion minima from this contract.\n"

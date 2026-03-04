@@ -35,6 +35,11 @@ from app.schemas.payloads import (
     PlanContractPayload,
 )
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+from app.services.shared_generation_contract import (
+    compute_shared_generation_contract_hash,
+    merge_shared_generation_contract,
+    validate_shared_generation_contract,
+)
 
 __all__ = [
     "run",
@@ -255,6 +260,26 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     genre = gdd.genre
     settings = deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    shared_contract = state["outputs"].get("shared_generation_contract")
+    typed_shared_contract = shared_contract if isinstance(shared_contract, dict) else None
+    shared_contract_issues = validate_shared_generation_contract(typed_shared_contract)
+    if shared_contract_issues:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "shared_generation_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 공유 생성 계약이 유효하지 않습니다.",
+            reason=state["reason"],
+            metadata={
+                "shared_generation_contract_issues": shared_contract_issues,
+                "deliverables": ["shared_generation_contract_gate"],
+                "contract_status": "fail",
+                "strict_vertex_only": strict_vertex_only,
+            },
+        )
     try:
         analyze_contract = _require_contract_payload(state["outputs"].get("analyze_contract"), AnalyzeContractPayload)
         plan_contract = _require_contract_payload(state["outputs"].get("plan_contract"), PlanContractPayload)
@@ -460,6 +485,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     synapse_contract_hash = compute_synapse_contract_hash(synapse_contract)
     state["outputs"]["synapse_contract"] = synapse_contract
     state["outputs"]["synapse_contract_hash"] = synapse_contract_hash
+    shared_contract = merge_shared_generation_contract(
+        contract=typed_shared_contract,
+        keyword=state["keyword"],
+        title=title,
+        objective=gdd.objective,
+        player_verbs=intent_contract.player_verbs,
+        non_negotiables=intent_contract.non_negotiables,
+        runtime_engine_mode=runtime_engine_mode,
+        visual_profile_hint=core_loop_type,
+    )
+    shared_contract_hash = compute_shared_generation_contract_hash(shared_contract)
+    state["outputs"]["shared_generation_contract"] = shared_contract
+    state["outputs"]["shared_generation_contract_hash"] = shared_contract_hash
     unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
     if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
         state["status"] = PipelineStatus.ERROR
@@ -516,6 +554,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "generated_genre_directive_applied": bool(generated_genre_directive),
             "intent_contract_hash": intent_contract_hash,
             "synapse_contract_hash": synapse_contract_hash,
+            "shared_generation_contract_hash": shared_contract_hash,
             "asset_memory_hint_applied": bool(asset_memory_context.hint),
             "asset_memory_profile": asset_memory_context.retrieval_profile,
             "asset_memory_snapshot": asset_memory_context.registry_snapshot,
@@ -589,6 +628,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         generated_genre_directive=generated_genre_directive,
         intent_contract=intent_contract.model_dump(),
         synapse_contract=synapse_contract,
+        shared_generation_contract=shared_contract,
     )
     if bool(production_result.metadata.get("vertex_resource_exhausted_retryable", False)):
         state["status"] = PipelineStatus.RETRY
@@ -768,6 +808,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                     "max_output_tokens",
                     "prompt_contract_version",
                     "usage",
+                    "runtime_compiler",
                 }
             },
             "deliverables": [

@@ -78,6 +78,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         "fatal_errors": smoke_result.fatal_errors or [],
         "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
         "visual_metrics": smoke_result.visual_metrics or {},
+        "runtime_probe_summary": smoke_result.runtime_probe_summary or {},
     }
 
     if not smoke_result.ok:
@@ -123,6 +124,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "console_errors": smoke_result.console_errors or [],
                 "fatal_errors": fatal_errors,
                 "non_fatal_warnings": non_fatal_warnings,
+                "runtime_probe_summary": smoke_result.runtime_probe_summary or {},
                 "deliverables": ["runtime_smoke_probe", "qa_gate_block_report"],
                 "contract_status": "fail",
                 "contribution_score": 1.6,
@@ -157,6 +159,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "fatal_errors": smoke_result.fatal_errors or [],
             "non_fatal_warnings": smoke_result.non_fatal_warnings or [],
             "visual_metrics": smoke_result.visual_metrics or {},
+            "runtime_probe_summary": smoke_result.runtime_probe_summary or {},
             "deliverables": ["runtime_smoke_probe", "screenshot_capture"],
             "contract_status": "pass",
             "contribution_score": 4.1,

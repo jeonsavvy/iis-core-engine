@@ -42,16 +42,24 @@ class VertexStructuredGenerationClient(Protocol):
 
     def _invoke_with_retry(self, runnable: Any, prompt: str) -> Any: ...
 
-    def _gdd_prompt(self, keyword: str) -> str: ...
+    def _gdd_prompt(self, keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str: ...
 
-    def _design_prompt(self, *, keyword: str, visual_style: str, genre: str) -> str: ...
-    def _analyze_contract_prompt(self, keyword: str) -> str: ...
+    def _design_prompt(
+        self,
+        *,
+        keyword: str,
+        visual_style: str,
+        genre: str,
+        shared_contract: dict[str, Any] | None = None,
+    ) -> str: ...
+    def _analyze_contract_prompt(self, keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str: ...
     def _plan_contract_prompt(
         self,
         *,
         keyword: str,
         gdd: dict[str, Any],
         research_summary: dict[str, Any] | None,
+        shared_contract: dict[str, Any] | None = None,
     ) -> str: ...
     def _design_contract_prompt(
         self,
@@ -60,6 +68,7 @@ class VertexStructuredGenerationClient(Protocol):
         genre: str,
         visual_style: str,
         design_spec: dict[str, Any],
+        shared_contract: dict[str, Any] | None = None,
     ) -> str: ...
 
     def _builder_prompt(
@@ -98,14 +107,19 @@ class VertexStructuredGenerationClient(Protocol):
     def _model_to_dict(self, model: Any) -> dict[str, Any]: ...
 
 
-def generate_gdd_bundle(service: VertexStructuredGenerationClient, keyword: str) -> VertexGenerationResult:
+def generate_gdd_bundle(
+    service: VertexStructuredGenerationClient,
+    keyword: str,
+    *,
+    shared_contract: dict[str, Any] | None = None,
+) -> VertexGenerationResult:
     fallback = service._fallback_gdd_bundle(keyword, reason="vertex_not_configured")
     if not service._is_enabled():
         return fallback
 
     started = time.perf_counter()
     try:
-        prompt = service._gdd_prompt(keyword)
+        prompt = service._gdd_prompt(keyword, shared_contract=shared_contract)
         usage: dict[str, Any] = {}
         if service._use_genai_sdk():
             raw, usage = service._genai_json(
@@ -162,6 +176,7 @@ def generate_analyze_contract(
     service: VertexStructuredGenerationClient,
     *,
     keyword: str,
+    shared_contract: dict[str, Any] | None = None,
 ) -> VertexGenerationResult:
     fallback = service._fallback_analyze_contract(keyword)
     if not service._is_enabled():
@@ -169,7 +184,7 @@ def generate_analyze_contract(
 
     started = time.perf_counter()
     try:
-        prompt = service._analyze_contract_prompt(keyword)
+        prompt = service._analyze_contract_prompt(keyword, shared_contract=shared_contract)
         usage: dict[str, Any] = {}
         if service._use_genai_sdk():
             raw, usage = service._genai_json(
@@ -212,6 +227,7 @@ def generate_plan_contract(
     keyword: str,
     gdd: dict[str, Any],
     research_summary: dict[str, Any] | None = None,
+    shared_contract: dict[str, Any] | None = None,
 ) -> VertexGenerationResult:
     fallback = service._fallback_plan_contract(keyword=keyword, gdd=gdd)
     if not service._is_enabled():
@@ -223,6 +239,7 @@ def generate_plan_contract(
             keyword=keyword,
             gdd=gdd,
             research_summary=research_summary,
+            shared_contract=shared_contract,
         )
         usage: dict[str, Any] = {}
         if service._use_genai_sdk():
@@ -271,6 +288,7 @@ def generate_design_contract(
     genre: str,
     visual_style: str,
     design_spec: dict[str, Any],
+    shared_contract: dict[str, Any] | None = None,
 ) -> VertexGenerationResult:
     fallback = service._fallback_design_contract(keyword=keyword, genre=genre, visual_style=visual_style)
     if not service._is_enabled():
@@ -283,6 +301,7 @@ def generate_design_contract(
             genre=genre,
             visual_style=visual_style,
             design_spec=design_spec,
+            shared_contract=shared_contract,
         )
         usage: dict[str, Any] = {}
         if service._use_genai_sdk():
@@ -329,6 +348,7 @@ def generate_design_spec(
     keyword: str,
     visual_style: str,
     genre: str,
+    shared_contract: dict[str, Any] | None = None,
 ) -> VertexGenerationResult:
     fallback = service._fallback_design_spec(visual_style=visual_style)
     if not service._is_enabled():
@@ -336,7 +356,12 @@ def generate_design_spec(
 
     started = time.perf_counter()
     try:
-        prompt = service._design_prompt(keyword=keyword, visual_style=visual_style, genre=genre)
+        prompt = service._design_prompt(
+            keyword=keyword,
+            visual_style=visual_style,
+            genre=genre,
+            shared_contract=shared_contract,
+        )
         usage: dict[str, Any] = {}
         if service._use_genai_sdk():
             raw, usage = service._genai_json(

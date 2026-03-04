@@ -166,6 +166,8 @@ def test_trigger_architect_stylist_populate_contract_outputs() -> None:
     assert isinstance(outputs.get("analyze_contract"), dict)
     assert isinstance(outputs.get("plan_contract"), dict)
     assert isinstance(outputs.get("design_contract"), dict)
+    assert isinstance(outputs.get("shared_generation_contract"), dict)
+    assert isinstance(outputs.get("shared_generation_contract_hash"), str)
     assert any(log.stage.value == "analyze" for log in state["logs"])
     assert any(log.stage.value == "plan" for log in state["logs"])
     assert any(log.stage.value == "design" for log in state["logs"])

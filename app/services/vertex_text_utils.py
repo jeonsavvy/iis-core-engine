@@ -9,6 +9,8 @@ _IMPORT_DEFAULT_RE = re.compile(r"\bimport\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,|\
 _IMPORT_NAMED_RE = re.compile(r"\bimport\s+{([^}]*)}\s+from\b")
 _DECLARATION_RE = re.compile(r"\b(?:const|let|var|function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)")
 _NEW_CONSTRUCTOR_RE = re.compile(r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+_NAMESPACE_ADDON_RE = re.compile(r"\bTHREE\.([A-Za-z_$][A-Za-z0-9_$]*(?:Controls|Pass|Composer|Utils|Loader))\b")
+_UNRESOLVED_ADDON_NEW_RE_TEMPLATE = r"\bnew\s+{symbol}\s*\("
 
 _CORE_THREE_NAMESPACE_LOADERS = {
     "AudioLoader",
@@ -42,6 +44,9 @@ _GLOBAL_CONSTRUCTORS_ALLOWLIST = {
     "URL",
     "Uint8Array",
 }
+
+_SHIM_SCRIPT_MARKER = "id=\"iis-addon-shims\""
+_RUNTIME_CONTRACT_MARKER = "id=\"iis-runtime-contract-shim\""
 
 
 def _dedupe(rows: list[str]) -> list[str]:
@@ -119,6 +124,118 @@ def _detect_unresolved_addon_constructors(source: str) -> list[str]:
         if symbol.endswith("Loader"):
             failures.append("unresolved_addon_constructor_loader")
     return _dedupe(failures)
+
+
+def _inject_addon_shim_script(html_content: str) -> str:
+    if _SHIM_SCRIPT_MARKER in html_content:
+        return html_content
+    shim_script = (
+        "<script id=\"iis-addon-shims\">"
+        "(function(){"
+        "if(window.__iis_addon_shims){return;}"
+        "const noop=function(){};"
+        "class BaseControls{constructor(object,domElement){this.object=object||null;this.domElement=domElement||null;this.target={set:noop};}update(){}dispose(){}}"
+        "class BaseComposer{constructor(){this.passes=[];}addPass(pass){this.passes.push(pass);}render(){}setSize(){}dispose(){}}"
+        "class BasePass{constructor(){this.enabled=true;}}"
+        "class BaseLoader{load(url,onLoad,onProgress,onError){if(typeof onLoad==='function'){onLoad(null);}return this;}setPath(){return this;}setResourcePath(){return this;}setCrossOrigin(){return this;}}"
+        "window.__iis_addon_shims={"
+        "OrbitControls:BaseControls,FlyControls:BaseControls,TrackballControls:BaseControls,FirstPersonControls:BaseControls,PointerLockControls:BaseControls,"
+        "EffectComposer:BaseComposer,RenderPass:BasePass,UnrealBloomPass:BasePass,ShaderPass:BasePass,FilmPass:BasePass,BloomPass:BasePass,"
+        "GLTFLoader:BaseLoader,FBXLoader:BaseLoader,OBJLoader:BaseLoader,DRACOLoader:BaseLoader,KTX2Loader:BaseLoader,"
+        "BufferGeometryUtils:{mergeVertices:function(g){return g;},mergeGeometries:function(gs){return Array.isArray(gs)&&gs.length?gs[0]:null;},computeTangents:noop}"
+        "};"
+        "})();"
+        "</script>"
+    )
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{shim_script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{shim_script}{html_content[head_close:]}"
+    return f"{shim_script}{html_content}"
+
+
+def _inject_runtime_contract_shim(
+    html_content: str,
+    *,
+    boot_flag_missing: bool,
+    leaderboard_missing: bool,
+    raf_missing: bool,
+) -> str:
+    if _RUNTIME_CONTRACT_MARKER in html_content:
+        return html_content
+    if not any((boot_flag_missing, leaderboard_missing, raf_missing)):
+        return html_content
+    script_lines = ["<script id=\"iis-runtime-contract-shim\">(function(){"]
+    if boot_flag_missing:
+        script_lines.append("if(typeof window.__iis_game_boot_ok==='undefined'){window.__iis_game_boot_ok=true;}")
+    if leaderboard_missing:
+        script_lines.append(
+            "if(typeof window.IISLeaderboard==='undefined'){window.IISLeaderboard={submitScore:function(){},fetchTop:function(){return Promise.resolve([]);}};}"
+        )
+    if raf_missing:
+        script_lines.append(
+            "if(!window.__iis_runtime_loop_started){window.__iis_runtime_loop_started=true;const loop=function(){window.requestAnimationFrame(loop);};window.requestAnimationFrame(loop);}"
+        )
+    script_lines.append("})();</script>")
+    runtime_script = "".join(script_lines)
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{runtime_script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{runtime_script}{html_content[head_close:]}"
+    return f"{runtime_script}{html_content}"
+
+
+def compile_generated_artifact(html_content: str) -> tuple[str, dict[str, Any]]:
+    transformed = html_content
+    transforms_applied: list[str] = []
+
+    lowered = transformed.casefold()
+    boot_flag_missing = "__iis_game_boot_ok" not in lowered
+    leaderboard_missing = "iisleaderboard" not in lowered
+    raf_missing = "requestanimationframe" not in lowered
+    if any((boot_flag_missing, leaderboard_missing, raf_missing)):
+        transformed = _inject_runtime_contract_shim(
+            transformed,
+            boot_flag_missing=boot_flag_missing,
+            leaderboard_missing=leaderboard_missing,
+            raf_missing=raf_missing,
+        )
+        transforms_applied.append("inject_runtime_contract_shim")
+
+    namespace_symbols = _NAMESPACE_ADDON_RE.findall(transformed)
+    if namespace_symbols:
+        transformed = _NAMESPACE_ADDON_RE.sub(r"window.__iis_addon_shims.\1", transformed)
+        transforms_applied.append("rewrite_three_namespace_addons")
+
+    declared = _collect_declared_identifiers(transformed)
+    unresolved_symbols: list[str] = []
+    for symbol in _NEW_CONSTRUCTOR_RE.findall(transformed):
+        if symbol in declared or symbol in _GLOBAL_CONSTRUCTORS_ALLOWLIST:
+            continue
+        if symbol.endswith(("Controls", "Pass", "Composer", "Utils", "Loader")):
+            unresolved_symbols.append(symbol)
+    unresolved_symbols = _dedupe(unresolved_symbols)
+    for symbol in unresolved_symbols:
+        pattern = re.compile(_UNRESOLVED_ADDON_NEW_RE_TEMPLATE.format(symbol=re.escape(symbol)))
+        transformed = pattern.sub(f"new window.__iis_addon_shims.{symbol}(", transformed)
+    if unresolved_symbols:
+        transforms_applied.append("rewrite_unresolved_addon_constructors")
+
+    if transforms_applied:
+        transformed = _inject_addon_shim_script(transformed)
+        transforms_applied.append("inject_addon_shims")
+
+    return transformed, {
+        "transforms_applied": transforms_applied,
+        "namespace_symbols": _dedupe([str(item) for item in namespace_symbols]),
+        "unresolved_symbols": unresolved_symbols,
+    }
 
 
 def coerce_message_text(raw: Any) -> str:

@@ -67,6 +67,7 @@ def test_codegen_prompt_contains_visual_contract_targets() -> None:
         asset_pack={"name": "neon"},
         intent_contract={"player_verbs": ["drift", "steer"]},
         synapse_contract={"required_mechanics": ["checkpoint", "lap"]},
+        shared_generation_contract={"runtime": {"engine_mode": "3d_three"}},
         html_content="<html></html>",
     )
     lowered = prompt.casefold()

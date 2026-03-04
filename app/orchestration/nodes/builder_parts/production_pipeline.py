@@ -14,6 +14,7 @@ from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload, IntentContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
+from app.services.shared_generation_contract import compute_shared_generation_contract_hash
 from app.services.visual_contract import resolve_visual_contract_profile
 
 
@@ -206,6 +207,98 @@ def _runtime_warning_penalty(warnings: list[str] | None) -> float:
         code = str(token).strip().casefold()
         score += penalties.get(code, 0.0)
     return round(min(28.0, score), 2)
+
+
+def _metric_value(metrics: dict[str, object], key: str) -> float:
+    value = metrics.get(key)
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def _evaluate_generation_checklist(
+    *,
+    assessment: _ArtifactAssessment,
+    visual_contract: dict[str, Any],
+    shared_generation_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    quality_checks = assessment.quality.checks if isinstance(assessment.quality.checks, dict) else {}
+    gameplay_checks = assessment.gameplay.checks if isinstance(assessment.gameplay.checks, dict) else {}
+    visual_metrics = assessment.smoke.visual_metrics if isinstance(assessment.smoke.visual_metrics, dict) else {}
+    runtime_probe = assessment.smoke.runtime_probe_summary if isinstance(assessment.smoke.runtime_probe_summary, dict) else {}
+    runtime_warnings = {
+        str(code).strip().casefold()
+        for code in (assessment.smoke.non_fatal_warnings or [])
+        if str(code).strip()
+    }
+    has_visual_metrics = bool(visual_metrics)
+    visual_contrast_ok = (
+        _metric_value(visual_metrics, "luminance_std") >= float(visual_contract.get("contrast_min", 0.0) or 0.0)
+        if has_visual_metrics
+        else bool(assessment.visual.ok)
+    )
+    visual_diversity_ok = (
+        _metric_value(visual_metrics, "color_bucket_count") >= float(visual_contract.get("color_diversity_min", 0.0) or 0.0)
+        if has_visual_metrics
+        else bool(assessment.visual.ok)
+    )
+    visual_edge_ok = (
+        _metric_value(visual_metrics, "edge_energy") >= float(visual_contract.get("edge_energy_min", 0.0) or 0.0)
+        if has_visual_metrics
+        else bool(assessment.visual.ok)
+    )
+    visual_motion_ok = (
+        _metric_value(visual_metrics, "motion_delta") >= float(visual_contract.get("motion_delta_min", 0.0) or 0.0)
+        if has_visual_metrics
+        else bool(assessment.visual.ok)
+    )
+
+    required_map: dict[str, bool]
+    if isinstance(shared_generation_contract, dict):
+        raw_required_map = shared_generation_contract.get("checklist")
+        if isinstance(raw_required_map, dict):
+            required_map = {str(key): bool(value) for key, value in raw_required_map.items()}
+        else:
+            required_map = {}
+    else:
+        required_map = {}
+    input_reaction_ok = (
+        bool(runtime_probe.get("input_reaction_ok", False))
+        and "input_reaction_missing" not in runtime_warnings
+        and "input_probe_keypress_failed" not in runtime_warnings
+    )
+    if not runtime_probe:
+        input_reaction_ok = True
+
+    checks: dict[str, bool] = {
+        "boot_flag": bool(quality_checks.get("boot_flag", True)),
+        "leaderboard_contract": bool(quality_checks.get("leaderboard_contract", True)),
+        "realtime_loop": bool(quality_checks.get("game_loop_raf", True)),
+        "input_reaction": input_reaction_ok,
+        "state_transition": bool(quality_checks.get("game_state_logic", True))
+        and "timer_not_progressing" not in runtime_warnings
+        and "timer_static_with_overlay" not in runtime_warnings,
+        "restart_loop": bool(gameplay_checks.get("restart_loop", True)),
+        "visual_contrast": visual_contrast_ok,
+        "visual_diversity": visual_diversity_ok,
+        "visual_edge": visual_edge_ok,
+        "visual_motion": visual_motion_ok,
+    }
+
+    failed_required: list[str] = []
+    for key, passed in checks.items():
+        required = bool(required_map.get(key, True))
+        if required and not passed:
+            failed_required.append(key)
+
+    return {
+        "checks": checks,
+        "required": {key: bool(required_map.get(key, True)) for key in checks.keys()},
+        "failed_required_checks": failed_required,
+        "ok": len(failed_required) == 0,
+    }
 
 
 def _is_vertex_resource_exhausted(*values: str) -> bool:
@@ -422,6 +515,7 @@ def _build_scaffold_first_production_artifact(
     generated_genre_directive: str = "",
     intent_contract: dict[str, Any] | None = None,
     synapse_contract: dict[str, Any] | None = None,
+    shared_generation_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     design_spec_dump = design_spec.model_dump()
     rebuild_feedback_hint = ""
@@ -459,10 +553,11 @@ def _build_scaffold_first_production_artifact(
     intent_contract_hash = compute_intent_contract_hash_from_map(intent_contract)
     synapse_prompt = _build_synapse_prompt_fragment(synapse_contract)
     synapse_contract_hash = compute_synapse_contract_hash(synapse_contract)
+    shared_generation_contract_hash = compute_shared_generation_contract_hash(shared_generation_contract)
     effective_variation_hint = (
-        f"single_pass_generation | {combined_feedback_hint}\n{intent_prompt}\n{synapse_prompt}"
+        f"single_pass_generation | {combined_feedback_hint}\n{intent_prompt}\n{synapse_prompt}\nShared contract hash: {shared_generation_contract_hash}"
         if combined_feedback_hint
-        else f"single_pass_generation\n{intent_prompt}\n{synapse_prompt}"
+        else f"single_pass_generation\n{intent_prompt}\n{synapse_prompt}\nShared contract hash: {shared_generation_contract_hash}"
     )
 
     append_log(
@@ -487,6 +582,7 @@ def _build_scaffold_first_production_artifact(
             "qa_mode": "verify_only",
             "intent_contract_hash": intent_contract_hash,
             "synapse_contract_hash": synapse_contract_hash,
+            "shared_generation_contract_hash": shared_generation_contract_hash,
         },
     )
 
@@ -503,6 +599,7 @@ def _build_scaffold_first_production_artifact(
         html_content=scaffold_html,
         intent_contract=intent_contract if isinstance(intent_contract, dict) else {},
         synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else {},
+        shared_generation_contract=shared_generation_contract if isinstance(shared_generation_contract, dict) else {},
     )
     generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
     generation_source = str(codegen_result.meta.get("generation_source", "stub")).strip().lower()
@@ -564,6 +661,11 @@ def _build_scaffold_first_production_artifact(
         runtime_engine_mode=runtime_engine_mode,
         keyword=state["keyword"],
     ).as_dict()
+    generation_checklist_report = _evaluate_generation_checklist(
+        assessment=final_assessment,
+        visual_contract=visual_contract,
+        shared_generation_contract=shared_generation_contract if isinstance(shared_generation_contract, dict) else None,
+    )
 
     quality_floor_score = _coerce_int(
         getattr(deps.vertex_service.settings, "builder_quality_floor_score", 82),
@@ -610,6 +712,15 @@ def _build_scaffold_first_production_artifact(
             quality_floor_fail_reasons.append("placeholder_visual_detected")
         if final_assessment.runtime_warning_codes:
             quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
+        if not bool(generation_checklist_report.get("ok", False)):
+            quality_floor_fail_reasons.append("generation_checklist_unmet")
+            failed_required_checks = generation_checklist_report.get("failed_required_checks")
+            if isinstance(failed_required_checks, list):
+                quality_floor_fail_reasons.extend(
+                    f"checklist:{str(item).strip()}"
+                    for item in failed_required_checks[:10]
+                    if str(item).strip()
+                )
     quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
     vertex_resource_exhausted_retryable = (not codegen_available) and _is_vertex_resource_exhausted(
@@ -692,6 +803,7 @@ def _build_scaffold_first_production_artifact(
         "intent": final_assessment.intent_gate_report,
         "visual_metrics": final_assessment.smoke.visual_metrics or {},
         "visual_contract": visual_contract,
+        "generation_checklist_report": generation_checklist_report,
     }
 
     selected_generation_meta = dict(codegen_result.meta or {})
@@ -740,6 +852,7 @@ def _build_scaffold_first_production_artifact(
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
         "visual_contract": visual_contract,
         "visual_metrics": final_assessment.smoke.visual_metrics or {},
+        "generation_checklist_report": generation_checklist_report,
         "vertex_resource_exhausted_retryable": vertex_resource_exhausted_retryable,
         "quality_gate_report": quality_gate_report,
         "intent_gate_report": final_assessment.intent_gate_report,
@@ -754,6 +867,8 @@ def _build_scaffold_first_production_artifact(
         "intent_contract_hash": intent_contract_hash,
         "synapse_contract": synapse_contract if isinstance(synapse_contract, dict) else {},
         "synapse_contract_hash": synapse_contract_hash,
+        "shared_generation_contract": shared_generation_contract if isinstance(shared_generation_contract, dict) else {},
+        "shared_generation_contract_hash": shared_generation_contract_hash,
         "strict_vertex_only": strict_vertex_only,
         "allow_stub_fallback": allow_stub_fallback,
         "fallback_blocked": not allow_stub_fallback,
@@ -816,6 +931,7 @@ def build_production_artifact(
     generated_genre_directive: str = "",
     intent_contract: dict[str, Any] | None = None,
     synapse_contract: dict[str, Any] | None = None,
+    shared_generation_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     core_loop_type = _normalize_core_loop_type(core_loop_type)
     normalized_runtime_engine_mode = str(runtime_engine_mode or "").strip() or "3d_three"
@@ -839,4 +955,5 @@ def build_production_artifact(
         generated_genre_directive=generated_genre_directive,
         intent_contract=intent_contract,
         synapse_contract=synapse_contract,
+        shared_generation_contract=shared_generation_contract,
     )

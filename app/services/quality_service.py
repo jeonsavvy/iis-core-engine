@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, cast
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
@@ -95,6 +95,7 @@ class QualityService:
         non_fatal_warnings: list[str] = []
         screenshot_bytes = None
         visual_metrics: dict[str, object] | None = None
+        runtime_probe_summary: dict[str, object] | None = None
 
         try:
             with TemporaryDirectory(prefix="iis-smoke-") as tmp_dir:
@@ -157,9 +158,17 @@ class QualityService:
                     page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
                     page.wait_for_timeout(250)
                     probe_before = capture_runtime_probe(page)
-                    try:
-                        page.keyboard.press("ArrowUp")
-                    except Exception:
+                    input_sequence = ["ArrowUp", "ArrowLeft", "ArrowRight", "Space", "KeyR"]
+                    executed_inputs: list[str] = []
+                    input_failures: list[str] = []
+                    for key in input_sequence:
+                        try:
+                            page.keyboard.press(key)
+                            executed_inputs.append(key)
+                        except Exception:
+                            input_failures.append(key)
+                        page.wait_for_timeout(180)
+                    if input_failures:
                         non_fatal_warnings.append("input_probe_keypress_failed")
                     page.wait_for_timeout(1200)
                     probe_mid = capture_runtime_probe(page)
@@ -175,6 +184,32 @@ class QualityService:
                     )
                     fatal_errors.extend(runtime_fatal_late)
                     non_fatal_warnings.extend(runtime_warnings_late)
+                    timer_before = str((probe_before or {}).get("timer_text", "")).strip()
+                    timer_after = str((probe_after or {}).get("timer_text", "")).strip()
+                    score_before = str((probe_before or {}).get("score_text", "")).strip()
+                    score_after = str((probe_after or {}).get("score_text", "")).strip()
+                    hp_before = str((probe_before or {}).get("hp_text", "")).strip()
+                    hp_after = str((probe_after or {}).get("hp_text", "")).strip()
+                    overlay_before = bool((probe_before or {}).get("overlay_visible", False))
+                    overlay_after = bool((probe_after or {}).get("overlay_visible", False))
+                    input_reaction_ok = any(
+                        (
+                            timer_before != timer_after,
+                            score_before != score_after,
+                            hp_before != hp_after,
+                            overlay_before != overlay_after,
+                        )
+                    )
+                    if not input_reaction_ok:
+                        non_fatal_warnings.append("input_reaction_missing")
+                    runtime_probe_summary = {
+                        "probe_before": probe_before or {},
+                        "probe_mid": probe_mid or {},
+                        "probe_after": probe_after or {},
+                        "executed_inputs": executed_inputs,
+                        "input_failures": input_failures,
+                        "input_reaction_ok": input_reaction_ok,
+                    }
 
                     try:
                         canvas = page.locator("canvas")
@@ -210,6 +245,7 @@ class QualityService:
                 non_fatal_warnings=non_fatal_warnings,
                 screenshot_bytes=screenshot_bytes,
                 visual_metrics=visual_metrics,
+                runtime_probe_summary=runtime_probe_summary,
             )
 
         return SmokeCheckResult(
@@ -219,6 +255,7 @@ class QualityService:
             non_fatal_warnings=non_fatal_warnings or None,
             screenshot_bytes=screenshot_bytes,
             visual_metrics=visual_metrics,
+            runtime_probe_summary=runtime_probe_summary,
         )
 
     def evaluate_quality_contract(
@@ -233,16 +270,19 @@ class QualityService:
         intent_contract: dict[str, Any] | None = None,
         synapse_contract: dict[str, Any] | None = None,
     ) -> QualityGateResult:
-        return evaluate_quality_contract_gate(
-            self.settings,
-            html_content,
-            design_spec=design_spec,
-            genre=genre,
-            genre_engine=genre_engine,
-            runtime_engine_mode=runtime_engine_mode,
-            keyword=keyword,
-            intent_contract=intent_contract,
-            synapse_contract=synapse_contract,
+        return cast(
+            QualityGateResult,
+            evaluate_quality_contract_gate(
+                self.settings,
+                html_content,
+                design_spec=design_spec,
+                genre=genre,
+                genre_engine=genre_engine,
+                runtime_engine_mode=runtime_engine_mode,
+                keyword=keyword,
+                intent_contract=intent_contract,
+                synapse_contract=synapse_contract,
+            ),
         )
 
     def evaluate_gameplay_gate(
@@ -256,15 +296,18 @@ class QualityService:
         intent_contract: dict[str, Any] | None = None,
         synapse_contract: dict[str, Any] | None = None,
     ) -> GameplayGateResult:
-        return evaluate_gameplay_gate_gate(
-            self.settings,
-            html_content,
-            design_spec=design_spec,
-            genre=genre,
-            genre_engine=genre_engine,
-            keyword=keyword,
-            intent_contract=intent_contract,
-            synapse_contract=synapse_contract,
+        return cast(
+            GameplayGateResult,
+            evaluate_gameplay_gate_gate(
+                self.settings,
+                html_content,
+                design_spec=design_spec,
+                genre=genre,
+                genre_engine=genre_engine,
+                keyword=keyword,
+                intent_contract=intent_contract,
+                synapse_contract=synapse_contract,
+            ),
         )
 
     def evaluate_visual_gate(
@@ -274,11 +317,14 @@ class QualityService:
         genre_engine: str | None = None,
         runtime_engine_mode: str | None = None,
     ) -> QualityGateResult:
-        return evaluate_visual_gate_gate(
-            self.settings,
-            visual_metrics,
-            genre_engine=genre_engine,
-            runtime_engine_mode=runtime_engine_mode,
+        return cast(
+            QualityGateResult,
+            evaluate_visual_gate_gate(
+                self.settings,
+                visual_metrics,
+                genre_engine=genre_engine,
+                runtime_engine_mode=runtime_engine_mode,
+            ),
         )
 
     def evaluate_artifact_contract(
@@ -287,10 +333,13 @@ class QualityService:
         *,
         art_direction_contract: dict[str, Any] | None = None,
     ) -> ArtifactContractResult:
-        return evaluate_artifact_contract_gate(
-            self.settings,
-            artifact_manifest,
-            art_direction_contract=art_direction_contract,
+        return cast(
+            ArtifactContractResult,
+            evaluate_artifact_contract_gate(
+                self.settings,
+                artifact_manifest,
+                art_direction_contract=art_direction_contract,
+            ),
         )
 
     def evaluate_intent_gate(
@@ -299,7 +348,10 @@ class QualityService:
         *,
         intent_contract: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return evaluate_intent_gate_gate(
-            html_content,
-            intent_contract=intent_contract,
+        return cast(
+            dict[str, Any],
+            evaluate_intent_gate_gate(
+                html_content,
+                intent_contract=intent_contract,
+            ),
         )

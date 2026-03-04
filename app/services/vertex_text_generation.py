@@ -18,6 +18,7 @@ from app.services.vertex_prompts import (
     build_polish_prompt,
 )
 from app.services.vertex_text_utils import (
+    compile_generated_artifact,
     coerce_message_text,
     looks_like_playable_artifact,
     playable_artifact_missing_requirements,
@@ -265,6 +266,7 @@ def generate_codegen_candidate_artifact(
     asset_pack: dict[str, Any],
     intent_contract: dict[str, Any] | None,
     synapse_contract: dict[str, Any] | None,
+    shared_generation_contract: dict[str, Any] | None,
     html_content: str,
 ) -> VertexGenerationResult:
     if not service.settings.builder_codegen_enabled:
@@ -290,6 +292,7 @@ def generate_codegen_candidate_artifact(
         asset_pack=asset_pack,
         intent_contract=intent_contract,
         synapse_contract=synapse_contract,
+        shared_generation_contract=shared_generation_contract,
         html_content=html_content,
     )
     started = time.perf_counter()
@@ -311,14 +314,15 @@ def generate_codegen_candidate_artifact(
             generated_html = strip_code_fences(coerce_message_text(result.content))
 
         normalized = generated_html.strip()
-        if not looks_like_playable_artifact(normalized):
-            missing_requirements = playable_artifact_missing_requirements(normalized)
+        compiled_artifact, compile_meta = compile_generated_artifact(normalized)
+        if not looks_like_playable_artifact(compiled_artifact):
+            missing_requirements = playable_artifact_missing_requirements(compiled_artifact)
             detail = ",".join(missing_requirements[:8]) if missing_requirements else "unknown"
             raise ValueError(f"invalid_codegen_artifact:{detail}")
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         return VertexGenerationResult(
-            payload={"artifact_html": normalized},
+            payload={"artifact_html": compiled_artifact},
             meta={
                 "generation_source": "vertex",
                 "model": builder_model,
@@ -326,7 +330,8 @@ def generate_codegen_candidate_artifact(
                 "usage": usage,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "synapse_visual_v2",
+                "prompt_contract_version": "synapse_visual_v3",
+                "runtime_compiler": compile_meta,
             },
         )
     except Exception as exc:
@@ -347,7 +352,7 @@ def generate_codegen_candidate_artifact(
                 "validation_failures": validation_failures,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "synapse_visual_v2",
+                "prompt_contract_version": "synapse_visual_v3",
             },
         )
 

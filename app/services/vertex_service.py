@@ -75,11 +75,16 @@ class VertexService:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = configured
         return resolved
 
-    def generate_gdd_bundle(self, keyword: str) -> VertexGenerationResult:
-        return generate_gdd_bundle_bundle(self, keyword)
+    def generate_gdd_bundle(self, keyword: str, *, shared_contract: dict[str, Any] | None = None) -> VertexGenerationResult:
+        return generate_gdd_bundle_bundle(self, keyword, shared_contract=shared_contract)
 
-    def generate_analyze_contract(self, *, keyword: str) -> VertexGenerationResult:
-        return generate_analyze_contract_bundle(self, keyword=keyword)
+    def generate_analyze_contract(
+        self,
+        *,
+        keyword: str,
+        shared_contract: dict[str, Any] | None = None,
+    ) -> VertexGenerationResult:
+        return generate_analyze_contract_bundle(self, keyword=keyword, shared_contract=shared_contract)
 
     def generate_plan_contract(
         self,
@@ -87,12 +92,14 @@ class VertexService:
         keyword: str,
         gdd: dict[str, Any],
         research_summary: dict[str, Any] | None = None,
+        shared_contract: dict[str, Any] | None = None,
     ) -> VertexGenerationResult:
         return generate_plan_contract_bundle(
             self,
             keyword=keyword,
             gdd=gdd,
             research_summary=research_summary,
+            shared_contract=shared_contract,
         )
 
     def generate_design_contract(
@@ -102,6 +109,7 @@ class VertexService:
         genre: str,
         visual_style: str,
         design_spec: dict[str, Any],
+        shared_contract: dict[str, Any] | None = None,
     ) -> VertexGenerationResult:
         return generate_design_contract_bundle(
             self,
@@ -109,14 +117,23 @@ class VertexService:
             genre=genre,
             visual_style=visual_style,
             design_spec=design_spec,
+            shared_contract=shared_contract,
         )
 
-    def generate_design_spec(self, *, keyword: str, visual_style: str, genre: str) -> VertexGenerationResult:
+    def generate_design_spec(
+        self,
+        *,
+        keyword: str,
+        visual_style: str,
+        genre: str,
+        shared_contract: dict[str, Any] | None = None,
+    ) -> VertexGenerationResult:
         return generate_design_spec_bundle(
             self,
             keyword=keyword,
             visual_style=visual_style,
             genre=genre,
+            shared_contract=shared_contract,
         )
 
     def generate_game_config(
@@ -306,16 +323,27 @@ class VertexService:
         )
 
     @staticmethod
-    def _gdd_prompt(keyword: str) -> str:
-        return build_gdd_prompt(keyword)
+    def _gdd_prompt(keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str:
+        return build_gdd_prompt(keyword, shared_contract=shared_contract)
 
     @staticmethod
-    def _design_prompt(*, keyword: str, visual_style: str, genre: str) -> str:
-        return build_design_prompt(keyword=keyword, visual_style=visual_style, genre=genre)
+    def _design_prompt(
+        *,
+        keyword: str,
+        visual_style: str,
+        genre: str,
+        shared_contract: dict[str, Any] | None = None,
+    ) -> str:
+        return build_design_prompt(
+            keyword=keyword,
+            visual_style=visual_style,
+            genre=genre,
+            shared_contract=shared_contract,
+        )
 
     @staticmethod
-    def _analyze_contract_prompt(keyword: str) -> str:
-        return build_analyze_contract_prompt(keyword)
+    def _analyze_contract_prompt(keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str:
+        return build_analyze_contract_prompt(keyword, shared_contract=shared_contract)
 
     @staticmethod
     def _plan_contract_prompt(
@@ -323,11 +351,13 @@ class VertexService:
         keyword: str,
         gdd: dict[str, Any],
         research_summary: dict[str, Any] | None = None,
+        shared_contract: dict[str, Any] | None = None,
     ) -> str:
         return build_plan_contract_prompt(
             keyword=keyword,
             gdd=gdd,
             research_summary=research_summary,
+            shared_contract=shared_contract,
         )
 
     @staticmethod
@@ -337,12 +367,14 @@ class VertexService:
         genre: str,
         visual_style: str,
         design_spec: dict[str, Any],
+        shared_contract: dict[str, Any] | None = None,
     ) -> str:
         return build_design_contract_prompt(
             keyword=keyword,
             genre=genre,
             visual_style=visual_style,
             design_spec=design_spec,
+            shared_contract=shared_contract,
         )
 
     def generate_marketing_copy(
@@ -409,6 +441,7 @@ class VertexService:
         asset_pack: dict[str, Any],
         intent_contract: dict[str, Any] | None,
         synapse_contract: dict[str, Any] | None,
+        shared_generation_contract: dict[str, Any] | None,
         html_content: str,
     ) -> VertexGenerationResult:
         return generate_codegen_candidate_artifact_text(
@@ -424,6 +457,7 @@ class VertexService:
             asset_pack=asset_pack,
             intent_contract=intent_contract,
             synapse_contract=synapse_contract,
+            shared_generation_contract=shared_generation_contract,
             html_content=html_content,
         )
 

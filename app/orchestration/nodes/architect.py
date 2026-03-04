@@ -5,6 +5,11 @@ from app.orchestration.nodes.common import append_log, apply_operator_control_ga
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import GDDPayload, PlanContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+from app.services.shared_generation_contract import (
+    compute_shared_generation_contract_hash,
+    merge_shared_generation_contract,
+    validate_shared_generation_contract,
+)
 
 
 def _validation_error_detail(exc: Exception) -> object:
@@ -26,7 +31,30 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     keyword = state["keyword"]
     settings = deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
-    generated = deps.vertex_service.generate_gdd_bundle(keyword)
+    shared_contract = state["outputs"].get("shared_generation_contract")
+    typed_shared_contract = shared_contract if isinstance(shared_contract, dict) else None
+    shared_contract_issues = validate_shared_generation_contract(typed_shared_contract)
+    if shared_contract_issues:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "shared_generation_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.PLAN,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.PLANNER,
+            message="기획 중단: 공유 생성 계약이 유효하지 않습니다.",
+            reason=state["reason"],
+            metadata={
+                "shared_generation_contract_issues": shared_contract_issues,
+                "contract_status": "fail",
+                "deliverables": ["shared_generation_contract_gate"],
+            },
+        )
+
+    try:
+        generated = deps.vertex_service.generate_gdd_bundle(keyword, shared_contract=typed_shared_contract)
+    except TypeError:
+        generated = deps.vertex_service.generate_gdd_bundle(keyword)
     gdd_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and gdd_source != "vertex":
         reason, retryable = classify_vertex_unavailable_reason(
@@ -104,11 +132,19 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["gdd"] = gdd.model_dump()
     state["outputs"]["gdd_source"] = gdd_source
     state["outputs"]["gdd_meta"] = dict(generated.meta)
-    generated_contract = deps.vertex_service.generate_plan_contract(
-        keyword=keyword,
-        gdd=gdd.model_dump(),
-        research_summary=research_summary,
-    )
+    try:
+        generated_contract = deps.vertex_service.generate_plan_contract(
+            keyword=keyword,
+            gdd=gdd.model_dump(),
+            research_summary=research_summary,
+            shared_contract=typed_shared_contract,
+        )
+    except TypeError:
+        generated_contract = deps.vertex_service.generate_plan_contract(
+            keyword=keyword,
+            gdd=gdd.model_dump(),
+            research_summary=research_summary,
+        )
     plan_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and plan_source != "vertex":
         reason, retryable = classify_vertex_unavailable_reason(
@@ -163,6 +199,16 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     state["outputs"]["plan_contract"] = plan_contract.model_dump()
     state["outputs"]["plan_contract_source"] = plan_source
     state["outputs"]["plan_contract_meta"] = dict(generated_contract.meta)
+    shared_contract = merge_shared_generation_contract(
+        contract=typed_shared_contract,
+        keyword=keyword,
+        title=gdd.title,
+        objective=gdd.objective,
+        runtime_engine_mode=None,
+    )
+    shared_contract_hash = compute_shared_generation_contract_hash(shared_contract)
+    state["outputs"]["shared_generation_contract"] = shared_contract
+    state["outputs"]["shared_generation_contract_hash"] = shared_contract_hash
     gdd_usage = generated.meta.get("usage", {}) if isinstance(generated.meta.get("usage", {}), dict) else {}
     plan_usage = generated_contract.meta.get("usage", {}) if isinstance(generated_contract.meta.get("usage", {}), dict) else {}
     usage = {
@@ -181,6 +227,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         "contract_status": "pass",
         "contract_summary": f"{len(plan_contract.core_mechanics)} mechanics / {len(plan_contract.progression_plan)} progression beats",
         "contribution_score": 4.3,
+        "shared_generation_contract_hash": shared_contract_hash,
         "strict_vertex_only": strict_vertex_only,
         "gdd_source": gdd_source,
         "plan_source": plan_source,

@@ -5,6 +5,11 @@ from app.orchestration.nodes.common import append_log, apply_operator_control_ga
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import AnalyzeContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
+from app.services.shared_generation_contract import (
+    build_shared_generation_contract,
+    compute_shared_generation_contract_hash,
+    infer_runtime_engine_mode,
+)
 
 
 def _validation_error_detail(exc: Exception) -> object:
@@ -24,11 +29,28 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     if gated_state is not None:
         return gated_state
 
-    state["status"] = PipelineStatus.RUNNING
-    generated = _deps.vertex_service.generate_analyze_contract(keyword=state["keyword"])
-    generation_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     settings = _deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
+    shared_contract = build_shared_generation_contract(
+        keyword=state["keyword"],
+        runtime_engine_mode=infer_runtime_engine_mode(keyword=state["keyword"]),
+        quality_bar={
+            "quality_min": int(getattr(settings, "qa_min_quality_score", 50)),
+            "gameplay_min": int(getattr(settings, "qa_min_gameplay_score", 55)),
+            "visual_min": int(getattr(settings, "qa_min_visual_score", 45)),
+        },
+    )
+    shared_contract_hash = compute_shared_generation_contract_hash(shared_contract)
+
+    state["status"] = PipelineStatus.RUNNING
+    try:
+        generated = _deps.vertex_service.generate_analyze_contract(
+            keyword=state["keyword"],
+            shared_contract=shared_contract,
+        )
+    except TypeError:
+        generated = _deps.vertex_service.generate_analyze_contract(keyword=state["keyword"])
+    generation_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and generation_source != "vertex":
         reason, retryable = classify_vertex_unavailable_reason(
             default_reason="analyze_contract_unavailable",
@@ -80,6 +102,8 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     state["outputs"]["analyze_contract"] = analyze_contract.model_dump()
     state["outputs"]["analyze_contract_source"] = generation_source
     state["outputs"]["analyze_contract_meta"] = dict(generated.meta)
+    state["outputs"]["shared_generation_contract"] = shared_contract
+    state["outputs"]["shared_generation_contract_hash"] = shared_contract_hash
     pipeline_version = str(state["outputs"].get("pipeline_version", "forgeflow-v1"))
     usage = generated.meta.get("usage", {}) if isinstance(generated.meta.get("usage", {}), dict) else {}
     model_name = str(generated.meta.get("model", "")).strip()
@@ -99,6 +123,7 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
             "contract_status": "pass",
             "contract_summary": analyze_contract.intent,
             "contribution_score": 4.2,
+            "shared_generation_contract_hash": shared_contract_hash,
             "strict_vertex_only": strict_vertex_only,
             "usage": usage,
             "model": model_name,

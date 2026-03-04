@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.vertex_text_utils import (
+    compile_generated_artifact,
     coerce_message_text,
     looks_like_playable_artifact,
     playable_artifact_missing_requirements,
@@ -101,3 +102,41 @@ def test_playable_artifact_missing_requirements_accepts_explicitly_imported_addo
     )
     missing = playable_artifact_missing_requirements(html)
     assert "unresolved_addon_constructor_controls" not in missing
+
+
+def test_compile_generated_artifact_rewrites_three_namespace_addons_with_shim() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const controls = new THREE.OrbitControls(camera, renderer.domElement);"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(html)
+    assert "window.__iis_addon_shims.OrbitControls" in compiled
+    assert "iis-addon-shims" in compiled
+    assert "rewrite_three_namespace_addons" in meta["transforms_applied"]
+
+
+def test_compile_generated_artifact_rewrites_unresolved_addon_constructors() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const controls = new OrbitControls(camera, renderer.domElement);"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(html)
+    assert "new window.__iis_addon_shims.OrbitControls(" in compiled
+    assert "rewrite_unresolved_addon_constructors" in meta["transforms_applied"]
+
+
+def test_compile_generated_artifact_injects_runtime_contract_shim_when_missing_required_tokens() -> None:
+    html = "<html><body><canvas></canvas><script>const x = 1;</script></body></html>"
+    compiled, meta = compile_generated_artifact(html)
+    assert "__iis_game_boot_ok" in compiled
+    assert "IISLeaderboard" in compiled
+    assert "requestAnimationFrame" in compiled
+    assert "inject_runtime_contract_shim" in meta["transforms_applied"]
