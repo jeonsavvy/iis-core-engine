@@ -196,6 +196,22 @@ def _runtime_warning_penalty(warnings: list[str] | None) -> float:
     return round(min(28.0, score), 2)
 
 
+def _is_vertex_resource_exhausted(*values: str) -> bool:
+    combined = " ".join(str(value or "").casefold() for value in values)
+    return any(
+        token in combined
+        for token in (
+            "resource_exhausted",
+            "resourceexhausted",
+            "resource exhausted",
+            "429",
+            "quota",
+            "rate limit",
+            "too many requests",
+        )
+    )
+
+
 def _assess_artifact_quality(
     *,
     deps: NodeDependencies,
@@ -578,6 +594,10 @@ def _build_scaffold_first_production_artifact(
             quality_floor_fail_reasons.append("runtime_liveness_warnings_detected")
     quality_floor_fail_reasons = list(dict.fromkeys(quality_floor_fail_reasons))
     quality_floor_passed = len(quality_floor_fail_reasons) == 0
+    vertex_resource_exhausted_retryable = (not codegen_available) and _is_vertex_resource_exhausted(
+        generation_reason,
+        generation_error,
+    )
 
     artifact_files: list[dict[str, str]] | None = None
     artifact_manifest: dict[str, object] | None = None
@@ -698,6 +718,7 @@ def _build_scaffold_first_production_artifact(
         "quality_floor_enforced": quality_floor_enforced,
         "quality_floor_passed": quality_floor_passed,
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
+        "vertex_resource_exhausted_retryable": vertex_resource_exhausted_retryable,
         "quality_gate_report": quality_gate_report,
         "intent_gate_report": final_assessment.intent_gate_report,
         "blocking_reasons": quality_floor_fail_reasons,

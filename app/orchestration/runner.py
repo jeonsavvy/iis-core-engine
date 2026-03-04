@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import Settings
 from app.orchestration.graph.pipeline_graph import build_pipeline_graph
@@ -51,15 +51,34 @@ class PipelineRunner:
 
         self._flush_pending_logs(final_state)
         usage_summary = self._build_usage_summary(final_state)
+        status = final_state["status"]
+        error_reason = final_state.get("reason")
+        metadata_update: dict[str, object] = {
+            "execution_mode": "auto",
+            "usage_summary": usage_summary,
+            "operator_control": {"pause_requested": False, "cancel_requested": False},
+        }
+
+        if status == PipelineStatus.RETRY:
+            retry_plan = self._build_vertex_retry_plan(job=job, final_state=final_state)
+            metadata_update["vertex_retry"] = retry_plan["vertex_retry"]
+            metadata_update["retry_not_before_at"] = retry_plan["retry_not_before_at"]
+            status = retry_plan["status"]
+            error_reason = retry_plan["error_reason"]
+        else:
+            metadata_update["vertex_retry"] = {
+                "attempt": 0,
+                "not_before_at": None,
+                "last_reason": None,
+                "last_stage": None,
+            }
+            metadata_update["retry_not_before_at"] = None
+
         self.repository.update_pipeline_metadata(
             job.pipeline_id,
-            metadata_update={
-                "execution_mode": "auto",
-                "usage_summary": usage_summary,
-                "operator_control": {"pause_requested": False, "cancel_requested": False},
-            },
-            status=final_state["status"],
-            error_reason=final_state.get("reason"),
+            metadata_update=metadata_update,
+            status=status,
+            error_reason=error_reason,
         )
 
     def _log_sink(self, log: PipelineLogRecord) -> None:
@@ -131,6 +150,57 @@ class PipelineRunner:
             "estimated_cost_usd": round(estimated_cost_usd, 6),
             "unpriced_tokens": unpriced_tokens,
             "model_breakdown": model_breakdown,
+        }
+
+    def _build_vertex_retry_plan(self, *, job: PipelineJob, final_state: PipelineState) -> dict[str, object]:
+        retry_meta_raw = job.metadata.get("vertex_retry")
+        retry_meta = retry_meta_raw if isinstance(retry_meta_raw, dict) else {}
+        previous_attempt = self._coerce_non_negative_int(retry_meta.get("attempt", 0))
+        attempt = previous_attempt + 1
+        max_attempts = int(self.settings.vertex_retry_max_attempts_per_pipeline)
+        reason = str(final_state.get("reason") or "vertex_resource_exhausted").strip() or "vertex_resource_exhausted"
+        last_stage = final_state["logs"][-1].stage.value if final_state["logs"] else None
+
+        if attempt > max_attempts:
+            exhausted_reason = f"{reason}_retry_exhausted"
+            return {
+                "status": PipelineStatus.ERROR,
+                "error_reason": exhausted_reason,
+                "retry_not_before_at": None,
+                "vertex_retry": {
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "not_before_at": None,
+                    "last_reason": exhausted_reason,
+                    "last_stage": last_stage,
+                    "state": "exhausted",
+                },
+            }
+
+        base = max(1, int(self.settings.vertex_retry_backoff_base_seconds))
+        delay_seconds = min(
+            int(self.settings.vertex_retry_backoff_max_seconds),
+            base * (2 ** max(0, attempt - 1)),
+        )
+        jitter = max(0, int(self.settings.vertex_retry_jitter_seconds))
+        if jitter > 0:
+            delay_seconds += int(job.pipeline_id.int % (jitter + 1))
+
+        retry_not_before = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        retry_not_before_at = retry_not_before.isoformat()
+        return {
+            "status": PipelineStatus.QUEUED,
+            "error_reason": reason,
+            "retry_not_before_at": retry_not_before_at,
+            "vertex_retry": {
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "delay_seconds": delay_seconds,
+                "not_before_at": retry_not_before_at,
+                "last_reason": reason,
+                "last_stage": last_stage,
+                "state": "scheduled",
+            },
         }
 
     @staticmethod

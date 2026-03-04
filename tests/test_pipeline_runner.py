@@ -241,6 +241,19 @@ class FakeVertexService:
         return SimpleNamespace(payload={"ai_review": "review"}, meta={"generation_source": "vertex"})
 
 
+class FakeResourceExhaustedVertexService(FakeVertexService):
+    def generate_gdd_bundle(self, keyword: str):
+        _ = keyword
+        return SimpleNamespace(
+            payload={"gdd": {}, "research_summary": {}},
+            meta={
+                "generation_source": "stub",
+                "reason": "vertex_error:ResourceExhausted",
+                "vertex_error": "429 RESOURCE_EXHAUSTED",
+            },
+        )
+
+
 def _make_runner(repository: PipelineRepository) -> PipelineRunner:
     settings = Settings(telegram_bot_token="")
     return PipelineRunner(
@@ -262,6 +275,18 @@ def _make_runner_with_quality(repository: PipelineRepository, quality_service: A
         publisher_service=cast(Any, FakePublisherService()),
         github_archive_service=cast(Any, FakeGitHubArchiveService()),
         vertex_service=cast(Any, FakeVertexService(quality_floor_enforced=False)),
+    )
+
+
+def _make_runner_with_vertex(repository: PipelineRepository, vertex_service: Any) -> PipelineRunner:
+    settings = Settings(telegram_bot_token="", builder_quality_floor_enforced=False)
+    return PipelineRunner(
+        repository=repository,
+        settings=settings,
+        quality_service=cast(Any, FakeQualityService()),
+        publisher_service=cast(Any, FakePublisherService()),
+        github_archive_service=cast(Any, FakeGitHubArchiveService()),
+        vertex_service=cast(Any, vertex_service),
     )
 
 
@@ -347,3 +372,24 @@ def test_pipeline_runner_quality_gate_always_blocks_release() -> None:
     assert final_job is not None
     assert final_job.status == PipelineStatus.ERROR
     assert final_job.error_reason == "qa_quality_gate_failed"
+
+
+def test_pipeline_runner_schedules_retry_on_vertex_resource_exhausted() -> None:
+    repository = PipelineRepository()
+    job = repository.create_pipeline(TriggerRequest(keyword="retry on quota", qa_fail_until=0))
+    queued_job = repository.claim_next_queued_pipeline()
+    assert queued_job is not None
+
+    runner = _make_runner_with_vertex(repository, FakeResourceExhaustedVertexService())
+    runner.run(queued_job)
+
+    final_job = repository.get_pipeline(job.pipeline_id)
+    assert final_job is not None
+    assert final_job.status == PipelineStatus.QUEUED
+    assert final_job.error_reason == "gdd_unavailable_vertex_resource_exhausted"
+    retry_meta = final_job.metadata.get("vertex_retry")
+    assert isinstance(retry_meta, dict)
+    assert int(retry_meta.get("attempt", 0)) == 1
+    assert isinstance(retry_meta.get("not_before_at"), str)
+    logs = repository.list_logs(job.pipeline_id)
+    assert any(log.stage == PipelineStage.PLAN and log.status == PipelineStatus.RETRY for log in logs)

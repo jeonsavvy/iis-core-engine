@@ -255,3 +255,13 @@ def test_build_production_artifact_marks_fallback_blocked_metadata() -> None:
     assert result.metadata["deterministic_fallback_used"] is False
     assert result.metadata["fallback_blocked"] is True
     assert result.selected_generation_meta["generation_source"] == "stub"
+
+
+def test_build_production_artifact_marks_retryable_when_codegen_quota_exhausted() -> None:
+    vertex = _FakeVertexService(
+        generation_source="stub",
+        stub_reason="vertex_error:ResourceExhausted",
+    )
+    result, _ = _build_result_with_vertex(vertex)
+    assert result.metadata["quality_floor_passed"] is False
+    assert result.metadata["vertex_resource_exhausted_retryable"] is True

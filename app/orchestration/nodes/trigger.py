@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log, apply_operator_control_gate
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate, classify_vertex_unavailable_reason
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import AnalyzeContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
@@ -30,18 +30,27 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     settings = _deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
     if strict_vertex_only and generation_source != "vertex":
-        state["status"] = PipelineStatus.ERROR
-        state["reason"] = "analyze_contract_unavailable"
+        reason, retryable = classify_vertex_unavailable_reason(
+            default_reason="analyze_contract_unavailable",
+            generation_meta=generated.meta,
+        )
+        state["status"] = PipelineStatus.RETRY if retryable else PipelineStatus.ERROR
+        state["reason"] = reason
         return append_log(
             state,
             stage=PipelineStage.ANALYZE,
-            status=PipelineStatus.ERROR,
+            status=state["status"],
             agent_name=PipelineAgentName.ANALYZER,
-            message="분석 중단: Vertex analyze contract를 확보하지 못했습니다.",
+            message="분석 지연: Vertex analyze contract를 확보하지 못했습니다."
+            if retryable
+            else "분석 중단: Vertex analyze contract를 확보하지 못했습니다.",
             reason=state["reason"],
             metadata={
                 "generation_source": generation_source,
                 "strict_vertex_only": strict_vertex_only,
+                "retryable": retryable,
+                "upstream_reason": str(generated.meta.get("reason", "")).strip() or None,
+                "vertex_error": str(generated.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["analyze_contract_gate"],
                 "contract_status": "fail",
                 **generated.meta,

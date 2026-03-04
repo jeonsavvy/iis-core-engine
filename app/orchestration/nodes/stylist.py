@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log, apply_operator_control_gate
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate, classify_vertex_unavailable_reason
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import DesignContractPayload, DesignSpecPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
@@ -11,15 +11,6 @@ def _validation_error_detail(exc: Exception) -> object:
     if isinstance(exc, ValidationError):
         return exc.errors()
     return str(exc)
-
-
-def _resolve_unavailable_reason(*, default_reason: str, generation_meta: dict[str, object]) -> str:
-    upstream_reason = str(generation_meta.get("reason", "")).strip().casefold()
-    if upstream_reason == "vertex_not_configured":
-        return f"{default_reason}_vertex_not_configured"
-    if upstream_reason.startswith("vertex_error:"):
-        return f"{default_reason}_vertex_error"
-    return default_reason
 
 
 def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: str) -> dict[str, object]:
@@ -83,18 +74,25 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     generated = deps.vertex_service.generate_design_spec(keyword=keyword, visual_style=visual_style, genre=genre)
     design_spec_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and design_spec_source != "vertex":
-        state["reason"] = _resolve_unavailable_reason(default_reason="design_spec_unavailable", generation_meta=generated.meta)
-        state["status"] = PipelineStatus.ERROR
+        reason, retryable = classify_vertex_unavailable_reason(
+            default_reason="design_spec_unavailable",
+            generation_meta=generated.meta,
+        )
+        state["reason"] = reason
+        state["status"] = PipelineStatus.RETRY if retryable else PipelineStatus.ERROR
         return append_log(
             state,
             stage=PipelineStage.DESIGN,
-            status=PipelineStatus.ERROR,
+            status=state["status"],
             agent_name=PipelineAgentName.DESIGNER,
-            message="디자인 중단: Vertex design spec을 확보하지 못했습니다.",
+            message="디자인 지연: Vertex design spec을 확보하지 못했습니다."
+            if retryable
+            else "디자인 중단: Vertex design spec을 확보하지 못했습니다.",
             reason=state["reason"],
             metadata={
                 "design_spec_source": design_spec_source,
                 "strict_vertex_only": strict_vertex_only,
+                "retryable": retryable,
                 "upstream_reason": str(generated.meta.get("reason", "")).strip() or None,
                 "vertex_error": str(generated.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["design_spec_gate"],
@@ -136,22 +134,26 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     design_contract_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and design_contract_source != "vertex":
-        state["reason"] = _resolve_unavailable_reason(
+        reason, retryable = classify_vertex_unavailable_reason(
             default_reason="design_contract_unavailable",
             generation_meta=generated_contract.meta,
         )
-        state["status"] = PipelineStatus.ERROR
+        state["reason"] = reason
+        state["status"] = PipelineStatus.RETRY if retryable else PipelineStatus.ERROR
         return append_log(
             state,
             stage=PipelineStage.DESIGN,
-            status=PipelineStatus.ERROR,
+            status=state["status"],
             agent_name=PipelineAgentName.DESIGNER,
-            message="디자인 중단: Vertex design contract를 확보하지 못했습니다.",
+            message="디자인 지연: Vertex design contract를 확보하지 못했습니다."
+            if retryable
+            else "디자인 중단: Vertex design contract를 확보하지 못했습니다.",
             reason=state["reason"],
             metadata={
                 "design_spec_source": design_spec_source,
                 "design_contract_source": design_contract_source,
                 "strict_vertex_only": strict_vertex_only,
+                "retryable": retryable,
                 "upstream_reason": str(generated_contract.meta.get("reason", "")).strip() or None,
                 "vertex_error": str(generated_contract.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["design_contract_gate"],

@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     rqc_version: str = Field(default="rqc-1", min_length=3, max_length=24)
     pipeline_contract_enforcement: str = Field(default="strict", pattern=r"^(strict|warn_only)$")
     qa_retry_source: str = Field(default="builder_only", pattern=r"^(builder_only|qa_or_builder)$")
+    vertex_retry_max_attempts_per_pipeline: int = Field(default=4, ge=1, le=12)
+    vertex_retry_backoff_base_seconds: int = Field(default=30, ge=5, le=300)
+    vertex_retry_backoff_max_seconds: int = Field(default=600, ge=30, le=7200)
+    vertex_retry_jitter_seconds: int = Field(default=7, ge=0, le=60)
     pipeline_default_version: str = Field(default="forgeflow-v1", min_length=1, max_length=40)
 
     pipeline_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30.0)

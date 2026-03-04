@@ -6,6 +6,35 @@ from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineAgentName, PipelineLogRecord, PipelineStage, PipelineStatus
 
+_VERTEX_RESOURCE_EXHAUSTED_TOKENS: tuple[str, ...] = (
+    "resource_exhausted",
+    "resourceexhausted",
+    "resource exhausted",
+    "429",
+    "quota",
+    "rate limit",
+    "too many requests",
+)
+
+
+def classify_vertex_unavailable_reason(
+    *,
+    default_reason: str,
+    generation_meta: dict[str, object] | None,
+) -> tuple[str, bool]:
+    meta = generation_meta if isinstance(generation_meta, dict) else {}
+    upstream_reason = str(meta.get("reason", "")).strip().casefold()
+    vertex_error = str(meta.get("vertex_error", "")).strip().casefold()
+    combined = f"{upstream_reason} {vertex_error}".strip()
+    retryable = any(token in combined for token in _VERTEX_RESOURCE_EXHAUSTED_TOKENS)
+    if retryable:
+        return f"{default_reason}_vertex_resource_exhausted", True
+    if upstream_reason == "vertex_not_configured":
+        return f"{default_reason}_vertex_not_configured", False
+    if upstream_reason.startswith("vertex_error:"):
+        return f"{default_reason}_vertex_error", False
+    return default_reason, False
+
 
 def append_log(
     state: PipelineState,

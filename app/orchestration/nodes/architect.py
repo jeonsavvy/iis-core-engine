@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 
 from app.orchestration.graph.state import PipelineState
-from app.orchestration.nodes.common import append_log, apply_operator_control_gate
+from app.orchestration.nodes.common import append_log, apply_operator_control_gate, classify_vertex_unavailable_reason
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import GDDPayload, PlanContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
@@ -29,18 +29,27 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     generated = deps.vertex_service.generate_gdd_bundle(keyword)
     gdd_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and gdd_source != "vertex":
-        state["status"] = PipelineStatus.ERROR
-        state["reason"] = "gdd_unavailable"
+        reason, retryable = classify_vertex_unavailable_reason(
+            default_reason="gdd_unavailable",
+            generation_meta=generated.meta,
+        )
+        state["status"] = PipelineStatus.RETRY if retryable else PipelineStatus.ERROR
+        state["reason"] = reason
         return append_log(
             state,
             stage=PipelineStage.PLAN,
-            status=PipelineStatus.ERROR,
+            status=state["status"],
             agent_name=PipelineAgentName.PLANNER,
-            message="기획 중단: Vertex GDD를 확보하지 못했습니다.",
+            message="기획 지연: Vertex GDD를 확보하지 못했습니다."
+            if retryable
+            else "기획 중단: Vertex GDD를 확보하지 못했습니다.",
             reason=state["reason"],
             metadata={
                 "generation_source": gdd_source,
                 "strict_vertex_only": strict_vertex_only,
+                "retryable": retryable,
+                "upstream_reason": str(generated.meta.get("reason", "")).strip() or None,
+                "vertex_error": str(generated.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["gdd_gate"],
                 "contract_status": "fail",
                 **generated.meta,
@@ -102,19 +111,28 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     plan_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and plan_source != "vertex":
-        state["status"] = PipelineStatus.ERROR
-        state["reason"] = "plan_contract_unavailable"
+        reason, retryable = classify_vertex_unavailable_reason(
+            default_reason="plan_contract_unavailable",
+            generation_meta=generated_contract.meta,
+        )
+        state["status"] = PipelineStatus.RETRY if retryable else PipelineStatus.ERROR
+        state["reason"] = reason
         return append_log(
             state,
             stage=PipelineStage.PLAN,
-            status=PipelineStatus.ERROR,
+            status=state["status"],
             agent_name=PipelineAgentName.PLANNER,
-            message="기획 중단: Vertex plan contract를 확보하지 못했습니다.",
+            message="기획 지연: Vertex plan contract를 확보하지 못했습니다."
+            if retryable
+            else "기획 중단: Vertex plan contract를 확보하지 못했습니다.",
             reason=state["reason"],
             metadata={
                 "gdd_source": gdd_source,
                 "plan_source": plan_source,
                 "strict_vertex_only": strict_vertex_only,
+                "retryable": retryable,
+                "upstream_reason": str(generated_contract.meta.get("reason", "")).strip() or None,
+                "vertex_error": str(generated_contract.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["plan_contract_gate"],
                 "contract_status": "fail",
                 **generated_contract.meta,

@@ -56,3 +56,23 @@ def test_requeued_job_can_be_claimed_again() -> None:
     assert reclaimed is not None
     assert reclaimed.pipeline_id == UUID(str(created.pipeline_id))
     assert reclaimed.status == PipelineStatus.RUNNING
+
+
+def test_claim_next_queued_pipeline_respects_retry_not_before() -> None:
+    repository = PipelineRepository()
+    created = repository.create_pipeline(TriggerRequest(keyword="retry schedule"))
+    job_id = str(created.pipeline_id)
+
+    memory_row = repository._memory_jobs[job_id]  # noqa: SLF001
+    memory_row["payload"]["vertex_retry"] = {
+        "attempt": 1,
+        "not_before_at": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+    }
+
+    claimed = repository.claim_next_queued_pipeline()
+    assert claimed is None
+
+    memory_row["payload"]["vertex_retry"]["not_before_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    claimed_after = repository.claim_next_queued_pipeline()
+    assert claimed_after is not None
+    assert claimed_after.pipeline_id == UUID(job_id)

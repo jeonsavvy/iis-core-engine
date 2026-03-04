@@ -20,3 +20,13 @@ def test_route_after_qa_quality_stops_on_error() -> None:
         "max_qa_loops": 3,
     }
     assert _route_after_qa_quality(state) == "End"
+
+
+def test_route_after_qa_quality_stops_on_retry() -> None:
+    state = {
+        "status": PipelineStatus.RETRY,
+        "needs_rebuild": False,
+        "qa_attempt": 1,
+        "max_qa_loops": 3,
+    }
+    assert _route_after_qa_quality(state) == "End"

@@ -590,6 +590,27 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         intent_contract=intent_contract.model_dump(),
         synapse_contract=synapse_contract,
     )
+    if bool(production_result.metadata.get("vertex_resource_exhausted_retryable", False)):
+        state["status"] = PipelineStatus.RETRY
+        state["reason"] = "build_vertex_resource_exhausted"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RETRY,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 지연: Vertex codegen 쿼터가 소진되어 재시도를 예약합니다.",
+            reason=state["reason"],
+            metadata={
+                "retryable": True,
+                "codegen_generation_attempts": production_result.metadata.get("codegen_generation_attempts"),
+                "codegen_initial_reason": production_result.metadata.get("codegen_initial_reason"),
+                "codegen_initial_error": production_result.metadata.get("codegen_initial_error"),
+                "strict_vertex_only": strict_vertex_only,
+                "contract_status": "retry",
+                "deliverables": ["codegen_retry_schedule"],
+                **production_result.metadata,
+            },
+        )
     playability_hard_gate = bool(getattr(deps.vertex_service.settings, "builder_playability_hard_gate", True))
     playability_passed = bool(production_result.metadata.get("playability_passed", True))
     if playability_hard_gate and not playability_passed:

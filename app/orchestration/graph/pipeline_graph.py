@@ -8,44 +8,48 @@ from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.pipeline import PipelineStatus
 
 
+def _should_end(status: PipelineStatus) -> bool:
+    return status in {PipelineStatus.ERROR, PipelineStatus.SKIPPED, PipelineStatus.RETRY}
+
+
 def _route_after_analyze(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "Planner"
 
 
 def _route_after_plan(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "Designer"
 
 
 def _route_after_design(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "Developer"
 
 
 def _route_after_build(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "QaRuntime"
 
 
 def _route_after_qa_runtime(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "QaQuality"
 
 
 def _route_after_qa_quality(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "Release"
 
 
 def _route_after_release(state: PipelineState) -> str:
-    if state["status"] in {PipelineStatus.ERROR, PipelineStatus.SKIPPED}:
+    if _should_end(state["status"]):
         return "End"
     return "Report"
 

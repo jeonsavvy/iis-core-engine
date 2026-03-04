@@ -223,6 +223,43 @@ def test_builder_stops_when_quality_floor_unmet(monkeypatch) -> None:
     assert any(log.stage.value == "build" and log.status.value == "error" for log in result["logs"])
 
 
+def test_builder_sets_retry_when_codegen_vertex_quota_is_exhausted(monkeypatch) -> None:
+    state = _base_state()
+    vertex = _VertexStub(contract_mode="ok")
+    deps = _deps(vertex)
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    state = architect.run(cast(Any, state), cast(Any, deps))
+    state = stylist.run(cast(Any, state), cast(Any, deps))
+
+    def _retryable_production_artifact(**_kwargs: Any) -> ProductionBuildResult:
+        build_artifact = BuildArtifactPayload(
+            game_slug="arena-pulse",
+            game_name="Arena Pulse",
+            game_genre="shooter",
+            artifact_path="games/arena-pulse/index.html",
+            artifact_html="<!doctype html><html><body><main><canvas id='game'></canvas><script>window.__iis_game_boot_ok=true;</script></main></body></html>",
+        )
+        return ProductionBuildResult(
+            build_artifact=build_artifact,
+            selected_generation_meta={"generation_source": "stub"},
+            metadata={
+                "vertex_resource_exhausted_retryable": True,
+                "codegen_generation_attempts": 1,
+                "codegen_initial_reason": "vertex_error:ResourceExhausted",
+                "codegen_initial_error": "429 RESOURCE_EXHAUSTED",
+            },
+        )
+
+    monkeypatch.setattr(builder, "build_production_artifact", _retryable_production_artifact)
+    result = builder.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.RETRY
+    assert result["reason"] == "build_vertex_resource_exhausted"
+    retry_logs = [log for log in result["logs"] if log.stage.value == "build" and log.status.value == "retry"]
+    assert retry_logs
+
+
 def test_builder_stops_when_playability_hard_gate_unmet(monkeypatch) -> None:
     state = _base_state()
     vertex = _VertexStub(contract_mode="ok")
@@ -290,6 +327,33 @@ def test_trigger_blocks_when_strict_vertex_only_and_source_is_stub() -> None:
 
     assert result["status"] == PipelineStatus.ERROR
     assert result["reason"] == "analyze_contract_unavailable"
+
+
+def test_architect_sets_retry_when_vertex_resource_exhausted() -> None:
+    state = _base_state()
+    deps = _deps(_VertexStub(contract_mode="ok", strict_vertex_only=False))
+
+    state = trigger.run(cast(Any, state), cast(Any, deps))
+    deps.vertex_service.settings.strict_vertex_only = True
+
+    def _resource_exhausted_gdd_bundle(_keyword: str) -> VertexGenerationResult:
+        return VertexGenerationResult(
+            payload={"gdd": {}, "research_summary": {}},
+            meta={
+                "generation_source": "stub",
+                "reason": "vertex_error:ResourceExhausted",
+                "vertex_error": "429 RESOURCE_EXHAUSTED",
+            },
+        )
+
+    deps.vertex_service.generate_gdd_bundle = _resource_exhausted_gdd_bundle
+    result = architect.run(cast(Any, state), cast(Any, deps))
+
+    assert result["status"] == PipelineStatus.RETRY
+    assert result["reason"] == "gdd_unavailable_vertex_resource_exhausted"
+    plan_logs = [log for log in result["logs"] if log.stage.value == "plan"]
+    assert plan_logs
+    assert plan_logs[-1].status == PipelineStatus.RETRY
 
 
 def test_architect_plan_invalid_logs_validation_error_details() -> None:

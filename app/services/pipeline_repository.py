@@ -544,10 +544,14 @@ class PipelineRepository:
                 .select("*")
                 .eq("status", PipelineStatus.QUEUED.value)
                 .order("created_at", desc=False)
-                .limit(10)
+                .limit(100)
                 .execute()
             )
             for row in queued.data or []:
+                payload_raw = row.get("payload")
+                payload = payload_raw if isinstance(payload_raw, dict) else {}
+                if not self._is_retry_ready(payload):
+                    continue
                 update = (
                     self.client.table("admin_config")
                     .update(
@@ -567,15 +571,38 @@ class PipelineRepository:
 
         with self._lock:
             queued_rows = sorted(
-                (row for row in self._memory_jobs.values() if row["status"] == PipelineStatus.QUEUED.value),
+                (
+                    row for row in self._memory_jobs.values() if row["status"] == PipelineStatus.QUEUED.value
+                ),
                 key=lambda row: row["created_at"],
             )
+            retry_ready_rows: list[dict[str, Any]] = []
+            for row in queued_rows:
+                payload_raw = row.get("payload")
+                payload = payload_raw if isinstance(payload_raw, dict) else {}
+                if self._is_retry_ready(payload):
+                    retry_ready_rows.append(row)
+            queued_rows = retry_ready_rows
             if not queued_rows:
                 return None
             row = queued_rows[0]
             row["status"] = PipelineStatus.RUNNING.value
             row["updated_at"] = datetime.now(timezone.utc).isoformat()
             return self._job_from_row(row)
+
+    @staticmethod
+    def _is_retry_ready(payload: dict[str, Any]) -> bool:
+        retry_meta = payload.get("vertex_retry")
+        if not isinstance(retry_meta, dict):
+            return True
+        not_before_raw = retry_meta.get("not_before_at")
+        if not isinstance(not_before_raw, str) or not not_before_raw.strip():
+            return True
+        try:
+            not_before_at = datetime.fromisoformat(not_before_raw.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        return datetime.now(timezone.utc) >= not_before_at
 
     def get_execution_mode(self, job: PipelineJob) -> ExecutionMode:
         return ExecutionMode.AUTO
