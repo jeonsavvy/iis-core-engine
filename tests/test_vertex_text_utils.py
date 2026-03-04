@@ -47,3 +47,16 @@ def test_playable_artifact_missing_requirements_returns_missing_tokens() -> None
     missing = playable_artifact_missing_requirements(html)
     assert "boot_flag" in missing
     assert "leaderboard_contract" in missing
+
+
+def test_playable_artifact_missing_requirements_rejects_unsupported_three_utils_usage() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const merged = new THREE.BufferGeometryUtils();"
+        "</script></body></html>"
+    )
+    missing = playable_artifact_missing_requirements(html)
+    assert "unsupported_three_buffergeometryutils" in missing

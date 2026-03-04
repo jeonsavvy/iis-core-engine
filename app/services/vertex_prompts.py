@@ -254,6 +254,8 @@ def build_codegen_prompt(
         f"- Runtime stack is fixed: {runtime_stack}. Do not switch frameworks.\n"
         "- Keep `window.IISLeaderboard` and `window.__iis_game_boot_ok`.\n"
         "- Return exactly one complete HTML document (no markdown fences).\n\n"
+        "- Never use `THREE.BufferGeometryUtils` (unavailable in this runtime contract).\n"
+        "- Use only APIs that are imported/defined inside the returned HTML.\n\n"
         "=== Playability Contract ===\n"
         "- Controls must respond immediately in embedded iframe.\n"
         "- Keep explicit fail/restart loop and avoid unavoidable death in first 3 seconds.\n"

@@ -56,6 +56,11 @@ def playable_artifact_missing_requirements(html_content: str) -> list[str]:
     if not has_canvas_runtime:
         missing.append("canvas_or_render_runtime")
 
+    # Three.js runtime contract guard:
+    # BufferGeometryUtils is not available on THREE namespace in our scaffold import.
+    if "three.buffergeometryutils" in lowered:
+        missing.append("unsupported_three_buffergeometryutils")
+
     return missing
 
 
