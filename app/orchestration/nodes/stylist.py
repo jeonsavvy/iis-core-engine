@@ -13,6 +13,15 @@ def _validation_error_detail(exc: Exception) -> object:
     return str(exc)
 
 
+def _resolve_unavailable_reason(*, default_reason: str, generation_meta: dict[str, object]) -> str:
+    upstream_reason = str(generation_meta.get("reason", "")).strip().casefold()
+    if upstream_reason == "vertex_not_configured":
+        return f"{default_reason}_vertex_not_configured"
+    if upstream_reason.startswith("vertex_error:"):
+        return f"{default_reason}_vertex_error"
+    return default_reason
+
+
 def _derive_art_direction_contract(*, keyword: str, genre: str, visual_style: str) -> dict[str, object]:
     keyword_hint = keyword.casefold()
     motif = "neon-motion"
@@ -74,8 +83,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     generated = deps.vertex_service.generate_design_spec(keyword=keyword, visual_style=visual_style, genre=genre)
     design_spec_source = str(generated.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and design_spec_source != "vertex":
+        state["reason"] = _resolve_unavailable_reason(default_reason="design_spec_unavailable", generation_meta=generated.meta)
         state["status"] = PipelineStatus.ERROR
-        state["reason"] = "design_spec_unavailable"
         return append_log(
             state,
             stage=PipelineStage.DESIGN,
@@ -86,6 +95,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             metadata={
                 "design_spec_source": design_spec_source,
                 "strict_vertex_only": strict_vertex_only,
+                "upstream_reason": str(generated.meta.get("reason", "")).strip() or None,
+                "vertex_error": str(generated.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["design_spec_gate"],
                 "contract_status": "fail",
                 **generated.meta,
@@ -125,8 +136,11 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     )
     design_contract_source = str(generated_contract.meta.get("generation_source", "stub")).strip().casefold()
     if strict_vertex_only and design_contract_source != "vertex":
+        state["reason"] = _resolve_unavailable_reason(
+            default_reason="design_contract_unavailable",
+            generation_meta=generated_contract.meta,
+        )
         state["status"] = PipelineStatus.ERROR
-        state["reason"] = "design_contract_unavailable"
         return append_log(
             state,
             stage=PipelineStage.DESIGN,
@@ -138,6 +152,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
                 "design_spec_source": design_spec_source,
                 "design_contract_source": design_contract_source,
                 "strict_vertex_only": strict_vertex_only,
+                "upstream_reason": str(generated_contract.meta.get("reason", "")).strip() or None,
+                "vertex_error": str(generated_contract.meta.get("vertex_error", "")).strip() or None,
                 "deliverables": ["design_contract_gate"],
                 "contract_status": "fail",
                 **generated_contract.meta,
