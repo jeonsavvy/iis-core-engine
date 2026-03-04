@@ -74,4 +74,4 @@ def test_codegen_prompt_contains_visual_contract_targets() -> None:
     assert "contrast_min" in lowered
     assert "color_diversity_min" in lowered
     assert "motion_delta_min" in lowered
-    assert "never use `three.buffergeometryutils`" in lowered
+    assert "do not reference add-on classes through `three.<symbol>` namespace" in lowered

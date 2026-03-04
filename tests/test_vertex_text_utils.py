@@ -60,3 +60,44 @@ def test_playable_artifact_missing_requirements_rejects_unsupported_three_utils_
     )
     missing = playable_artifact_missing_requirements(html)
     assert "unsupported_three_buffergeometryutils" in missing
+    assert "unsupported_three_namespace_addon_utils" in missing
+
+
+def test_playable_artifact_missing_requirements_rejects_three_namespace_addon_controls() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const c = new THREE.OrbitControls(camera, renderer.domElement);"
+        "</script></body></html>"
+    )
+    missing = playable_artifact_missing_requirements(html)
+    assert "unsupported_three_namespace_addon_controls" in missing
+
+
+def test_playable_artifact_missing_requirements_detects_unresolved_addon_constructor() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const controls = new OrbitControls(camera, renderer.domElement);"
+        "</script></body></html>"
+    )
+    missing = playable_artifact_missing_requirements(html)
+    assert "unresolved_addon_constructor_controls" in missing
+
+
+def test_playable_artifact_missing_requirements_accepts_explicitly_imported_addon_constructor() -> None:
+    html = (
+        "<html><body><canvas></canvas><script type='module'>"
+        "import { OrbitControls } from 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js';"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "const controls = new OrbitControls(camera, renderer.domElement);"
+        "</script></body></html>"
+    )
+    missing = playable_artifact_missing_requirements(html)
+    assert "unresolved_addon_constructor_controls" not in missing
