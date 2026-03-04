@@ -16,6 +16,28 @@ _VERTEX_RESOURCE_EXHAUSTED_TOKENS: tuple[str, ...] = (
     "too many requests",
 )
 
+_AGENT_LANE_BY_STAGE: dict[PipelineStage, str] = {
+    PipelineStage.ANALYZE: "A",
+    PipelineStage.PLAN: "A",
+    PipelineStage.DESIGN: "A",
+    PipelineStage.BUILD: "A",
+    PipelineStage.QA_RUNTIME: "B",
+    PipelineStage.QA_QUALITY: "B",
+    PipelineStage.RELEASE: "B",
+    PipelineStage.REPORT: "B",
+    PipelineStage.DONE: "SYSTEM",
+}
+
+_HANDOFF_STAGE_BY_STAGE: dict[PipelineStage, PipelineStage] = {
+    PipelineStage.ANALYZE: PipelineStage.PLAN,
+    PipelineStage.PLAN: PipelineStage.DESIGN,
+    PipelineStage.DESIGN: PipelineStage.BUILD,
+    PipelineStage.BUILD: PipelineStage.QA_RUNTIME,
+    PipelineStage.QA_RUNTIME: PipelineStage.QA_QUALITY,
+    PipelineStage.QA_QUALITY: PipelineStage.RELEASE,
+    PipelineStage.RELEASE: PipelineStage.REPORT,
+}
+
 
 def classify_vertex_unavailable_reason(
     *,
@@ -46,6 +68,18 @@ def append_log(
     reason: str | None = None,
     metadata: dict | None = None,
 ) -> PipelineState:
+    metadata_payload = dict(metadata or {})
+    if "agent_lane" not in metadata_payload:
+        metadata_payload["agent_lane"] = _AGENT_LANE_BY_STAGE.get(stage, "SYSTEM")
+    if "handoff_to_stage" not in metadata_payload and status == PipelineStatus.SUCCESS:
+        handoff_stage = _HANDOFF_STAGE_BY_STAGE.get(stage)
+        if handoff_stage is not None:
+            metadata_payload["handoff_to_stage"] = handoff_stage.value
+    if "handoff_summary" not in metadata_payload:
+        compact_message = " ".join(message.split()).strip()
+        if compact_message:
+            metadata_payload["handoff_summary"] = compact_message[:200]
+
     record = PipelineLogRecord(
         pipeline_id=state["pipeline_id"],
         stage=stage,
@@ -54,7 +88,7 @@ def append_log(
         message=message,
         reason=reason,
         attempt=state["qa_attempt"] if state["qa_attempt"] > 0 else 1,
-        metadata=metadata or {},
+        metadata=metadata_payload,
         created_at=datetime.now(timezone.utc),
     )
     state["logs"].append(record)
