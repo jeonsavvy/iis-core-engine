@@ -183,6 +183,43 @@ def test_collect_asset_memory_context_prefers_registry_when_present() -> None:
     assert "visual_quality_below_threshold" in cast(list[str], result.retrieval_profile.get("failure_reasons", []))
 
 
+def test_collect_asset_memory_context_reads_build_blocking_reasons_as_feedback() -> None:
+    current_pipeline_id = uuid4()
+    pipeline_a = uuid4()
+    logs = [
+        _log(
+            pipeline_id=pipeline_a,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.RUNNING,
+            metadata={"core_loop_type": "flight_sim_3d"},
+            offset_seconds=1,
+        ),
+        _log(
+            pipeline_id=pipeline_a,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            reason="builder_quality_floor_unmet",
+            metadata={
+                "blocking_reasons": ["quality_gate_unmet", "flight_mechanics_not_found"],
+                "quality_floor_fail_reasons": ["visual_gate_unmet"],
+            },
+            offset_seconds=2,
+        ),
+    ]
+    deps = cast(Any, SimpleNamespace(repository=_FakeRepository(logs)))
+
+    result = collect_asset_memory_context(
+        state=cast(Any, _state(current_pipeline_id)),
+        deps=deps,
+        core_loop_type="flight_sim_3d",
+    )
+
+    reasons = cast(list[str], result.retrieval_profile.get("failure_reasons", []))
+    tokens = cast(list[str], result.retrieval_profile.get("failure_tokens", []))
+    assert "builder_quality_floor_unmet" in reasons
+    assert "flight_mechanics_not_found" in tokens
+
+
 def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -> None:
     current_pipeline_id = uuid4()
     deps = cast(

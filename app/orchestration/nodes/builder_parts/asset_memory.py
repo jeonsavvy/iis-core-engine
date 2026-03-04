@@ -352,13 +352,22 @@ def collect_asset_memory_context(
             if variant_theme:
                 theme_scores[variant_theme].append(_to_float(metadata.get("final_composite_score"), 0.0))
 
-        if log.stage == PipelineStage.QA_RUNTIME and log.status in {PipelineStatus.RETRY, PipelineStatus.ERROR}:
+        if log.stage in {PipelineStage.BUILD, PipelineStage.QA_RUNTIME, PipelineStage.QA_QUALITY} and log.status in {
+            PipelineStatus.RETRY,
+            PipelineStatus.ERROR,
+        }:
             qa_failure_samples += 1
             reason = str(log.reason or metadata.get("reason") or "").strip()
             if reason:
                 failure_reason_counter[reason] += 1
 
-            for key in ("failed_checks", "fatal_errors"):
+            for key in (
+                "failed_checks",
+                "fatal_errors",
+                "blocking_reasons",
+                "quality_floor_fail_reasons",
+                "playability_fail_reasons",
+            ):
                 for token in _to_str_list(metadata.get(key)):
                     failure_token_counter[token] += 1
 

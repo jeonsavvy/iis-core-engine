@@ -275,3 +275,55 @@ def test_evaluate_intent_gate_fails_when_restart_or_verbs_are_missing() -> None:
     assert report["ok"] is False
     assert "player_verbs" in report["failed_items"]
     assert "fail_restart_loop" in report["failed_items"]
+
+
+def test_evaluate_intent_gate_does_not_hard_fail_on_non_negotiable_advisory_only() -> None:
+    html = """
+    <html><body>
+      <script>
+        const state = { mode: "flight" };
+        function restartGame() {}
+        function update() {}
+        function throttle() {}
+        function checkpoint() {}
+      </script>
+    </body></html>
+    """
+    report = evaluate_intent_gate(
+        html,
+        intent_contract={
+            "fantasy": "섬을 돌아다니는 풀3d 비행기 시뮬레이터",
+            "player_verbs": ["throttle", "checkpoint"],
+            "camera_interaction": "camera follows aircraft",
+            "progression_loop": ["checkpoint lap"],
+            "fail_restart_loop": "fail and restart",
+            "non_negotiables": [
+                "preserve_requested_intent_without_generic_substitution",
+                "maintain immersion in cockpit fantasy",
+            ],
+        },
+    )
+
+    assert report["checks"]["non_negotiables"] is True
+    assert report["ok"] is True
+    assert "non_negotiables_advisory" in report["reason_by_item"]
+
+
+def test_quality_and_gameplay_score_drop_when_hard_failures_exist() -> None:
+    settings = Settings(qa_min_quality_score=40, qa_min_gameplay_score=55)
+    html = """
+    <html><body>
+      <canvas id="game"></canvas>
+      <script>
+        window.__iis_game_boot_ok = true;
+        window.IISLeaderboard = {};
+      </script>
+    </body></html>
+    """
+    quality = evaluate_quality_contract(settings, html, runtime_engine_mode="3d_three")
+    gameplay = evaluate_gameplay_gate(settings, html)
+
+    assert quality.ok is False
+    assert quality.score < quality.threshold
+    assert gameplay.ok is False
+    assert gameplay.score < gameplay.threshold

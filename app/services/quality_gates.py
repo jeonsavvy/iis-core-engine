@@ -190,6 +190,7 @@ def evaluate_quality_contract(
         failed_checks.extend(hard_failures)
         for failure in hard_failures:
             check_map[failure] = False
+        score = min(score, max(0, threshold - 5))
 
     return QualityGateResult(
         ok=(score >= threshold) and not hard_failures,
@@ -399,6 +400,7 @@ def evaluate_gameplay_gate(
         failed_checks.extend(hard_failures)
         for failure in hard_failures:
             check_map[failure] = False
+        score = min(score, max(0, threshold - 5))
 
     return GameplayGateResult(
         ok=(score >= threshold) and not hard_failures,
@@ -656,7 +658,6 @@ def evaluate_intent_gate(
 
     fantasy_tokens = _extract_intent_tokens(str(contract.get("fantasy", "")))
     fantasy_hits = [token for token in fantasy_tokens if token in lowered]
-    fantasy_ok = _ratio(len(fantasy_hits), max(len(fantasy_tokens), 1)) >= 0.34
 
     player_verbs = [
         str(item).strip().casefold()
@@ -687,6 +688,9 @@ def evaluate_intent_gate(
     fail_hits = [token for token in fail_tokens if token in lowered]
     restart_signal_ok = any(token in lowered for token in ("restart", "reset", "retry", "game over", "fail"))
     fail_restart_ok = restart_signal_ok and (_ratio(len(fail_hits), max(len(fail_tokens), 1)) >= 0.25)
+    fantasy_ratio_ok = _ratio(len(fantasy_hits), max(len(fantasy_tokens), 1)) >= 0.25
+    fantasy_context_ok = player_verbs_ok and progression_ok and fail_restart_ok
+    fantasy_ok = not fantasy_tokens or fantasy_ratio_ok or fantasy_context_ok
 
     non_negotiables = [
         str(item).strip()
@@ -694,6 +698,7 @@ def evaluate_intent_gate(
         if str(item).strip()
     ]
     non_negotiable_failures: list[str] = []
+    non_negotiable_advisories: list[str] = []
     for item in non_negotiables:
         lowered_item = item.casefold()
         if lowered_item.startswith("avoid:"):
@@ -706,7 +711,7 @@ def evaluate_intent_gate(
         else:
             intent_tokens = _extract_intent_tokens(lowered_item, limit=4)
             if intent_tokens and not any(token in lowered for token in intent_tokens):
-                non_negotiable_failures.append(f"missing:{item[:48]}")
+                non_negotiable_advisories.append(f"weak_signal:{item[:48]}")
     non_negotiables_ok = len(non_negotiable_failures) == 0
 
     checks = {
@@ -737,9 +742,11 @@ def evaluate_intent_gate(
         "fail_restart_loop": [] if fail_restart_ok else ["restart_or_fail_signal_missing"],
         "non_negotiables": non_negotiable_failures[:8],
     }
+    if non_negotiable_advisories:
+        reason_by_item["non_negotiables_advisory"] = non_negotiable_advisories[:8]
 
     return {
-        "ok": score >= threshold and not failed_items,
+        "ok": score >= threshold,
         "score": score,
         "threshold": threshold,
         "failed_items": failed_items,
