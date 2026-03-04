@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from app.core.config import Settings
 from app.orchestration.graph.pipeline_graph import build_pipeline_graph
@@ -63,7 +64,14 @@ class PipelineRunner:
             retry_plan = self._build_vertex_retry_plan(job=job, final_state=final_state)
             metadata_update["vertex_retry"] = retry_plan["vertex_retry"]
             metadata_update["retry_not_before_at"] = retry_plan["retry_not_before_at"]
-            status = retry_plan["status"]
+            retry_status_raw = retry_plan.get("status")
+            if isinstance(retry_status_raw, PipelineStatus):
+                retry_status = retry_status_raw
+            else:
+                retry_status = PipelineStatus.ERROR
+            resume_payload = self._build_resume_payload(status=retry_status, final_state=final_state)
+            metadata_update.update(resume_payload)
+            status = retry_status
             error_reason = retry_plan["error_reason"]
         else:
             metadata_update["vertex_retry"] = {
@@ -73,6 +81,8 @@ class PipelineRunner:
                 "last_stage": None,
             }
             metadata_update["retry_not_before_at"] = None
+            metadata_update["resume_stage"] = None
+            metadata_update["resume_outputs"] = {}
 
         self.repository.update_pipeline_metadata(
             job.pipeline_id,
@@ -201,6 +211,55 @@ class PipelineRunner:
                 "last_stage": last_stage,
                 "state": "scheduled",
             },
+        }
+
+    def _build_resume_payload(self, *, status: PipelineStatus, final_state: PipelineState) -> dict[str, object]:
+        if status != PipelineStatus.QUEUED:
+            return {"resume_stage": None, "resume_outputs": {}}
+        reason = str(final_state.get("reason") or "").strip().casefold()
+        if reason != "build_vertex_resource_exhausted":
+            return {"resume_stage": None, "resume_outputs": {}}
+        outputs = final_state.get("outputs", {})
+        if not isinstance(outputs, dict):
+            return {"resume_stage": None, "resume_outputs": {}}
+        snapshot_keys = (
+            "safe_slug",
+            "pipeline_version",
+            "analyze_contract",
+            "analyze_contract_source",
+            "analyze_contract_meta",
+            "research_summary",
+            "gdd",
+            "gdd_source",
+            "gdd_meta",
+            "plan_contract",
+            "plan_contract_source",
+            "plan_contract_meta",
+            "design_spec",
+            "design_spec_source",
+            "design_spec_meta",
+            "design_contract",
+            "design_contract_source",
+            "design_contract_meta",
+            "art_direction_contract",
+            "intent_contract",
+            "intent_contract_hash",
+            "synapse_contract",
+            "synapse_contract_hash",
+            "shared_generation_contract",
+            "shared_generation_contract_hash",
+        )
+        resume_outputs: dict[str, Any] = {}
+        for key in snapshot_keys:
+            value = outputs.get(key)
+            if value is None:
+                continue
+            resume_outputs[key] = value
+        if not resume_outputs:
+            return {"resume_stage": None, "resume_outputs": {}}
+        return {
+            "resume_stage": "build",
+            "resume_outputs": resume_outputs,
         }
 
     @staticmethod

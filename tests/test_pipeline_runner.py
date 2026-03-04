@@ -254,6 +254,20 @@ class FakeResourceExhaustedVertexService(FakeVertexService):
         )
 
 
+class FakeBuildResourceExhaustedVertexService(FakeVertexService):
+    def generate_codegen_candidate_artifact(self, *, html_content: str, **_kwargs):
+        _ = html_content
+        return SimpleNamespace(
+            payload={"artifact_html": ""},
+            meta={
+                "generation_source": "stub",
+                "model": "fake-pro",
+                "reason": "vertex_error:ClientError",
+                "vertex_error": "429 RESOURCE_EXHAUSTED",
+            },
+        )
+
+
 def _make_runner(repository: PipelineRepository) -> PipelineRunner:
     settings = Settings(telegram_bot_token="")
     return PipelineRunner(
@@ -393,3 +407,26 @@ def test_pipeline_runner_schedules_retry_on_vertex_resource_exhausted() -> None:
     assert isinstance(retry_meta.get("not_before_at"), str)
     logs = repository.list_logs(job.pipeline_id)
     assert any(log.stage == PipelineStage.PLAN and log.status == PipelineStatus.RETRY for log in logs)
+
+
+def test_pipeline_runner_persists_resume_snapshot_for_build_quota_retry() -> None:
+    repository = PipelineRepository()
+    job = repository.create_pipeline(TriggerRequest(keyword="build retry on quota", qa_fail_until=0))
+    queued_job = repository.claim_next_queued_pipeline()
+    assert queued_job is not None
+
+    runner = _make_runner_with_vertex(repository, FakeBuildResourceExhaustedVertexService())
+    runner.run(queued_job)
+
+    final_job = repository.get_pipeline(job.pipeline_id)
+    assert final_job is not None
+    assert final_job.status == PipelineStatus.QUEUED
+    assert final_job.error_reason == "build_vertex_resource_exhausted"
+    assert final_job.metadata.get("resume_stage") == "build"
+    resume_outputs = final_job.metadata.get("resume_outputs")
+    assert isinstance(resume_outputs, dict)
+    assert isinstance(resume_outputs.get("analyze_contract"), dict)
+    assert isinstance(resume_outputs.get("gdd"), dict)
+    assert isinstance(resume_outputs.get("plan_contract"), dict)
+    assert isinstance(resume_outputs.get("design_spec"), dict)
+    assert isinstance(resume_outputs.get("design_contract"), dict)

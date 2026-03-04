@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from pydantic import BaseModel
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from app.core.config import Settings
 from app.services.vertex_models import GameConfigModel
@@ -49,6 +49,20 @@ except Exception:  # pragma: no cover - runtime safeguard
     genai_types = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+_NON_RETRYABLE_VERTEX_TOKENS = (
+    "resource_exhausted",
+    "resource exhausted",
+    "429",
+    "rate limit",
+    "quota",
+    "too many requests",
+)
+
+
+def _is_retryable_vertex_exception(exc: BaseException) -> bool:
+    text = str(exc or "").casefold()
+    return not any(token in text for token in _NON_RETRYABLE_VERTEX_TOKENS)
 
 
 class VertexService:
@@ -301,7 +315,7 @@ class VertexService:
 
     @retry(
         reraise=True,
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(_is_retryable_vertex_exception),
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.5, max=3),
     )
@@ -310,7 +324,7 @@ class VertexService:
 
     @retry(
         reraise=True,
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(_is_retryable_vertex_exception),
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.5, max=3),
     )

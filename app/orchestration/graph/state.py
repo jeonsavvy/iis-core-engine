@@ -30,6 +30,12 @@ def create_initial_state(
     log_sink: Callable[[PipelineLogRecord], None] | None = None,
 ) -> PipelineState:
     outputs: dict[str, Any] = {}
+    resume_outputs = job.metadata.get("resume_outputs")
+    if isinstance(resume_outputs, dict):
+        outputs.update(resume_outputs)
+    resume_stage = job.metadata.get("resume_stage")
+    if isinstance(resume_stage, str) and resume_stage.strip():
+        outputs["resume_stage"] = resume_stage.strip().casefold()
     safe_slug = job.metadata.get("safe_slug")
     if isinstance(safe_slug, str) and safe_slug:
         outputs["safe_slug"] = safe_slug

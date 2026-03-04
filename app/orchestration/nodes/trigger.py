@@ -29,6 +29,24 @@ def run(state: PipelineState, _deps: NodeDependencies) -> PipelineState:
     if gated_state is not None:
         return gated_state
 
+    resume_stage = str(state["outputs"].get("resume_stage", "")).strip().casefold()
+    if resume_stage in {"plan", "design", "build", "qa_runtime", "qa_quality", "release", "report"}:
+        cached = state["outputs"].get("analyze_contract")
+        if isinstance(cached, dict) and cached:
+            state["status"] = PipelineStatus.RUNNING
+            return append_log(
+                state,
+                stage=PipelineStage.ANALYZE,
+                status=PipelineStatus.SUCCESS,
+                agent_name=PipelineAgentName.ANALYZER,
+                message="분석 재개: 기존 analyze contract를 재사용합니다.",
+                metadata={
+                    "resume_stage": resume_stage,
+                    "reused_cached_contract": True,
+                    "contract_status": "pass",
+                },
+            )
+
     settings = _deps.vertex_service.settings
     strict_vertex_only = bool(getattr(settings, "strict_vertex_only", True))
     shared_contract = build_shared_generation_contract(

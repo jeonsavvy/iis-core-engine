@@ -70,6 +70,25 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     if gated_state is not None:
         return gated_state
 
+    resume_stage = str(state["outputs"].get("resume_stage", "")).strip().casefold()
+    if resume_stage in {"build", "qa_runtime", "qa_quality", "release", "report"}:
+        cached_spec = state["outputs"].get("design_spec")
+        cached_contract = state["outputs"].get("design_contract")
+        if isinstance(cached_spec, dict) and cached_spec and isinstance(cached_contract, dict) and cached_contract:
+            state["status"] = PipelineStatus.RUNNING
+            return append_log(
+                state,
+                stage=PipelineStage.DESIGN,
+                status=PipelineStatus.SUCCESS,
+                agent_name=PipelineAgentName.DESIGNER,
+                message="디자인 재개: 기존 design spec/contract를 재사용합니다.",
+                metadata={
+                    "resume_stage": resume_stage,
+                    "reused_cached_contract": True,
+                    "contract_status": "pass",
+                },
+            )
+
     gdd_output = state["outputs"].get("gdd", {})
     visual_style = str(gdd_output.get("visual_style", "neon-minimal"))
     keyword = state["keyword"]

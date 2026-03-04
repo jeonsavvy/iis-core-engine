@@ -173,6 +173,87 @@ def test_trigger_architect_stylist_populate_contract_outputs() -> None:
     assert any(log.stage.value == "design" for log in state["logs"])
 
 
+def test_trigger_reuses_cached_analyze_contract_on_build_resume(monkeypatch) -> None:
+    state = _base_state()
+    state["outputs"]["resume_stage"] = "build"
+    state["outputs"]["analyze_contract"] = {"intent": "cached"}
+    deps = _deps(_VertexStub())
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_analyze_contract",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("generate_analyze_contract should not be called")),
+    )
+
+    result = trigger.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    analyze_logs = [log for log in result["logs"] if log.stage.value == "analyze"]
+    assert analyze_logs
+    assert "재개" in analyze_logs[-1].message
+
+
+def test_architect_reuses_cached_plan_contract_on_build_resume(monkeypatch) -> None:
+    state = _base_state()
+    state["outputs"]["resume_stage"] = "build"
+    state["outputs"]["gdd"] = {"title": "cached", "genre": "arcade", "objective": "survive", "visual_style": "neon"}
+    state["outputs"]["plan_contract"] = {
+        "core_mechanics": ["move"],
+        "progression_plan": ["intro"],
+        "encounter_plan": ["wave"],
+        "risk_reward_plan": ["safe"],
+        "control_model": "keyboard",
+        "balance_baseline": {"base_hp": 3.0},
+    }
+    deps = _deps(_VertexStub())
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_gdd_bundle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("generate_gdd_bundle should not be called")),
+    )
+
+    result = architect.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    plan_logs = [log for log in result["logs"] if log.stage.value == "plan"]
+    assert plan_logs
+    assert "재개" in plan_logs[-1].message
+
+
+def test_stylist_reuses_cached_design_contract_on_build_resume(monkeypatch) -> None:
+    state = _base_state()
+    state["outputs"]["resume_stage"] = "build"
+    state["outputs"]["gdd"] = {"genre": "arcade"}
+    state["outputs"]["design_spec"] = {
+        "visual_style": "neon",
+        "palette": ["#00FFEE", "#111111", "#FF3366", "#F2F2F2"],
+        "hud": "score/time/hp",
+        "viewport_width": 1280,
+        "viewport_height": 720,
+        "safe_area_padding": 24,
+        "min_font_size_px": 14,
+        "text_overflow_policy": "ellipsis-clamp",
+        "typography": "inter-bold-hud",
+        "thumbnail_concept": "arena burst",
+    }
+    state["outputs"]["design_contract"] = {
+        "camera_ui_contract": ["stable camera", "hud"],
+        "asset_blueprint_2d3d": ["player", "enemy", "bg"],
+        "scene_layers": ["fg", "bg"],
+        "feedback_fx_contract": ["hit flash"],
+        "readability_contract": ["contrast"],
+    }
+    deps = _deps(_VertexStub())
+    monkeypatch.setattr(
+        deps.vertex_service,
+        "generate_design_spec",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("generate_design_spec should not be called")),
+    )
+
+    result = stylist.run(cast(Any, state), cast(Any, deps))
+    assert result["status"] == PipelineStatus.RUNNING
+    design_logs = [log for log in result["logs"] if log.stage.value == "design"]
+    assert design_logs
+    assert "재개" in design_logs[-1].message
+
+
 def test_builder_contract_validator_blocks_weak_contracts_in_strict_mode() -> None:
     state = _base_state()
     vertex = _VertexStub(contract_mode="weak")
