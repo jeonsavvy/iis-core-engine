@@ -14,6 +14,7 @@ from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import BuildArtifactPayload, DesignSpecPayload, GDDPayload, IntentContractPayload
 from app.schemas.pipeline import PipelineAgentName, PipelineStage, PipelineStatus
 from app.services.quality_types import GameplayGateResult, PlayabilityGateResult, QualityGateResult, SmokeCheckResult
+from app.services.visual_contract import resolve_visual_contract_profile
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,23 @@ def _normalize_core_loop_type(core_loop_type: str) -> str:
 def _evaluate_visual_or_fallback(
     *,
     deps: NodeDependencies,
-    visual_metrics: dict[str, float] | None,
+    visual_metrics: dict[str, object] | None,
     core_loop_type: str,
+    runtime_engine_mode: str,
 ) -> QualityGateResult:
     evaluate_visual = getattr(deps.quality_service, "evaluate_visual_gate", None)
     if callable(evaluate_visual):
-        evaluated = evaluate_visual(visual_metrics, genre_engine=core_loop_type)
+        try:
+            evaluated = evaluate_visual(
+                visual_metrics,
+                genre_engine=core_loop_type,
+                runtime_engine_mode=runtime_engine_mode,
+            )
+        except TypeError:
+            evaluated = evaluate_visual(
+                visual_metrics,
+                genre_engine=core_loop_type,
+            )
         if isinstance(evaluated, QualityGateResult):
             return evaluated
     has_metrics = bool(visual_metrics)
@@ -268,6 +280,7 @@ def _assess_artifact_quality(
         deps=deps,
         visual_metrics=smoke.visual_metrics,
         core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
     )
     runtime_warning_codes = _critical_runtime_warning_codes(smoke.non_fatal_warnings)
     runtime_warning_penalty = _runtime_warning_penalty(runtime_warning_codes)
@@ -546,6 +559,11 @@ def _build_scaffold_first_production_artifact(
         intent_contract=intent_contract,
         synapse_contract=synapse_contract,
     )
+    visual_contract = resolve_visual_contract_profile(
+        core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
+        keyword=state["keyword"],
+    ).as_dict()
 
     quality_floor_score = _coerce_int(
         getattr(deps.vertex_service.settings, "builder_quality_floor_score", 82),
@@ -672,6 +690,8 @@ def _build_scaffold_first_production_artifact(
             "non_fatal_warnings": final_assessment.smoke.non_fatal_warnings,
         },
         "intent": final_assessment.intent_gate_report,
+        "visual_metrics": final_assessment.smoke.visual_metrics or {},
+        "visual_contract": visual_contract,
     }
 
     selected_generation_meta = dict(codegen_result.meta or {})
@@ -718,6 +738,8 @@ def _build_scaffold_first_production_artifact(
         "quality_floor_enforced": quality_floor_enforced,
         "quality_floor_passed": quality_floor_passed,
         "quality_floor_fail_reasons": quality_floor_fail_reasons,
+        "visual_contract": visual_contract,
+        "visual_metrics": final_assessment.smoke.visual_metrics or {},
         "vertex_resource_exhausted_retryable": vertex_resource_exhausted_retryable,
         "quality_gate_report": quality_gate_report,
         "intent_gate_report": final_assessment.intent_gate_report,

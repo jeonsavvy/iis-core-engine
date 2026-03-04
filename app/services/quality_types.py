@@ -11,7 +11,7 @@ class SmokeCheckResult:
     fatal_errors: list[str] | None = None
     non_fatal_warnings: list[str] | None = None
     screenshot_bytes: bytes | None = None
-    visual_metrics: dict[str, float] | None = None
+    visual_metrics: dict[str, object] | None = None
 
 
 @dataclass

@@ -66,6 +66,59 @@ def test_evaluate_visual_gate_fails_without_metrics() -> None:
     assert "visual_metrics_missing" in result.failed_checks
 
 
+def test_evaluate_visual_gate_uses_multi_frame_samples_for_motion() -> None:
+    settings = Settings(qa_min_visual_score=45)
+    metrics = {
+        "canvas_width": 1280,
+        "canvas_height": 720,
+        "luminance_std": 19.0,
+        "luminance_std_samples": [18.8, 19.4, 19.1, 19.6],
+        "non_dark_ratio": 0.48,
+        "non_dark_ratio_samples": [0.42, 0.46, 0.51, 0.49],
+        "color_bucket_count": 23.0,
+        "color_bucket_count_samples": [22.0, 24.0, 23.0, 25.0],
+        "edge_energy": 0.023,
+        "edge_energy_samples": [0.022, 0.024, 0.023, 0.025],
+        "motion_delta": 0.0002,
+        "motion_delta_samples": [0.0002, 0.00095, 0.00084],
+        "frame_probe_count": 4,
+    }
+
+    result = evaluate_visual_gate(
+        settings,
+        metrics,
+        genre_engine="webgl_three_runner",
+        runtime_engine_mode="3d_three",
+    )
+
+    assert result.ok is True
+    assert "motion_presence" not in result.failed_checks
+
+
+def test_evaluate_visual_gate_applies_2d_profile() -> None:
+    settings = Settings(qa_min_visual_score=45)
+    metrics = {
+        "canvas_width": 960,
+        "canvas_height": 540,
+        "luminance_std": 16.4,
+        "non_dark_ratio": 0.5,
+        "color_bucket_count": 15.0,
+        "edge_energy": 0.0145,
+        "motion_delta": 0.0005,
+        "frame_probe_count": 2,
+    }
+
+    result = evaluate_visual_gate(
+        settings,
+        metrics,
+        genre_engine="topdown_roguelike_shooter",
+        runtime_engine_mode="2d_phaser",
+    )
+
+    assert result.ok is True
+    assert "advanced_visual_density" not in result.failed_checks
+
+
 def test_evaluate_artifact_contract_requires_hybrid_engine_bundle() -> None:
     settings = Settings(qa_min_artifact_contract_score=70)
     manifest = {"bundle_kind": "single_html", "files": [{"path": "index.html"}]}

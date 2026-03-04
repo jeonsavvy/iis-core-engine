@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.services.visual_contract import resolve_visual_contract_profile
+
 
 def build_analyze_contract_prompt(keyword: str) -> str:
     return (
@@ -231,6 +233,12 @@ def build_codegen_prompt(
     synapse_contract_json = json.dumps(synapse_contract or {}, ensure_ascii=False)
     lowered_engine_mode = str(runtime_engine_mode).strip().casefold()
     runtime_stack = "phaser.js" if lowered_engine_mode == "2d_phaser" else "three.js"
+    visual_contract = resolve_visual_contract_profile(
+        core_loop_type=core_loop_type,
+        runtime_engine_mode=runtime_engine_mode,
+        keyword=keyword,
+    )
+    visual_contract_json = json.dumps(visual_contract.as_dict(), ensure_ascii=False)
     return (
         "You are a principal web game engineer. Produce one complete, high-quality game artifact.\n"
         "Single-pass policy: one response only, no iterative refinement assumptions.\n\n"
@@ -251,6 +259,11 @@ def build_codegen_prompt(
         "- Keep explicit fail/restart loop and avoid unavoidable death in first 3 seconds.\n"
         "- Keep analog/time-based movement; avoid one-step quantized controls.\n"
         "- Keep HUD concise and player-facing.\n\n"
+        "=== Visual Contract ===\n"
+        f"{visual_contract_json}\n"
+        "- Hit or exceed contrast/diversity/edge/motion minima from this contract.\n"
+        "- Build layered depth and readable silhouettes to satisfy cohesion + composition bounds.\n"
+        "- Treat these metrics as hard acceptance targets, not optional polish notes.\n\n"
         "=== Output Contract ===\n"
         "- Preserve safe-area and overflow guard behavior.\n"
         "- Maintain at least 3 visual layers with readable silhouettes.\n"

@@ -6,6 +6,7 @@ from typing import Any
 from app.orchestration.nodes.builder_parts.genre_engine import get_genre_quality_floor, resolve_genre_engine
 from app.core.config import Settings
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult
+from app.services.visual_contract import resolve_visual_contract_profile
 
 
 def evaluate_quality_contract(
@@ -459,32 +460,77 @@ def evaluate_gameplay_gate(
 
 def evaluate_visual_gate(
     settings: Settings,
-    visual_metrics: dict[str, float] | None,
+    visual_metrics: dict[str, Any] | None,
     *,
     genre_engine: str | None = None,
+    runtime_engine_mode: str | None = None,
 ) -> QualityGateResult:
-    metrics = visual_metrics or {}
-    engine = (genre_engine or "").strip().casefold()
-    luminance_std = float(metrics.get("luminance_std", 0.0))
-    non_dark_ratio = float(metrics.get("non_dark_ratio", 0.0))
-    color_bucket_count = float(metrics.get("color_bucket_count", 0.0))
-    edge_energy = float(metrics.get("edge_energy", 0.0))
-    motion_delta = float(metrics.get("motion_delta", 0.0))
-    width = float(metrics.get("canvas_width", 0.0))
-    height = float(metrics.get("canvas_height", 0.0))
+    def _metric_series(name: str) -> list[float]:
+        values: list[float] = []
+        primary = metrics.get(name)
+        if isinstance(primary, (int, float)) and not isinstance(primary, bool):
+            values.append(float(primary))
+        samples = metrics.get(f"{name}_samples")
+        if isinstance(samples, list):
+            for row in samples:
+                if isinstance(row, (int, float)) and not isinstance(row, bool):
+                    values.append(float(row))
+        return [value for value in values if value >= 0.0]
+
+    def _median(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        sorted_values = sorted(values)
+        middle = len(sorted_values) // 2
+        if len(sorted_values) % 2 == 1:
+            return sorted_values[middle]
+        return (sorted_values[middle - 1] + sorted_values[middle]) / 2.0
+
+    metrics = visual_metrics if isinstance(visual_metrics, dict) else {}
+    contract = resolve_visual_contract_profile(
+        core_loop_type=genre_engine,
+        runtime_engine_mode=runtime_engine_mode,
+    )
+    luminance_samples = _metric_series("luminance_std")
+    non_dark_samples = _metric_series("non_dark_ratio")
+    color_samples = _metric_series("color_bucket_count")
+    edge_samples = _metric_series("edge_energy")
+    motion_samples = _metric_series("motion_delta")
+
+    luminance_std = _median(luminance_samples)
+    non_dark_ratio = _median(non_dark_samples)
+    color_bucket_count = _median(color_samples)
+    edge_energy = _median(edge_samples)
+    motion_delta = max(motion_samples) if motion_samples else 0.0
+    width = float(metrics.get("canvas_width", 0.0)) if isinstance(metrics.get("canvas_width"), (int, float)) else 0.0
+    height = float(metrics.get("canvas_height", 0.0)) if isinstance(metrics.get("canvas_height"), (int, float)) else 0.0
+    frame_probe_count = int(metrics.get("frame_probe_count", 0)) if isinstance(metrics.get("frame_probe_count"), (int, float)) else len(luminance_samples)
 
     checks: list[tuple[str, bool, int]] = [
         ("canvas_size_present", width >= 640 and height >= 360, 10),
-        ("visual_contrast", luminance_std >= 22.0, 20),
-        ("color_diversity", color_bucket_count >= 22.0, 16),
-        ("composition_balance", 0.08 <= non_dark_ratio <= 0.92, 12),
-        ("edge_definition", edge_energy >= 0.025, 18),
-        ("motion_presence", motion_delta >= 0.0012, 14),
+        ("visual_contrast", luminance_std >= contract.contrast_min, 20),
+        ("color_diversity", color_bucket_count >= contract.color_diversity_min, 16),
+        ("composition_balance", contract.composition_non_dark_min <= non_dark_ratio <= contract.composition_non_dark_max, 12),
+        ("edge_definition", edge_energy >= contract.edge_energy_min, 18),
+        ("motion_presence", motion_delta >= contract.motion_delta_min, 14),
         ("metrics_available", bool(metrics), 10),
-        ("visual_cohesion", luminance_std >= 18.0 and edge_energy >= 0.02 and color_bucket_count >= 18.0, 12),
+        (
+            "visual_cohesion",
+            luminance_std >= contract.cohesion_contrast_min
+            and edge_energy >= contract.cohesion_edge_min
+            and color_bucket_count >= contract.cohesion_color_min,
+            12,
+        ),
+        ("multi_frame_probe", frame_probe_count >= 2, 8),
     ]
-    if engine in {"webgl_three_runner", "flight_sim_3d"}:
-        checks.append(("advanced_visual_density", color_bucket_count >= 28.0 and edge_energy >= 0.034, 12))
+    if contract.advanced_density_enabled:
+        checks.append(
+            (
+                "advanced_visual_density",
+                color_bucket_count >= contract.advanced_density_color_min and edge_energy >= contract.advanced_density_edge_min,
+                12,
+            )
+        )
 
     total_weight = sum(weight for _, _, weight in checks)
     passed_weight = sum(weight for _, passed, weight in checks if passed)
@@ -496,9 +542,9 @@ def evaluate_visual_gate(
 
     if not metrics:
         hard_failures.append("visual_metrics_missing")
-    if color_bucket_count < 10:
+    if color_bucket_count < max(8.0, contract.color_diversity_min * 0.45):
         hard_failures.append("visual_palette_too_flat")
-    if edge_energy < 0.015:
+    if edge_energy < max(0.01, contract.edge_energy_min * 0.6):
         hard_failures.append("visual_shape_definition_too_low")
 
     if hard_failures:

@@ -66,10 +66,17 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         intent_contract=typed_intent_contract,
         synapse_contract=typed_synapse_contract,
     )
-    visual_result = deps.quality_service.evaluate_visual_gate(
-        visual_metrics,
-        genre_engine=str(state["outputs"].get("genre_engine", "")),
-    )
+    try:
+        visual_result = deps.quality_service.evaluate_visual_gate(
+            visual_metrics,
+            genre_engine=str(state["outputs"].get("genre_engine", "")),
+            runtime_engine_mode=str(state["outputs"].get("runtime_engine_mode", "")),
+        )
+    except TypeError:
+        visual_result = deps.quality_service.evaluate_visual_gate(
+            visual_metrics,
+            genre_engine=str(state["outputs"].get("genre_engine", "")),
+        )
     artifact_result = deps.quality_service.evaluate_artifact_contract(
         state["outputs"].get("artifact_manifest") if isinstance(state["outputs"].get("artifact_manifest"), dict) else None,
         art_direction_contract=state["outputs"].get("art_direction_contract")

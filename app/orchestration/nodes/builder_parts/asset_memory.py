@@ -9,6 +9,7 @@ from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.orchestration.nodes.builder_parts.substrates import resolve_substrate_profile
 from app.schemas.pipeline import PipelineLogRecord, PipelineStage, PipelineStatus
+from app.services.visual_contract import canonicalize_visual_token
 
 
 @dataclass(frozen=True)
@@ -176,7 +177,9 @@ def _build_context_from_registry_entries(
         for reason in _to_str_list(row.get("failure_reasons")):
             failure_reason_counter[reason] += 1
         for token in _to_str_list(row.get("failure_tokens")):
-            failure_token_counter[token] += 1
+            normalized_token = canonicalize_visual_token(token)
+            if normalized_token:
+                failure_token_counter[normalized_token] += 1
 
     preferred_asset_pack = max(pack_scores.items(), key=lambda item: mean(item[1]))[0] if pack_scores else None
     preferred_variant_id = max(variant_scores.items(), key=lambda item: mean(item[1]))[0] if variant_scores else None
@@ -253,7 +256,9 @@ def _merge_improvement_queue_signals(
         if reason:
             reason_counter[reason] += 1
         for token in _to_str_list(row.get("tokens")):
-            token_counter[token] += 1
+            normalized_token = canonicalize_visual_token(token)
+            if normalized_token:
+                token_counter[normalized_token] += 1
 
     top_reasons = [key for key, _ in reason_counter.most_common(4)]
     top_tokens = [key for key, _ in token_counter.most_common(8)]
@@ -369,7 +374,9 @@ def collect_asset_memory_context(
                 "playability_fail_reasons",
             ):
                 for token in _to_str_list(metadata.get(key)):
-                    failure_token_counter[token] += 1
+                    normalized_token = canonicalize_visual_token(token)
+                    if normalized_token:
+                        failure_token_counter[normalized_token] += 1
 
     preferred_asset_pack = max(pack_scores.items(), key=lambda row: mean(row[1]))[0] if pack_scores else None
     preferred_variant_id = max(variant_scores.items(), key=lambda row: mean(row[1]))[0] if variant_scores else None

@@ -145,6 +145,7 @@ def test_collect_asset_memory_context_reads_recent_build_and_failure_signals() -
     assert profile.get("preferred_variant_theme") == "readability"
     assert "visual_quality_below_threshold" in failure_reasons
     assert "contrast" in failure_tokens
+    assert "diversity" in failure_tokens
     assert result.hint
     assert "Reuse proven asset pack webgl_neon_highway." in result.hint
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -25,6 +26,60 @@ from app.services.quality_smoke import (
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult, SmokeCheckResult
 
 
+def _safe_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            numeric = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _aggregate_visual_metrics(samples: list[dict[str, float]]) -> dict[str, object] | None:
+    if not samples:
+        return None
+    first = samples[0]
+    aggregated: dict[str, object] = dict(first)
+    for key in ("luminance_std", "non_dark_ratio", "color_bucket_count", "edge_energy", "frame_hash"):
+        values: list[float] = []
+        for row in samples:
+            numeric = _safe_float(row.get(key))
+            if numeric is not None:
+                values.append(round(numeric, 6))
+        if values:
+            aggregated[f"{key}_samples"] = values
+            aggregated[key] = round(sum(values) / len(values), 6)
+
+    frame_hash_values = [
+        value
+        for value in [
+            _safe_float(row.get("frame_hash"))
+            for row in samples
+        ]
+        if value is not None
+    ]
+    motion_samples = [
+        round(abs(frame_hash_values[index + 1] - frame_hash_values[index]), 6)
+        for index in range(len(frame_hash_values) - 1)
+    ]
+    if motion_samples:
+        aggregated["motion_delta_samples"] = motion_samples
+        aggregated["motion_delta"] = round(max(motion_samples), 6)
+    aggregated["frame_probe_count"] = len(samples)
+    return aggregated
+
+
 class QualityService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -39,7 +94,7 @@ class QualityService:
         fatal_errors: list[str] = []
         non_fatal_warnings: list[str] = []
         screenshot_bytes = None
-        visual_metrics: dict[str, float] | None = None
+        visual_metrics: dict[str, object] | None = None
 
         try:
             with TemporaryDirectory(prefix="iis-smoke-") as tmp_dir:
@@ -127,16 +182,14 @@ class QualityService:
                             screenshot_bytes = canvas.first.screenshot(type="png")
                         else:
                             screenshot_bytes = page.screenshot(type="png")
-                        visual_metrics = capture_visual_metrics(page)
-                        if visual_metrics:
-                            page.wait_for_timeout(120)
-                            second_metrics = capture_visual_metrics(page)
-                            if second_metrics:
-                                motion_delta = abs(
-                                    float(second_metrics.get("frame_hash", 0.0))
-                                    - float(visual_metrics.get("frame_hash", 0.0))
-                                )
-                                visual_metrics["motion_delta"] = round(motion_delta, 6)
+                        frame_samples: list[dict[str, float]] = []
+                        for attempt in range(4):
+                            captured = capture_visual_metrics(page)
+                            if captured:
+                                frame_samples.append(captured)
+                            if attempt < 3:
+                                page.wait_for_timeout(140)
+                        visual_metrics = _aggregate_visual_metrics(frame_samples)
                     except Exception as e:
                         non_fatal_warnings.append(f"screenshot_failed: {e}")
 
@@ -216,14 +269,16 @@ class QualityService:
 
     def evaluate_visual_gate(
         self,
-        visual_metrics: dict[str, float] | None,
+        visual_metrics: dict[str, Any] | None,
         *,
         genre_engine: str | None = None,
+        runtime_engine_mode: str | None = None,
     ) -> QualityGateResult:
         return evaluate_visual_gate_gate(
             self.settings,
             visual_metrics,
             genre_engine=genre_engine,
+            runtime_engine_mode=runtime_engine_mode,
         )
 
     def evaluate_artifact_contract(

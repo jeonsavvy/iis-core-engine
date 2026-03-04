@@ -326,7 +326,7 @@ def generate_codegen_candidate_artifact(
                 "usage": usage,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "synapse_v1",
+                "prompt_contract_version": "synapse_visual_v2",
             },
         )
     except Exception as exc:
@@ -347,7 +347,7 @@ def generate_codegen_candidate_artifact(
                 "validation_failures": validation_failures,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "synapse_v1",
+                "prompt_contract_version": "synapse_visual_v2",
             },
         )
 

@@ -7,6 +7,7 @@ from app.services.vertex_fallback_text import (
 )
 from app.services.vertex_prompts import (
     build_builder_prompt,
+    build_codegen_prompt,
     build_design_prompt,
     build_gdd_prompt,
 )
@@ -51,3 +52,25 @@ def test_fallback_copy_modules_return_non_empty_text() -> None:
     assert isinstance(marketing, str) and marketing.strip()
     assert isinstance(review, str) and review.strip()
     assert isinstance(grounded, str) and grounded.strip()
+
+
+def test_codegen_prompt_contains_visual_contract_targets() -> None:
+    prompt = build_codegen_prompt(
+        keyword="해안 도시 3d 레이싱",
+        title="Neon Circuit",
+        genre="racing_3d",
+        objective="finish 3 laps",
+        core_loop_type="webgl_three_runner",
+        runtime_engine_mode="3d_three",
+        variation_hint="balanced",
+        design_spec={"visual_style": "sunset-neon"},
+        asset_pack={"name": "neon"},
+        intent_contract={"player_verbs": ["drift", "steer"]},
+        synapse_contract={"required_mechanics": ["checkpoint", "lap"]},
+        html_content="<html></html>",
+    )
+    lowered = prompt.casefold()
+    assert "=== visual contract ===" in lowered
+    assert "contrast_min" in lowered
+    assert "color_diversity_min" in lowered
+    assert "motion_delta_min" in lowered

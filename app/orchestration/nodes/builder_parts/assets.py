@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.services.visual_contract import canonicalize_visual_token, resolve_visual_contract_profile
+
 
 def _normalize_hex_color(color: str, *, fallback: str) -> str:
     raw = str(color or "").strip()
@@ -379,6 +381,12 @@ def _build_hybrid_asset_bank(
     art_direction_contract: dict[str, object] | None = None,
     retrieval_profile: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, object]]:
+    visual_contract = resolve_visual_contract_profile(
+        core_loop_type=core_loop_type,
+        runtime_engine_mode=None,
+    ).as_dict()
+    contrast_target = _to_float(visual_contract.get("contrast_min"), 0.0)
+    diversity_target = _to_float(visual_contract.get("color_diversity_min"), 0.0)
     variants = _build_asset_variant_candidates(
         core_loop_type=core_loop_type,
         asset_pack=asset_pack,
@@ -391,6 +399,15 @@ def _build_hybrid_asset_bank(
     raw_failure_tokens = retrieval.get("failure_tokens")
     failure_reasons = {str(item).strip() for item in raw_failure_reasons if str(item).strip()} if isinstance(raw_failure_reasons, list) else set()
     failure_tokens = {str(item).strip() for item in raw_failure_tokens if str(item).strip()} if isinstance(raw_failure_tokens, list) else set()
+    canonical_failure_tokens = {
+        canonicalize_visual_token(token)
+        for token in failure_tokens
+        if token.strip()
+    }
+    visual_failure_signal = (
+        "visual_gate" in canonical_failure_tokens
+        or any("visual" in reason.casefold() for reason in failure_reasons)
+    )
 
     enriched_variants: list[dict[str, object]] = []
     for row in variants:
@@ -401,11 +418,13 @@ def _build_hybrid_asset_bank(
             memory_bonus += 15.0
         if preferred_theme and theme == preferred_theme:
             memory_bonus += 8.0
-        if "visual_quality_below_threshold" in failure_reasons and theme in {"readability", "high-contrast"}:
+        if visual_failure_signal and theme in {"readability", "high-contrast"}:
             memory_bonus += 4.0
-        if any(token in failure_tokens for token in {"contrast", "color_diversity", "readable_motion"}):
+        if canonical_failure_tokens.intersection({"contrast", "diversity", "motion", "edge", "composition", "cohesion", "density", "palette"}):
             if theme in {"readability", "high-contrast"}:
                 memory_bonus += 3.0
+        if (contrast_target >= 19.0 or diversity_target >= 19.0) and theme in {"readability", "high-contrast"}:
+            memory_bonus += 1.5
 
         enriched_variants.append(
             {
@@ -739,6 +758,7 @@ def _build_hybrid_asset_bank(
         "schema_version": 1,
         "pack_name": str(asset_pack.get("name", "hybrid-asset-pack")),
         "genre_engine": core_loop_type,
+        "visual_contract": visual_contract,
         "mesh_like_layers": mesh_like_layers,
         "silhouette_sets": silhouette_sets,
         "fx_hooks": fx_hooks,
@@ -788,12 +808,12 @@ def _build_hybrid_asset_bank(
                 for index, row in enumerate(enriched_variants)
             ],
             "retriever": {
-                "enabled": bool(preferred_variant_id or preferred_theme or failure_reasons or failure_tokens),
+                "enabled": bool(preferred_variant_id or preferred_theme or failure_reasons or canonical_failure_tokens),
                 "source": str(retrieval.get("source", "pipeline_logs_v1") or "pipeline_logs_v1"),
                 "preferred_variant_id": preferred_variant_id or None,
                 "preferred_variant_theme": preferred_theme or None,
                 "failure_reasons": sorted(failure_reasons),
-                "failure_tokens": sorted(failure_tokens),
+                "failure_tokens": sorted(canonical_failure_tokens),
                 "sample_size": _to_int(retrieval.get("sample_size", 0), fallback=0),
             },
         },
