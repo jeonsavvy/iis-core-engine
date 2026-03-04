@@ -177,6 +177,8 @@ class QualityService:
         genre_engine: str | None = None,
         runtime_engine_mode: str | None = None,
         keyword: str | None = None,
+        intent_contract: dict[str, Any] | None = None,
+        synapse_contract: dict[str, Any] | None = None,
     ) -> QualityGateResult:
         return evaluate_quality_contract_gate(
             self.settings,
@@ -186,6 +188,8 @@ class QualityService:
             genre_engine=genre_engine,
             runtime_engine_mode=runtime_engine_mode,
             keyword=keyword,
+            intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
         )
 
     def evaluate_gameplay_gate(
@@ -196,6 +200,8 @@ class QualityService:
         genre: str | None = None,
         genre_engine: str | None = None,
         keyword: str | None = None,
+        intent_contract: dict[str, Any] | None = None,
+        synapse_contract: dict[str, Any] | None = None,
     ) -> GameplayGateResult:
         return evaluate_gameplay_gate_gate(
             self.settings,
@@ -204,6 +210,8 @@ class QualityService:
             genre=genre,
             genre_engine=genre_engine,
             keyword=keyword,
+            intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
         )
 
     def evaluate_visual_gate(

@@ -200,7 +200,7 @@ def test_collect_asset_memory_context_reads_build_blocking_reasons_as_feedback()
             status=PipelineStatus.ERROR,
             reason="builder_quality_floor_unmet",
             metadata={
-                "blocking_reasons": ["quality_gate_unmet", "flight_mechanics_not_found"],
+                "blocking_reasons": ["quality_gate_unmet", "intent_mechanics_unmet"],
                 "quality_floor_fail_reasons": ["visual_gate_unmet"],
             },
             offset_seconds=2,
@@ -217,7 +217,7 @@ def test_collect_asset_memory_context_reads_build_blocking_reasons_as_feedback()
     reasons = cast(list[str], result.retrieval_profile.get("failure_reasons", []))
     tokens = cast(list[str], result.retrieval_profile.get("failure_tokens", []))
     assert "builder_quality_floor_unmet" in reasons
-    assert "flight_mechanics_not_found" in tokens
+    assert "intent_mechanics_unmet" in tokens
 
 
 def test_collect_asset_memory_context_registry_scoring_penalizes_failed_rows() -> None:

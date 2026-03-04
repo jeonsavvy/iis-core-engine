@@ -408,6 +408,7 @@ class VertexService:
         design_spec: dict[str, Any],
         asset_pack: dict[str, Any],
         intent_contract: dict[str, Any] | None,
+        synapse_contract: dict[str, Any] | None,
         html_content: str,
     ) -> VertexGenerationResult:
         return generate_codegen_candidate_artifact_text(
@@ -422,6 +423,7 @@ class VertexService:
             design_spec=design_spec,
             asset_pack=asset_pack,
             intent_contract=intent_contract,
+            synapse_contract=synapse_contract,
             html_content=html_content,
         )
 

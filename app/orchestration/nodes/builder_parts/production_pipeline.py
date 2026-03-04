@@ -7,6 +7,7 @@ from typing import Any
 from app.orchestration.graph.state import PipelineState
 from app.orchestration.nodes.builder_parts.bundle import _extract_hybrid_bundle_from_inline_html
 from app.orchestration.nodes.builder_parts.intent_contract import compute_intent_contract_hash
+from app.orchestration.nodes.builder_parts.synapse_contract import compute_synapse_contract_hash
 from app.orchestration.nodes.builder_parts.scaffold_builder import build_scaffold_html
 from app.orchestration.nodes.common import append_log
 from app.orchestration.nodes.dependencies import NodeDependencies
@@ -207,6 +208,7 @@ def _assess_artifact_quality(
     artifact_files: list[dict[str, str]],
     slug: str,
     intent_contract: dict[str, Any] | None = None,
+    synapse_contract: dict[str, Any] | None = None,
 ) -> _ArtifactAssessment:
     evaluate_quality = getattr(deps.quality_service, "evaluate_quality_contract")
     try:
@@ -217,16 +219,29 @@ def _assess_artifact_quality(
             genre_engine=core_loop_type,
             runtime_engine_mode=runtime_engine_mode,
             keyword=keyword,
+            intent_contract=intent_contract if isinstance(intent_contract, dict) else None,
+            synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else None,
         )
     except TypeError:
         quality = evaluate_quality(html_content, design_spec=design_spec)
-    gameplay = deps.quality_service.evaluate_gameplay_gate(
-        html_content,
-        design_spec=design_spec,
-        genre=genre,
-        genre_engine=core_loop_type,
-        keyword=keyword,
-    )
+    try:
+        gameplay = deps.quality_service.evaluate_gameplay_gate(
+            html_content,
+            design_spec=design_spec,
+            genre=genre,
+            genre_engine=core_loop_type,
+            keyword=keyword,
+            intent_contract=intent_contract if isinstance(intent_contract, dict) else None,
+            synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else None,
+        )
+    except TypeError:
+        gameplay = deps.quality_service.evaluate_gameplay_gate(
+            html_content,
+            design_spec=design_spec,
+            genre=genre,
+            genre_engine=core_loop_type,
+            keyword=keyword,
+        )
     smoke = deps.quality_service.run_smoke_check(
         html_content,
         artifact_files=artifact_files,
@@ -305,6 +320,48 @@ def _build_intent_prompt_fragment(intent_contract: dict[str, Any] | None) -> str
     return "Intent contract:\n" + "\n".join(f"- {row}" for row in rows)
 
 
+def _build_synapse_prompt_fragment(synapse_contract: dict[str, Any] | None) -> str:
+    contract = synapse_contract if isinstance(synapse_contract, dict) else {}
+    runtime_contract = contract.get("runtime_contract")
+    runtime_rows = runtime_contract if isinstance(runtime_contract, dict) else {}
+    engine_mode = str(runtime_rows.get("engine_mode", "")).strip()
+    required_mechanics = [
+        str(item).strip()
+        for item in (contract.get("required_mechanics") or [])
+        if str(item).strip()
+    ]
+    required_progression = [
+        str(item).strip()
+        for item in (contract.get("required_progression") or [])
+        if str(item).strip()
+    ]
+    required_visual = [
+        str(item).strip()
+        for item in (contract.get("required_visual_signals") or [])
+        if str(item).strip()
+    ]
+    non_negotiables = [
+        str(item).strip()
+        for item in (contract.get("non_negotiables") or [])
+        if str(item).strip()
+    ]
+
+    rows: list[str] = []
+    if engine_mode:
+        rows.append(f"Engine mode: {engine_mode}")
+    if required_mechanics:
+        rows.append(f"Required mechanics: {', '.join(required_mechanics[:10])}")
+    if required_progression:
+        rows.append("Required progression: " + " -> ".join(required_progression[:8]))
+    if required_visual:
+        rows.append(f"Required visual signals: {', '.join(required_visual[:8])}")
+    if non_negotiables:
+        rows.append(f"Non-negotiables: {', '.join(non_negotiables[:8])}")
+    if not rows:
+        return "Synapse contract missing. Keep all stage outputs aligned to user intent."
+    return "Synapse contract:\n" + "\n".join(f"- {row}" for row in rows)
+
+
 def compute_intent_contract_hash_from_map(intent_contract: dict[str, Any] | None) -> str:
     if not isinstance(intent_contract, dict) or not intent_contract:
         return "missing"
@@ -335,6 +392,7 @@ def _build_scaffold_first_production_artifact(
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
     intent_contract: dict[str, Any] | None = None,
+    synapse_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     design_spec_dump = design_spec.model_dump()
     rebuild_feedback_hint = ""
@@ -370,10 +428,12 @@ def _build_scaffold_first_production_artifact(
     )
     intent_prompt = _build_intent_prompt_fragment(intent_contract)
     intent_contract_hash = compute_intent_contract_hash_from_map(intent_contract)
+    synapse_prompt = _build_synapse_prompt_fragment(synapse_contract)
+    synapse_contract_hash = compute_synapse_contract_hash(synapse_contract)
     effective_variation_hint = (
-        f"single_pass_generation | {combined_feedback_hint}\n{intent_prompt}"
+        f"single_pass_generation | {combined_feedback_hint}\n{intent_prompt}\n{synapse_prompt}"
         if combined_feedback_hint
-        else f"single_pass_generation\n{intent_prompt}"
+        else f"single_pass_generation\n{intent_prompt}\n{synapse_prompt}"
     )
 
     append_log(
@@ -397,6 +457,7 @@ def _build_scaffold_first_production_artifact(
             "memory_feedback_tokens": memory_feedback_tokens,
             "qa_mode": "verify_only",
             "intent_contract_hash": intent_contract_hash,
+            "synapse_contract_hash": synapse_contract_hash,
         },
     )
 
@@ -412,6 +473,7 @@ def _build_scaffold_first_production_artifact(
         asset_pack=asset_pack,
         html_content=scaffold_html,
         intent_contract=intent_contract if isinstance(intent_contract, dict) else {},
+        synapse_contract=synapse_contract if isinstance(synapse_contract, dict) else {},
     )
     generated_html = str(codegen_result.payload.get("artifact_html", "")).strip()
     generation_source = str(codegen_result.meta.get("generation_source", "stub")).strip().lower()
@@ -453,6 +515,7 @@ def _build_scaffold_first_production_artifact(
         artifact_files=asset_bank_files,
         slug=slug,
         intent_contract=intent_contract,
+        synapse_contract=synapse_contract,
     )
     final_assessment = _assess_artifact_quality(
         deps=deps,
@@ -465,6 +528,7 @@ def _build_scaffold_first_production_artifact(
         artifact_files=asset_bank_files,
         slug=slug,
         intent_contract=intent_contract,
+        synapse_contract=synapse_contract,
     )
 
     quality_floor_score = _coerce_int(
@@ -645,6 +709,8 @@ def _build_scaffold_first_production_artifact(
         "memory_tokens": memory_feedback_tokens,
         "intent_contract": intent_contract if isinstance(intent_contract, dict) else {},
         "intent_contract_hash": intent_contract_hash,
+        "synapse_contract": synapse_contract if isinstance(synapse_contract, dict) else {},
+        "synapse_contract_hash": synapse_contract_hash,
         "strict_vertex_only": strict_vertex_only,
         "allow_stub_fallback": allow_stub_fallback,
         "fallback_blocked": not allow_stub_fallback,
@@ -706,6 +772,7 @@ def build_production_artifact(
     request_capability_hint: str = "",
     generated_genre_directive: str = "",
     intent_contract: dict[str, Any] | None = None,
+    synapse_contract: dict[str, Any] | None = None,
 ) -> ProductionBuildResult:
     core_loop_type = _normalize_core_loop_type(core_loop_type)
     normalized_runtime_engine_mode = str(runtime_engine_mode or "").strip() or "3d_three"
@@ -728,4 +795,5 @@ def build_production_artifact(
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
         intent_contract=intent_contract,
+        synapse_contract=synapse_contract,
     )

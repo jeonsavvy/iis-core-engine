@@ -327,3 +327,84 @@ def test_quality_and_gameplay_score_drop_when_hard_failures_exist() -> None:
     assert quality.score < quality.threshold
     assert gameplay.ok is False
     assert gameplay.score < gameplay.threshold
+
+
+def test_gameplay_gate_blocks_when_synapse_required_mechanics_are_missing() -> None:
+    settings = Settings(qa_min_gameplay_score=55)
+    html = """
+    <html>
+      <body class="safe-area overflow-guard">
+        <canvas id="game"></canvas>
+        <script>
+          function update() { requestAnimationFrame(update); }
+          function restartGame() {}
+          document.addEventListener("keydown", () => {});
+          const state = { checkpoint: 1 };
+        </script>
+      </body>
+    </html>
+    """
+
+    result = evaluate_gameplay_gate(
+        settings,
+        html,
+        genre="simulation",
+        genre_engine="flight_sim_3d",
+        keyword="island flight simulator",
+        intent_contract={
+            "player_verbs": ["pitch", "roll", "yaw", "throttle"],
+            "progression_loop": ["takeoff", "checkpoint", "landing"],
+        },
+        synapse_contract={
+            "required_mechanics": ["pitch", "roll", "yaw", "throttle"],
+            "required_progression": ["checkpoint", "landing"],
+        },
+    )
+
+    assert result.ok is False
+    assert "intent_mechanics_unmet" in result.failed_checks
+
+
+def test_quality_gate_treats_shader_shortage_as_non_hard_failure_signal() -> None:
+    settings = Settings(qa_min_quality_score=40)
+    html_lines = [
+        '<html>',
+        '  <head><meta name="viewport" content="width=device-width"></head>',
+        '  <body class="overflow-guard" data-overflow-policy="clamp">',
+        '    <canvas id="game"></canvas>',
+        '    <script src="https://unpkg.com/three@0.169.0/build/three.module.js"></script>',
+        '    <script>',
+        '      window.__iis_game_boot_ok = true;',
+        '      window.IISLeaderboard = {};',
+        '      const style = "--safe-area-padding: 8px";',
+        '      const renderer = new THREE.WebGLRenderer();',
+        '      function update() {}',
+        '      function draw() {}',
+        '      function initScene() {}',
+        '      function createPlayer() {}',
+        '      function createEnemy() {}',
+        '      function spawnWave() {}',
+        '      function handleInput() {}',
+        '      function updatePhysics() {}',
+        '      function checkCollisions() {}',
+        '      function updateScore() {}',
+        '      function renderHUD() {}',
+        '      function gameLoop() {}',
+        '      function resetGame() {}',
+        '      function loadAssets() {}',
+        '      function createParticles() {}',
+        '      function updateCamera() {}',
+        '      requestAnimationFrame(() => {});',
+        '      document.addEventListener("keydown", () => {});',
+        '      const overlay = "game over";',
+        '    </script>',
+        '  </body>',
+        '</html>',
+    ]
+    html_lines.extend([f'    <!-- padding line {i} -->' for i in range(820)])
+    html = "\n".join(html_lines)
+
+    result = evaluate_quality_contract(settings, html, runtime_engine_mode="3d_three")
+
+    assert result.ok is True
+    assert result.checks.get("shader_complexity_too_low") is False

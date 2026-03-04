@@ -37,6 +37,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     typed_design_spec = design_spec if isinstance(design_spec, dict) else None
     intent_contract = state["outputs"].get("intent_contract")
     typed_intent_contract = intent_contract if isinstance(intent_contract, dict) else None
+    synapse_contract = state["outputs"].get("synapse_contract")
+    typed_synapse_contract = synapse_contract if isinstance(synapse_contract, dict) else None
 
     evaluate_quality = getattr(deps.quality_service, "evaluate_quality_contract")
     try:
@@ -47,6 +49,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             genre_engine=str(state["outputs"].get("genre_engine", "")),
             runtime_engine_mode=str(state["outputs"].get("runtime_engine_mode", "")),
             keyword=str(state.get("keyword", "")),
+            intent_contract=typed_intent_contract,
+            synapse_contract=typed_synapse_contract,
         )
     except TypeError:
         quality_result = evaluate_quality(
@@ -59,6 +63,8 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         genre=str(state["outputs"].get("game_genre", "")),
         genre_engine=str(state["outputs"].get("genre_engine", "")),
         keyword=str(state.get("keyword", "")),
+        intent_contract=typed_intent_contract,
+        synapse_contract=typed_synapse_contract,
     )
     visual_result = deps.quality_service.evaluate_visual_gate(
         visual_metrics,

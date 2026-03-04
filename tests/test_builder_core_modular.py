@@ -69,9 +69,10 @@ class _VertexServiceWithCodegen:
         design_spec: dict[str, Any],
         asset_pack: dict[str, Any],
         intent_contract: dict[str, Any] | None,
+        synapse_contract: dict[str, Any] | None,
         html_content: str,
     ) -> Any:
-        _ = intent_contract
+        _ = (intent_contract, synapse_contract)
         self.calls += 1
         refined_html = f"{html_content}\n<!-- codegen-refined -->"
         return SimpleNamespace(

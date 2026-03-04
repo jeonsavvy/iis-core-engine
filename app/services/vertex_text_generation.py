@@ -264,6 +264,7 @@ def generate_codegen_candidate_artifact(
     design_spec: dict[str, Any],
     asset_pack: dict[str, Any],
     intent_contract: dict[str, Any] | None,
+    synapse_contract: dict[str, Any] | None,
     html_content: str,
 ) -> VertexGenerationResult:
     if not service.settings.builder_codegen_enabled:
@@ -288,6 +289,7 @@ def generate_codegen_candidate_artifact(
         design_spec=design_spec,
         asset_pack=asset_pack,
         intent_contract=intent_contract,
+        synapse_contract=synapse_contract,
         html_content=html_content,
     )
     started = time.perf_counter()
@@ -324,7 +326,7 @@ def generate_codegen_candidate_artifact(
                 "usage": usage,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "intent_v1",
+                "prompt_contract_version": "synapse_v1",
             },
         )
     except Exception as exc:
@@ -345,7 +347,7 @@ def generate_codegen_candidate_artifact(
                 "validation_failures": validation_failures,
                 "model_name": builder_model,
                 "max_output_tokens": service.settings.builder_codegen_max_output_tokens,
-                "prompt_contract_version": "intent_v1",
+                "prompt_contract_version": "synapse_v1",
             },
         )
 

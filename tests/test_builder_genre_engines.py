@@ -216,9 +216,17 @@ def test_gameplay_gate_rejects_when_keyword_requires_flight_but_mode_mismatches(
         genre="simulation",
         genre_engine="flight_sim_3d",
         keyword="full 3d flight simulator",
+        intent_contract={
+            "player_verbs": ["aileron_trim", "rudder_pedal", "stall_recovery"],
+            "progression_loop": ["takeoff_sequence", "landing_sequence"],
+        },
+        synapse_contract={
+            "required_mechanics": ["aileron_trim", "rudder_pedal", "stall_recovery"],
+            "required_progression": ["takeoff_sequence", "landing_sequence"],
+        },
     )
     assert gate.ok is False
-    assert "flight_mechanics_not_found" in gate.failed_checks or "genre_engine_mismatch" in gate.failed_checks
+    assert "intent_mechanics_unmet" in gate.failed_checks
 
 
 def test_gameplay_gate_rejects_quantized_webgl_lane_steering() -> None:

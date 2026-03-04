@@ -20,6 +20,11 @@ from app.orchestration.nodes.builder_parts.mode import (
 )
 from app.orchestration.nodes.builder_parts.intent_contract import build_intent_contract, compute_intent_contract_hash
 from app.orchestration.nodes.builder_parts.production_pipeline import build_production_artifact
+from app.orchestration.nodes.builder_parts.synapse_contract import (
+    build_synapse_contract,
+    compute_synapse_contract_hash,
+    validate_synapse_contract,
+)
 from app.orchestration.nodes.common import append_log, apply_operator_control_gate
 from app.orchestration.nodes.dependencies import NodeDependencies
 from app.schemas.payloads import (
@@ -415,6 +420,46 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
     intent_contract_hash = compute_intent_contract_hash(intent_contract)
     state["outputs"]["intent_contract"] = intent_contract.model_dump()
     state["outputs"]["intent_contract_hash"] = intent_contract_hash
+
+    synapse_contract = build_synapse_contract(
+        keyword=state["keyword"],
+        title=title,
+        genre=genre,
+        objective=gdd.objective,
+        analyze_contract=analyze_contract.model_dump(),
+        plan_contract=plan_contract.model_dump(),
+        design_contract=design_contract.model_dump(),
+        design_spec=design_spec.model_dump(),
+        base_contract={
+            "quality_bar": {
+                "quality_min": int(getattr(settings, "qa_min_quality_score", 50)),
+                "gameplay_min": int(getattr(settings, "qa_min_gameplay_score", 55)),
+                "visual_min": int(getattr(settings, "qa_min_visual_score", 45)),
+            }
+        },
+    )
+    synapse_issues = validate_synapse_contract(synapse_contract)
+    if synapse_issues:
+        state["status"] = PipelineStatus.ERROR
+        state["reason"] = "synapse_contract_invalid"
+        return append_log(
+            state,
+            stage=PipelineStage.BUILD,
+            status=PipelineStatus.ERROR,
+            agent_name=PipelineAgentName.DEVELOPER,
+            message="빌드 중단: 시냅스 계약 필수 항목이 충족되지 않았습니다.",
+            reason=state["reason"],
+            metadata={
+                "synapse_issues": synapse_issues,
+                "contract_status": "fail",
+                "deliverables": ["synapse_contract_validator"],
+                "contribution_score": 1.3,
+                "strict_vertex_only": strict_vertex_only,
+            },
+        )
+    synapse_contract_hash = compute_synapse_contract_hash(synapse_contract)
+    state["outputs"]["synapse_contract"] = synapse_contract
+    state["outputs"]["synapse_contract_hash"] = synapse_contract_hash
     unsupported_scope_reason = _detect_unsupported_scope(keyword=state["keyword"], title=title, genre=genre)
     if unsupported_scope_reason and deps.vertex_service.settings.builder_scope_guard_enabled:
         state["status"] = PipelineStatus.ERROR
@@ -470,6 +515,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
             "generated_genre_profile": generated_genre_profile,
             "generated_genre_directive_applied": bool(generated_genre_directive),
             "intent_contract_hash": intent_contract_hash,
+            "synapse_contract_hash": synapse_contract_hash,
             "asset_memory_hint_applied": bool(asset_memory_context.hint),
             "asset_memory_profile": asset_memory_context.retrieval_profile,
             "asset_memory_snapshot": asset_memory_context.registry_snapshot,
@@ -542,6 +588,7 @@ def run(state: PipelineState, deps: NodeDependencies) -> PipelineState:
         request_capability_hint=request_capability_hint,
         generated_genre_directive=generated_genre_directive,
         intent_contract=intent_contract.model_dump(),
+        synapse_contract=synapse_contract,
     )
     playability_hard_gate = bool(getattr(deps.vertex_service.settings, "builder_playability_hard_gate", True))
     playability_passed = bool(production_result.metadata.get("playability_passed", True))

@@ -222,11 +222,13 @@ def build_codegen_prompt(
     design_spec: dict[str, Any],
     asset_pack: dict[str, Any],
     intent_contract: dict[str, Any] | None,
+    synapse_contract: dict[str, Any] | None,
     html_content: str,
 ) -> str:
     design_spec_json = json.dumps(design_spec, ensure_ascii=False)
     asset_pack_json = json.dumps(asset_pack, ensure_ascii=False)
     intent_contract_json = json.dumps(intent_contract or {}, ensure_ascii=False)
+    synapse_contract_json = json.dumps(synapse_contract or {}, ensure_ascii=False)
     lowered_engine_mode = str(runtime_engine_mode).strip().casefold()
     runtime_stack = "phaser.js" if lowered_engine_mode == "2d_phaser" else "three.js"
     return (
@@ -236,6 +238,10 @@ def build_codegen_prompt(
         f"{intent_contract_json}\n"
         "- Never dilute/replace user intent with generic arcade fallback.\n"
         "- Do not insert unrelated loops that are absent from the intent contract.\n\n"
+        "=== Synapse Contract ===\n"
+        f"{synapse_contract_json}\n"
+        "- Keep analyze/plan/design/build contracts aligned without contradiction.\n"
+        "- required_mechanics/progression/visual signals are mandatory implementation targets.\n\n"
         "=== Runtime Contract ===\n"
         f"- Runtime stack is fixed: {runtime_stack}. Do not switch frameworks.\n"
         "- Keep `window.IISLeaderboard` and `window.__iis_game_boot_ok`.\n"

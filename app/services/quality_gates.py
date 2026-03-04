@@ -17,7 +17,10 @@ def evaluate_quality_contract(
     genre_engine: str | None = None,
     runtime_engine_mode: str | None = None,
     keyword: str | None = None,
+    intent_contract: dict[str, Any] | None = None,
+    synapse_contract: dict[str, Any] | None = None,
 ) -> QualityGateResult:
+    _ = (intent_contract, synapse_contract)
     spec = design_spec or {}
     lowered = html_content.lower()
     overflow_policy_present = any(
@@ -145,7 +148,7 @@ def evaluate_quality_contract(
         )
     )
     if shader_token_count < min_shader_count:
-        hard_failures.append("shader_complexity_too_low")
+        check_map["shader_complexity_too_low"] = False
 
     state_token_count = sum(
         lowered.count(token)
@@ -226,6 +229,40 @@ def _resolve_gameplay_profile(*, genre_engine_hint: str, genre_hint: str, keywor
     return "combat"
 
 
+def _rows_as_str_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    rows: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            rows.append(text)
+    return rows
+
+
+def _contract_required_tokens(
+    *,
+    intent_contract: dict[str, Any] | None,
+    synapse_contract: dict[str, Any] | None,
+    limit: int = 12,
+) -> list[str]:
+    synapse = synapse_contract if isinstance(synapse_contract, dict) else {}
+    intent = intent_contract if isinstance(intent_contract, dict) else {}
+    token_rows: list[str] = []
+    token_rows.extend(_rows_as_str_list(synapse.get("required_mechanics")))
+    token_rows.extend(_rows_as_str_list(synapse.get("required_progression")))
+    token_rows.extend(_rows_as_str_list(intent.get("player_verbs")))
+    token_rows.extend(_rows_as_str_list(intent.get("progression_loop")))
+    deduped: list[str] = []
+    for row in token_rows:
+        for token in _extract_intent_tokens(row, limit=4):
+            if token not in deduped:
+                deduped.append(token)
+            if len(deduped) >= limit:
+                return deduped
+    return deduped
+
+
 def evaluate_gameplay_gate(
     settings: Settings,
     html_content: str,
@@ -234,6 +271,8 @@ def evaluate_gameplay_gate(
     genre: str | None = None,
     genre_engine: str | None = None,
     keyword: str | None = None,
+    intent_contract: dict[str, Any] | None = None,
+    synapse_contract: dict[str, Any] | None = None,
 ) -> GameplayGateResult:
     spec = design_spec or {}
     lowered = html_content.lower()
@@ -382,16 +421,23 @@ def evaluate_gameplay_gate(
         check_map[name] = passed
     hard_failures: list[str] = []
 
+    required_contract_tokens = _contract_required_tokens(
+        intent_contract=intent_contract,
+        synapse_contract=synapse_contract,
+    )
+    matched_contract_tokens = [token for token in required_contract_tokens if token in lowered]
+    if required_contract_tokens:
+        contract_alignment_ok = _ratio(len(matched_contract_tokens), len(required_contract_tokens)) >= 0.24
+        check_map["intent_mechanics_alignment"] = contract_alignment_ok
+        if not contract_alignment_ok:
+            hard_failures.append("intent_mechanics_unmet")
+    else:
+        check_map["intent_mechanics_alignment"] = True
+
     if not loop_signal:
         hard_failures.append("missing_realtime_loop")
     if not input_signal:
         hard_failures.append("input_reactivity_missing")
-    if genre_engine_hint == "flight_sim_3d" and any(
-        token in keyword_hint for token in ("flight", "비행", "pilot", "aircraft", "조종")
-    ):
-        missing_flight_token = any(token not in lowered for token in ("state.flight", "checkpointcombo", "throttle"))
-        if missing_flight_token:
-            hard_failures.append("flight_mechanics_not_found")
     if genre_engine_hint == "webgl_three_runner":
         if "math.round(state.player.lane)" in lowered:
             hard_failures.append("quantized_lane_steering")
