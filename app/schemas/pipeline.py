@@ -84,6 +84,7 @@ class PipelineSummary(BaseModel):
     execution_mode: ExecutionMode = ExecutionMode.AUTO
     pipeline_version: str = "forgeflow-v1"
     error_reason: str | None = None
+    failure_snapshot: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

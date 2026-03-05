@@ -344,6 +344,9 @@ def test_pipeline_runner_forced_runtime_fail_blocks_pipeline() -> None:
     assert final_job is not None
     assert final_job.status == PipelineStatus.ERROR
     assert final_job.error_reason == "runtime_smoke_failed"
+    failure_snapshot = final_job.metadata.get("failure_snapshot")
+    assert isinstance(failure_snapshot, dict)
+    assert failure_snapshot.get("primary_failure_reason") == "runtime_smoke_failed"
 
     logs = repository.list_logs(job.pipeline_id)
     qa_runtime_logs = [log for log in logs if log.stage.value == "qa_runtime"]
@@ -365,6 +368,9 @@ def test_pipeline_runner_quality_gate_failure_blocks_pipeline() -> None:
     assert final_job is not None
     assert final_job.status == PipelineStatus.ERROR
     assert final_job.error_reason == "qa_quality_gate_failed"
+    failure_snapshot = final_job.metadata.get("failure_snapshot")
+    assert isinstance(failure_snapshot, dict)
+    assert failure_snapshot.get("primary_failure_reason") == "qa_quality_gate_failed"
 
     logs = repository.list_logs(job.pipeline_id)
     qa_quality_logs = [log for log in logs if log.stage == PipelineStage.QA_QUALITY]

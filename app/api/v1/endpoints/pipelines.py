@@ -84,6 +84,7 @@ def get_pipeline(
         execution_mode=repository.get_execution_mode(job),
         pipeline_version=repository.get_pipeline_version(job),
         error_reason=job.error_reason,
+        failure_snapshot=job.metadata.get("failure_snapshot") if isinstance(job.metadata.get("failure_snapshot"), dict) else None,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

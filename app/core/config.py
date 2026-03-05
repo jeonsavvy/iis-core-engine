@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     telegram_allowed_user_ids: str = ""
     telegram_webhook_secret: str | None = None
     telegram_control_enabled: bool = False
+    telegram_failure_report_broadcast: bool = True
     telegram_allow_dangerous_commands: bool = False
     telegram_confirm_ttl_seconds: int = Field(default=120, ge=30, le=600)
     telegram_confirm_secret: str | None = None
