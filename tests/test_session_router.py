@@ -243,6 +243,33 @@ def test_prompt_fail_fast_when_agent_loop_errors() -> None:
     assert session_row["current_html"] == ""
 
 
+def test_prompt_records_event_when_agent_loop_raises_exception() -> None:
+    client, store = make_client()
+    assert store is not None
+
+    class RaisingLoop:
+        async def run(self, **_: Any) -> AgentLoopResult:  # pragma: no cover - exercised by test
+            raise RuntimeError("loop_crashed")
+
+    client.app.state.agent_loop = RaisingLoop()
+
+    created = client.post("/api/v1/sessions", json={"title": "T", "genre_hint": "arcade"})
+    assert created.status_code == 200
+    session_id = created.json()["session_id"]
+
+    response = client.post(
+        f"/api/v1/sessions/{session_id}/prompt",
+        json={"prompt": "make game", "auto_qa": True, "stream": False},
+    )
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["detail"]["error"] == "prompt_failed"
+    assert payload["detail"]["code"] == "agent_loop_exception"
+
+    events = store.get_session_events(session_id, limit=20)
+    assert any(event.get("error_code") == "agent_loop_exception" for event in events)
+
+
 def test_prompt_response_contains_activity_contract_and_events() -> None:
     client, _ = make_client()
 

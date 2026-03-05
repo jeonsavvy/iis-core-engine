@@ -422,13 +422,33 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
         return StreamingResponse(_stream(), media_type="text/html")
 
     # Non-streaming mode: run full agent loop
-    result = await agent_loop.run(
-        user_prompt=body.prompt,
-        history=history,
-        current_html=str(session.get("current_html", "")),
-        genre_hint=str(session.get("genre", "")),
-        auto_qa=body.auto_qa,
-    )
+    try:
+        result = await agent_loop.run(
+            user_prompt=body.prompt,
+            history=history,
+            current_html=str(session.get("current_html", "")),
+            genre_hint=str(session.get("genre", "")),
+            auto_qa=body.auto_qa,
+        )
+    except Exception as exc:
+        logger.exception("Agent loop execution failed: session=%s", session_id)
+        error_detail = str(exc)[:200] or "agent_loop_exception"
+        store.add_session_event(
+            session_id=session_id,
+            event_type="prompt_failed",
+            agent="codegen",
+            action="generate",
+            summary=error_detail,
+            decision_reason="agent_loop_exception",
+            input_signal=body.prompt[:500],
+            change_impact="no_html_update",
+            confidence=0.0,
+            error_code="agent_loop_exception",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "prompt_failed", "code": "agent_loop_exception", "detail": error_detail},
+        ) from exc
 
     if result.error:
         store.add_session_event(
