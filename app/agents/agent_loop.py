@@ -17,9 +17,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.codegen_agent import CodegenAgent, CodegenResult, ConversationMessage
-from app.agents.playtester_agent import PlaytesterAgent, PlaytestResult
-from app.agents.visual_qa_agent import VisualQAAgent, VisualQAResult
+from app.agents.codegen_agent import CodegenAgent, ConversationMessage
+from app.agents.playtester_agent import PlaytesterAgent
+from app.agents.visual_qa_agent import VisualQAAgent
 
 logger = logging.getLogger(__name__)
 
