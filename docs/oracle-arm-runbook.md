@@ -10,22 +10,22 @@
    ```bash
    ./scripts/verify_playwright_arm.sh
    ```
-3. API/Worker 서비스 등록
+3. API 서비스 등록
    ```bash
    ./scripts/install_systemd_services.sh /opt/iis-core-engine iis /opt/iis-core-engine/.venv/bin
-   sudo systemctl start iis-core-api.service iis-core-worker.service
+   sudo systemctl start iis-core-api.service
    ```
 
 ## 운영 점검
 
-- `systemctl status iis-core-api iis-core-worker`
+- `systemctl status iis-core-api`
 - `/healthz` 응답 확인
-- worker 로그에서 queued pipeline 처리 확인
+- session API(`/api/v1/sessions/*`) 응답 확인
 
 ## 롤백
 
 - 서비스 중지/비활성화
   ```bash
-  sudo systemctl disable --now iis-core-api.service iis-core-worker.service
+  sudo systemctl disable --now iis-core-api.service
   ```
 - 이전 배포 디렉토리로 심볼릭 링크/서비스 WorkingDirectory 복원

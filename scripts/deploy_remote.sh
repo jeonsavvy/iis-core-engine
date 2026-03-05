@@ -4,11 +4,11 @@ set -euo pipefail
 APP_DIR="${1:-/opt/iis-core-engine}"
 BRANCH="${2:-main}"
 API_SERVICE="${API_SERVICE:-iis-core-api.service}"
-WORKER_SERVICE="${WORKER_SERVICE:-iis-core-worker.service}"
+WORKER_SERVICE="${WORKER_SERVICE:-}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8000/healthz}"
 HEALTHCHECK_RETRIES="${HEALTHCHECK_RETRIES:-20}"
 HEALTHCHECK_RETRY_DELAY="${HEALTHCHECK_RETRY_DELAY:-2}"
-PIPELINE_SCHEMA_EXPECTED="${PIPELINE_SCHEMA_EXPECTED:-v2}"
+SESSION_SCHEMA_EXPECTED="${SESSION_SCHEMA_EXPECTED:-v1}"
 
 resolve_python_bin() {
   if [[ -n "${PYTHON_BIN:-}" ]]; then
@@ -84,7 +84,7 @@ verify_health_signature() {
   local expected_sha="$1"
   local raw
   raw="$(curl --fail --silent --show-error --max-time 10 "${HEALTHCHECK_URL}")"
-  HEALTH_JSON="${raw}" EXPECTED_SHA="${expected_sha}" EXPECTED_SCHEMA="${PIPELINE_SCHEMA_EXPECTED}" "${PY_BIN}" - <<'PY'
+  HEALTH_JSON="${raw}" EXPECTED_SHA="${expected_sha}" EXPECTED_SCHEMA="${SESSION_SCHEMA_EXPECTED}" "${PY_BIN}" - <<'PY'
 import json
 import os
 import sys
@@ -93,7 +93,11 @@ payload = json.loads(os.environ["HEALTH_JSON"])
 expected_sha = os.environ["EXPECTED_SHA"].strip().lower()
 expected_schema = os.environ["EXPECTED_SCHEMA"].strip()
 actual_sha = str(payload.get("git_sha", "")).strip().lower()
-actual_schema = str(payload.get("pipeline_schema_version", "")).strip()
+actual_schema = str(
+    payload.get("session_schema_version")
+    or payload.get("pipeline_schema_version")
+    or ""
+).strip()
 
 if actual_sha in {"", "unknown"}:
     print("health_git_sha_unknown: unable to verify deployed commit via /healthz git_sha", file=sys.stderr)
@@ -102,6 +106,13 @@ elif expected_sha and not actual_sha.startswith(expected_sha):
 if expected_schema and actual_schema != expected_schema:
     raise SystemExit(f"health_schema_mismatch expected={expected_schema} actual={actual_schema}")
 PY
+}
+
+restart_services() {
+  sudo systemctl restart "${API_SERVICE}"
+  if [[ -n "${WORKER_SERVICE}" ]]; then
+    sudo systemctl restart "${WORKER_SERVICE}"
+  fi
 }
 
 upsert_env_value() {
@@ -182,16 +193,18 @@ fi
 "${VENV_DIR}/bin/pip" install -r requirements.txt
 "${VENV_DIR}/bin/python" --version
 
-sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
+restart_services
 
 if ! run_healthcheck; then
   echo "Healthcheck failed on target commit ${TARGET_COMMIT}. Capturing diagnostics."
   dump_service_diagnostics "${API_SERVICE}"
-  dump_service_diagnostics "${WORKER_SERVICE}"
+  if [[ -n "${WORKER_SERVICE}" ]]; then
+    dump_service_diagnostics "${WORKER_SERVICE}"
+  fi
   echo "Healthcheck failed. Rolling back to ${PREVIOUS_COMMIT}"
   git reset --hard "${PREVIOUS_COMMIT}"
   "${VENV_DIR}/bin/pip" install -r requirements.txt
-  sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
+  restart_services
   run_healthcheck
   echo "Rollback completed."
   exit 1

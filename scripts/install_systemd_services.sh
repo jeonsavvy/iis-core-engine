@@ -24,11 +24,17 @@ render_and_install() {
 }
 
 render_and_install "deploy/systemd/iis-core-api.service.tmpl" "iis-core-api.service"
-render_and_install "deploy/systemd/iis-core-worker.service.tmpl" "iis-core-worker.service"
+
+services=("iis-core-api.service")
+if [[ -f "deploy/systemd/iis-core-worker.service.tmpl" ]]; then
+  render_and_install "deploy/systemd/iis-core-worker.service.tmpl" "iis-core-worker.service"
+  services+=("iis-core-worker.service")
+fi
 
 sudo systemctl daemon-reload
-sudo systemctl enable iis-core-api.service iis-core-worker.service
+sudo systemctl enable "${services[@]}"
 
 echo "Installed services:"
-sudo systemctl status iis-core-api.service --no-pager || true
-sudo systemctl status iis-core-worker.service --no-pager || true
+for service in "${services[@]}"; do
+  sudo systemctl status "${service}" --no-pager || true
+done
