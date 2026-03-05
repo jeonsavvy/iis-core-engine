@@ -1,166 +1,41 @@
-# iis-core-engine (ForgeMind + ForgeFlow)
+# IIS Core Engine (Session-First)
 
-IIS 멀티에이전트 게임 제작 파이프라인의 코어 엔진입니다.  
-Python FastAPI(API) + Worker(큐 처리) 구조로 동작합니다.
+Session 기반 대화형 게임 생성 백엔드입니다.
 
-## 아키텍처 요약
+## 핵심 경로
+- `POST /api/v1/sessions`
+- `GET /api/v1/sessions?status=&limit=`
+- `GET /api/v1/sessions/{session_id}`
+- `POST /api/v1/sessions/{session_id}/prompt`
+- `GET /api/v1/sessions/{session_id}/events?cursor=&limit=`
+- `POST /api/v1/sessions/{session_id}/publish`
+- `POST /api/v1/sessions/{session_id}/cancel`
+- `DELETE /api/v1/sessions/{session_id}`
 
-- **API 프로세스**: 트리거/조회/제어 요청 수신
-- **Worker 프로세스**: 큐를 폴링하며 파이프라인 실행
-- **큐 소스**: Supabase `admin_config` 테이블 (MVP에서는 큐+감사로그 겸용)
-- **파이프라인 노드**
-  - Analyze → Plan → Design → Build ↔ QaRuntime(최대 3회 재시도) → QaQuality → Release → Report → Done
+모든 `/api/v1/sessions/*` 및 `/api/v1/games/*`는 `INTERNAL_API_TOKEN` Bearer 검증을 사용합니다.
+(토큰 미설정 시 비활성)
 
-## 주요 엔드포인트
-
-- `POST /api/v1/pipelines/trigger`
-- `GET /api/v1/pipelines/{pipeline_id}`
-- `GET /api/v1/pipelines/{pipeline_id}/logs`
-- `POST /api/v1/pipelines/{pipeline_id}/controls`
-- `POST /api/v1/telegram/webhook`
-- `GET /healthz`
-- `POST /api/v1/pipelines/{pipeline_id}/approvals` *(deprecated, 410 Gone)*
-
-`pipelines` 계열 엔드포인트는 `INTERNAL_API_TOKEN` Bearer 토큰 검증을 사용합니다.  
-특히 `APP_ENV=production`에서는 `INTERNAL_API_TOKEN` 미설정 시 앱이 fail-fast로 기동을 중단합니다.
-`POST /api/v1/pipelines/trigger`는 `Idempotency-Key` 헤더(또는 body `idempotency_key`)를 지원하며, 동일 키 재요청 시 기존 파이프라인을 재사용합니다.
-
-## Telegram 명령어 (실연동 대상)
-
-- `/run <keyword>`: `trigger_source=telegram`로 파이프라인 큐 등록
-- `/status <pipeline_id>`: 현재 상태 조회
-
-가드레일:
-- `TELEGRAM_ALLOWED_CHAT_IDS` 비어있으면 기본값은 **전부 거부**
-- `TELEGRAM_WEBHOOK_SECRET` 선택적으로 사용 가능
-- 트리거 키워드는 정규화/금칙어 검사 수행
-
-## 실행 모드
-
-- `execution_mode`는 `auto`만 허용
-- 승인 루프는 제거되었고 `/approvals`는 410으로 응답합니다.
-- 운영 제어는 `pause/resume/cancel/retry`만 지원합니다.
-
-## Publish 플로우
-
-- Supabase Storage 버킷에 게임 HTML 업로드
-- `games_metadata` 활성 행 upsert
-- Repo3(`iis-games-archive`)에 `games/<slug>/index.html`, `manifest/games.json` 동기화 (allowlist 강제)
-
-## Payload 계약 (MVP)
-
-- `gdd`: `title`, `genre`, `objective`, `visual_style`
-- `design_spec`: `visual_style`, `palette`, `hud`, `viewport_width`, `viewport_height`, `safe_area_padding`, `min_font_size_px`, `text_overflow_policy`, `typography`, `thumbnail_concept`
-- `build_artifact`: `game_slug`, `game_name`, `game_genre`, `artifact_path`, `artifact_html`, `leaderboard_contract`
+## 정책
+- Session Store 미연결 시 세션 API는 **503**
+- AI 미연결/실패 시 **Fail-Fast** (stub 반환 금지)
+- 이벤트/대화/저장 payload는 **Always Redacted**
+- 텔레그램은 **publish success 알림만** 전송
 
 ## 로컬 실행
-
-실행 컨텍스트 표기 규칙:
-- `[LOCAL WSL]` : 사용자 PC의 WSL/로컬 터미널
-- `[EC2 SSH]` : AWS EC2에 SSH 접속한 셸
-
-권장 Python 버전: **3.11+** (CI 기본 3.11)
-
 ```bash
-# [LOCAL WSL]
-# 현재 python3 버전 확인
-python3 --version
-
-# python3 --version 이 3.10.x라면 python3.11을 사용
-python3.11 -m venv .venv311
+python -m venv .venv311
 source .venv311/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-
-# [LOCAL WSL] 터미널 1 (API)
-./scripts/run_api.sh
-
-# [LOCAL WSL] 터미널 2 (Worker)
-./scripts/run_worker.sh
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
-보조 실행 옵션:
-- `PYTHON_BIN=/path/to/python3.11 ./scripts/run_api.sh`
-- `PYTHON_BIN=/path/to/python3.11 ./scripts/run_worker.sh`
-
-의존성은 `requirements.txt`에 동작 검증된 버전으로 고정(pin)되어 있습니다.
-
-## 보안/운영 메모
-
-- `SUPABASE_SERVICE_ROLE_KEY`는 **Repo1 서버 런타임 전용**
-- 외부 호출은 timeout/retry 기본값 사용 (`HTTP_TIMEOUT_SECONDS`, `HTTP_MAX_RETRIES`)
-- 재시도 상태코드: `429`, `5xx` (네트워크 타임아웃/연결오류 포함)
-- 비멱등 POST 외부 호출은 `Idempotency-Key` 없으면 재시도하지 않음
-- 워커 병렬도는 `PIPELINE_WORKER_CONCURRENCY`로 조절 (기본 1, 예: 4로 설정 시 최대 4개 파이프라인 동시 처리)
-- Telegram 실행은 chat whitelist 필수
-- X 포스팅은 일일 쿼터 + 실패 시 당일 중단 정책 적용
-- Archive 쓰기는 allowlist 확장자/경로 정책을 적용하고 경로 우회(`..`) 및 과대 파일을 차단
-- QA는 Playwright 스모크체크 + 품질 게이트(`QA_MIN_QUALITY_SCORE`) 적용
-- QA 기본 정책은 **soft-gate**입니다.
-  - 런타임/품질 미달 항목은 `qa_improvement_queue`로 누적됩니다.
-  - 퍼블리시 차단은 시스템 치명 오류(artifact/storage 실패)만 허용됩니다.
-  - 운영 중 강제 하드게이트가 필요하면 `QA_HARD_GATE=1` 사용
-- Builder는 현재 단일 후보(1개) 생성 모드로 동작하며, 후보 다중 생성 루프는 비활성화
-- Builder 생성 엔진은 `scaffold_v3` 단일 경로(Scaffold-first + 단일 codegen pass)로 동작
-- QA는 verify-only 하드게이트로 동작하며, 품질 미달 산출물은 Release 단계로 진행되지 않음
-- Builder는 최근 성공/실패 로그를 기반으로 자산 메모리(retriever)를 적용하며, 필요 시 `BUILDER_ASSET_MEMORY_ENABLED=false`로 즉시 비활성화 가능
-- Asset Registry(`public.asset_registry`)가 존재하면 retriever는 로그 기반 대신 DB 누적 자산 데이터를 우선 사용
-- 삭제 API는 archive 삭제 실패를 warning으로 반환하고 DB/Storage 삭제를 우선 완료합니다.
-- 로그 보존/삭제 운영 기준은 `../ops/log-retention-policy.md` 정책 문서 준수
-- Supabase 보존 함수/집계 뷰 SQL은 `supabase/log_retention.sql` 참고
-- Asset Registry additive migration SQL은 `supabase/asset_registry.sql` 참고
-
-## GitHub Actions 자동 배포 (Backend)
-
-`main` 브랜치에 push되면 아래 순서로 자동 실행됩니다.
-
-1. `ruff check app tests` 정적 린트
-2. `mypy` API/보안/파이프라인/품질/버텍스 모듈 타입체크
-3. `python -m compileall -q app tests` 구문 검증
-4. `pytest -q` 테스트 검증
-5. SSH 원격 배포 실행
-6. 서비스 재시작 + `/healthz` 확인
-7. 헬스체크 실패 시 직전 커밋으로 자동 롤백
-
-워크플로우 파일:
-- `.github/workflows/deploy-backend.yml`
-- `.github/workflows/backend-ci.yml` *(PR/비-main 브랜치 verify 전용)*
-
-원격 배포 스크립트:
-- `scripts/deploy_remote.sh`
-  - 기본 venv 경로는 `.venv311` 우선 탐색 후 `.venv` fallback
-  - `PYTHON_BIN`/`VENV_DIR` 환경변수로 경로를 명시적으로 고정 가능
-
-필수 GitHub Secrets:
-- `BACKEND_DEPLOY_HOST` (예: `1.2.3.4`)
-- `BACKEND_DEPLOY_USER` (예: `iis`)
-- `BACKEND_DEPLOY_SSH_KEY` (PEM private key 원문)
-
-선택 GitHub Secrets:
-- `BACKEND_DEPLOY_PORT` (기본 `22`)
-- `BACKEND_DEPLOY_PATH` (기본 `/opt/iis-core-engine`)
-
-서버 사전 조건:
-- 저장소가 `BACKEND_DEPLOY_PATH` 경로에 clone되어 있을 것
-- `sudo systemctl restart iis-core-api.service iis-core-worker.service` 권한이 배포 사용자에 허용되어 있을 것
-- `.env`, systemd unit 설치가 완료되어 있을 것
-
-## ARM(Oracle/AWS Graviton) 참고
-
+## 검증
 ```bash
-# [EC2 SSH] 또는 ARM 서버 셸
-./scripts/install_playwright_arm.sh
-./scripts/verify_playwright_arm.sh
+ruff check app tests
+mypy app tests
+PYTHONPATH=. pytest -q -s
 ```
 
-systemd 템플릿:
-- `deploy/systemd/iis-core-api.service.tmpl`
-- `deploy/systemd/iis-core-worker.service.tmpl`
-- 설치 스크립트: `./scripts/install_systemd_services.sh`
-  - 기본 venv bin 경로: `.venv311/bin` 우선, 없으면 `.venv/bin`
-
-운영 문서:
-- `docs/oracle-arm-runbook.md`
-- `docs/telegram-operations.md`
-- `docs/html-runtime-refactor-plan.md`
-- `docs/scaffold-v3-migration.md`
+## DB 마이그레이션
+- Big-Bang 전환 SQL: `supabase/session_first_big_bang.sql`
+- 이 스크립트는 레거시 pipeline 테이블을 hard drop 합니다.

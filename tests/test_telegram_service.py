@@ -1,131 +1,69 @@
 from __future__ import annotations
 
-from uuid import UUID
-
 from app.core.config import Settings
-from app.schemas.pipeline import PipelineStatus, TriggerRequest, TriggerSource
-from app.schemas.telegram import TelegramWebhookUpdate
-from app.services.pipeline_repository import PipelineRepository
+from app.services import telegram_service
 from app.services.telegram_service import TelegramService
 
 
-class StubTelegramService(TelegramService):
-    def __init__(self, settings: Settings) -> None:
-        super().__init__(settings)
-        self.sent_messages: list[tuple[str, str]] = []
-
-    def send_message(self, chat_id: str, text: str) -> dict[str, str]:
-        self.sent_messages.append((chat_id, text))
-        return {"status": "sent"}
+def test_send_message_skips_without_token() -> None:
+    service = TelegramService(Settings(telegram_bot_token=None))
+    result = service.send_message("1001", "hello")
+    assert result["status"] == "skipped"
 
 
-def make_update(text: str, *, chat_id: int = 1001, user_id: int = 2002) -> TelegramWebhookUpdate:
-    return TelegramWebhookUpdate(
-        update_id=1,
-        message={
-            "message_id": 1,
-            "chat": {"id": chat_id, "type": "private"},
-            "from": {"id": user_id, "username": "iis-admin"},
-            "text": text,
-        },
+def test_send_message_posts_with_retry(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def _stub_request_with_retry(method: str, url: str, **kwargs: object) -> dict[str, object]:
+        calls.append({"method": method, "url": url, "kwargs": kwargs})
+        return {"ok": True}
+
+    monkeypatch.setattr(telegram_service, "request_with_retry", _stub_request_with_retry)
+
+    service = TelegramService(
+        Settings(
+            telegram_bot_token="bot-token",
+            http_timeout_seconds=3.0,
+            http_max_retries=2,
+        )
     )
 
-
-def _default_settings(**overrides) -> Settings:
-    data = {
-        "telegram_control_enabled": True,
-        "telegram_webhook_secret": "secret-123",
-        "telegram_allowed_chat_ids": "1001",
-        "telegram_allowed_user_ids": "2002",
-        "telegram_allow_dangerous_commands": True,
-        "telegram_confirm_secret": "confirm-123",
-        "telegram_confirm_ttl_seconds": 120,
-    }
-    data.update(overrides)
-    return Settings(**data)
+    result = service.send_message("1001", "publish success")
+    assert result == {"status": "sent"}
+    assert calls
+    assert calls[0]["method"] == "POST"
+    assert "api.telegram.org" in str(calls[0]["url"])
 
 
-def test_run_command_queues_pipeline_for_allowed_user_and_chat() -> None:
-    settings = _default_settings()
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
-
-    result = service.handle_update(make_update("/run neon puzzle"), repository)
-
-    assert result.status == "queued"
-    assert result.pipeline_id is not None
-
-    job = repository.get_pipeline(UUID(result.pipeline_id))
-    assert job is not None
-    assert job.source == TriggerSource.TELEGRAM
-    assert job.status == PipelineStatus.QUEUED
-    assert job.keyword == "neon puzzle"
+def test_broadcast_skips_without_allowed_chat_ids() -> None:
+    service = TelegramService(Settings(telegram_bot_token="bot-token", telegram_allowed_chat_ids=""))
+    result = service.broadcast_message("hello")
+    assert result["status"] == "skipped"
 
 
-def test_blocked_user_creates_audit_entry() -> None:
-    settings = _default_settings()
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
+def test_broadcast_reports_posted_when_any_chat_succeeds(monkeypatch) -> None:
+    service = TelegramService(Settings(telegram_bot_token="bot-token", telegram_allowed_chat_ids="1001,1002"))
 
-    result = service.handle_update(make_update("/run blocked", user_id=9999), repository)
+    sent: list[tuple[str, str]] = []
 
-    assert result.status == "blocked"
-    assert result.detail == "telegram_user_not_allowed"
-    assert result.pipeline_id is not None
+    def _stub_send(chat_id: str, text: str) -> dict[str, str]:
+        sent.append((chat_id, text))
+        return {"status": "sent" if chat_id == "1001" else "error"}
 
-    audit_job = repository.get_pipeline(UUID(result.pipeline_id))
-    assert audit_job is not None
-    assert audit_job.status == PipelineStatus.SKIPPED
-    assert audit_job.error_reason == "telegram_user_not_allowed"
+    monkeypatch.setattr(service, "send_message", _stub_send)
 
-
-def test_missing_webhook_secret_blocks_control_commands() -> None:
-    settings = _default_settings(telegram_webhook_secret=None)
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
-
-    result = service.handle_update(make_update("/run blocked"), repository)
-
-    assert result.status == "blocked"
-    assert result.detail == "telegram_webhook_secret_required"
-    assert result.pipeline_id is not None
+    result = service.broadcast_message("published")
+    assert result == {"status": "posted"}
+    assert len(sent) == 2
 
 
-def test_retry_executes_immediately_without_confirm() -> None:
-    settings = _default_settings()
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
+def test_broadcast_reports_error_when_all_fail(monkeypatch) -> None:
+    service = TelegramService(Settings(telegram_bot_token="bot-token", telegram_allowed_chat_ids="1001,1002"))
 
-    job = repository.create_pipeline(TriggerRequest(keyword="retry-me"))
-    repository.mark_pipeline_status(job.pipeline_id, PipelineStatus.ERROR, error_reason="forced_error")
+    def _stub_send(_chat_id: str, _text: str) -> dict[str, str]:
+        return {"status": "error"}
 
-    request = service.handle_update(make_update(f"/retry {job.pipeline_id}"), repository)
-    assert request.status == "ok"
-    updated = repository.get_pipeline(job.pipeline_id)
-    assert updated is not None
-    assert updated.status == PipelineStatus.QUEUED
-    assert updated.error_reason is None
+    monkeypatch.setattr(service, "send_message", _stub_send)
 
-
-def test_run_command_rejects_forbidden_keyword() -> None:
-    settings = _default_settings(trigger_forbidden_keywords="banned")
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
-
-    result = service.handle_update(make_update("/run banned idea"), repository)
-
-    assert result.status == "invalid"
-    assert result.detail == "keyword_contains_blocked_term"
-    assert result.pipeline_id is None
-
-
-def test_start_command_returns_help_message() -> None:
-    settings = _default_settings()
-    repository = PipelineRepository(settings=settings)
-    service = StubTelegramService(settings)
-
-    result = service.handle_update(make_update("/start"), repository)
-
-    assert result.status == "help"
-    assert service.sent_messages
-    assert "IIS 제어 봇 명령 안내" in service.sent_messages[-1][1]
+    result = service.broadcast_message("published")
+    assert result["status"] == "error"

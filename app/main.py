@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import router as v1_router
 from app.core.config import Settings, get_settings
-from app.core.runtime_health import healthz_payload, verify_pipeline_schema_signature
+from app.core.runtime_health import healthz_payload, verify_session_schema_signature
 
 
 def ensure_internal_api_token_on_production(settings: Settings | None = None) -> None:
@@ -17,7 +17,7 @@ def ensure_internal_api_token_on_production(settings: Settings | None = None) ->
 settings = get_settings()
 ensure_internal_api_token_on_production(settings)
 if settings.app_env.strip().lower() in {"production", "prod"}:
-    verify_pipeline_schema_signature(settings)
+    verify_session_schema_signature(settings)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ async def _init_agents() -> None:
     try:
         enable_supabase_persistence(app, settings)
     except Exception:
-        logger.exception("Supabase session persistence initialization failed. Falling back to in-memory sessions.")
+        logger.exception("Supabase session persistence initialization failed. Session API will return 503.")
 
 
 @app.get("/healthz")

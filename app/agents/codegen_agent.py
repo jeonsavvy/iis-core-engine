@@ -72,10 +72,10 @@ class CodegenAgent:
         )
 
         if not self._vertex._is_enabled():
-            logger.warning("Vertex AI not configured — returning stub")
+            logger.error("Vertex AI not configured — fail-fast for code generation")
             return CodegenResult(
-                html=self._stub_html(user_prompt),
-                generation_source="stub",
+                html=current_html,
+                generation_source="error",
                 error="vertex_not_configured",
             )
 
@@ -100,7 +100,7 @@ class CodegenAgent:
         except Exception as exc:
             logger.exception("Codegen generation failed: %s", exc)
             return CodegenResult(
-                html=current_html or self._stub_html(user_prompt),
+                html=current_html,
                 generation_source="error",
                 error=str(exc)[:200],
             )
@@ -122,8 +122,7 @@ class CodegenAgent:
         )
 
         if not self._vertex._is_enabled():
-            yield self._stub_html(user_prompt)
-            return
+            raise RuntimeError("vertex_not_configured")
 
         model_name = self._vertex._builder_model_name()
         max_tokens = getattr(
@@ -133,8 +132,7 @@ class CodegenAgent:
         try:
             client = self._vertex._client()
             if client is None:
-                yield self._stub_html(user_prompt)
-                return
+                raise RuntimeError("vertex_client_unavailable")
 
             config = {"temperature": 0.7, "max_output_tokens": max_tokens}
             async for chunk in client.models.generate_content_stream(

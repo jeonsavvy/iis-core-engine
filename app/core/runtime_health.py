@@ -5,7 +5,6 @@ import subprocess
 from functools import lru_cache
 
 from app.core.config import Settings, get_settings
-from app.schemas.pipeline import PipelineAgentName
 
 try:
     from supabase import create_client
@@ -13,12 +12,8 @@ except ImportError:  # pragma: no cover - optional dependency in test environmen
     create_client = None
 
 
-PIPELINE_SCHEMA_VERSION = "v2"
+SESSION_SCHEMA_VERSION = "v1"
 RUNTIME_MODULE_SIGNATURE = "session_editor_loop_v1"
-
-
-def pipeline_agent_enum_signature() -> str:
-    return ",".join(agent.value for agent in PipelineAgentName)
 
 
 @lru_cache(maxsize=1)
@@ -38,16 +33,15 @@ def resolve_git_sha() -> str:
     return output.strip() or "unknown"
 
 
-def verify_pipeline_schema_signature(settings: Settings) -> None:
+def verify_session_schema_signature(settings: Settings) -> None:
     if not settings.supabase_url or not settings.supabase_service_role_key:
         return
     if create_client is None:
         return
     client = create_client(settings.supabase_url, settings.supabase_service_role_key)
     response = (
-        client.table("pipeline_logs")
+        client.table("sessions")
         .select("id")
-        .eq("agent_name", PipelineAgentName.REPORTER.value)
         .limit(1)
         .execute()
     )
@@ -56,8 +50,8 @@ def verify_pipeline_schema_signature(settings: Settings) -> None:
         return
     detail = str(getattr(error, "message", "") or error)
     lowered = detail.casefold()
-    if "pipeline_agent_name" in lowered or "invalid input value for enum" in lowered:
-        raise RuntimeError(f"pipeline_schema_mismatch: {detail}")
+    if "relation" in lowered and "sessions" in lowered:
+        raise RuntimeError(f"session_schema_mismatch: {detail}")
 
 
 def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
@@ -67,8 +61,7 @@ def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
         "status": "ok",
         "service": "IIS Game Editor",
         "git_sha": resolve_git_sha(),
-        "pipeline_schema_version": PIPELINE_SCHEMA_VERSION,
-        "pipeline_agent_enum_signature": pipeline_agent_enum_signature(),
+        "session_schema_version": SESSION_SCHEMA_VERSION,
         "generation_engine_version": resolved.generation_engine_version,
         "rqc_version": resolved.generation_engine_version,
         "module_signature": RUNTIME_MODULE_SIGNATURE,

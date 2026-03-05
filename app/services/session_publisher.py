@@ -12,6 +12,7 @@ from typing import Any
 from app.core.config import Settings
 from app.services.publisher_service import PublisherService
 from app.services.github_service import GitHubArchiveService
+from app.services.telegram_service import TelegramService
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class SessionPublisher:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._publisher = PublisherService(settings)
+        self._telegram = TelegramService(settings)
         self._archiver: GitHubArchiveService | None = None
         if settings.archive_repo_local_path:
             try:
@@ -53,6 +55,7 @@ class SessionPublisher:
 
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
+        play_url = f"/play/{slug}"
 
         # Archive to GitHub repo (best-effort, non-blocking)
         if self._archiver and public_url:
@@ -68,8 +71,22 @@ class SessionPublisher:
             except Exception as exc:
                 logger.warning("Archive commit failed (non-fatal): %s", exc)
 
+        try:
+            message = (
+                "✅ Publish success\n"
+                f"- slug: {slug}\n"
+                f"- game: {game_name}\n"
+                f"- play: {play_url}\n"
+                f"- public: {public_url or 'n/a'}"
+            )
+            self._telegram.broadcast_message(message)
+        except Exception as exc:
+            logger.warning("Telegram publish notification failed (non-fatal): %s", exc)
+
         return {
             "success": True,
             "public_url": public_url,
             "game_id": str(game_id),
+            "game_slug": slug,
+            "play_url": play_url,
         }
