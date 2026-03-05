@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.services.visual_contract import resolve_visual_contract_profile
+from app.services.quality_gates import resolve_visual_contract_profile
 
 
 def _shared_contract_section(shared_contract: dict[str, Any] | None) -> str:

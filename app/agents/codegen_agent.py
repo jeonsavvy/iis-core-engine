@@ -1,0 +1,266 @@
+"""Codegen Agent — interactive game code generation via LLM.
+
+Responsibilities:
+  - Generate initial game code from a user prompt
+  - Modify existing game code based on user or QA agent feedback
+  - Multi-turn conversation with history context
+  - Streaming output for real-time UI updates
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator
+
+logger = logging.getLogger(__name__)
+
+_THREE_CDN = "https://unpkg.com/three@0.169.0/build/three.module.js"
+_PHASER_CDN = "https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"
+
+
+@dataclass
+class CodegenResult:
+    html: str
+    generation_source: str = "vertex"
+    model_name: str = ""
+    tokens_used: int = 0
+    error: str = ""
+
+
+@dataclass
+class ConversationMessage:
+    role: str  # "user" | "assistant" | "system" | "visual_qa" | "playtester"
+    content: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class CodegenAgent:
+    """Interactive codegen agent for game generation/modification.
+
+    Unlike the old batch pipeline builder, this agent:
+    - Takes multi-turn conversation history
+    - Can modify existing code (not just generate from scratch)
+    - Streams output for real-time UI
+    - Uses a clean, concise prompt (not 300+ lines of contracts)
+    """
+
+    def __init__(self, *, vertex_service: Any) -> None:
+        self._vertex = vertex_service
+
+    async def generate(
+        self,
+        *,
+        user_prompt: str,
+        history: list[ConversationMessage] | None = None,
+        current_html: str = "",
+        genre_hint: str = "",
+    ) -> CodegenResult:
+        """Generate or modify game code based on user prompt.
+
+        Args:
+            user_prompt: What the user wants (e.g. "make a space shooter")
+            history: Previous conversation messages for context
+            current_html: Existing game HTML to modify (empty for new games)
+            genre_hint: Optional genre hint from initial analysis
+        """
+        prompt = self._build_prompt(
+            user_prompt=user_prompt,
+            history=history or [],
+            current_html=current_html,
+            genre_hint=genre_hint,
+        )
+
+        if not self._vertex._is_enabled():
+            logger.warning("Vertex AI not configured — returning stub")
+            return CodegenResult(
+                html=self._stub_html(user_prompt),
+                generation_source="stub",
+                error="vertex_not_configured",
+            )
+
+        try:
+            model_name = self._vertex._builder_model_name()
+            max_tokens = getattr(
+                self._vertex.settings, "builder_codegen_max_output_tokens", 48_000
+            )
+            result = await self._vertex._genai_text(
+                model_name=model_name,
+                prompt=prompt,
+                temperature=0.7,
+                max_output_tokens=max_tokens,
+            )
+            raw_text = str(result).strip()
+            html = self._extract_html(raw_text)
+            return CodegenResult(
+                html=html,
+                generation_source="vertex",
+                model_name=model_name,
+            )
+        except Exception as exc:
+            logger.exception("Codegen generation failed: %s", exc)
+            return CodegenResult(
+                html=current_html or self._stub_html(user_prompt),
+                generation_source="error",
+                error=str(exc)[:200],
+            )
+
+    async def generate_streaming(
+        self,
+        *,
+        user_prompt: str,
+        history: list[ConversationMessage] | None = None,
+        current_html: str = "",
+        genre_hint: str = "",
+    ) -> AsyncIterator[str]:
+        """Stream game code generation for real-time UI updates."""
+        prompt = self._build_prompt(
+            user_prompt=user_prompt,
+            history=history or [],
+            current_html=current_html,
+            genre_hint=genre_hint,
+        )
+
+        if not self._vertex._is_enabled():
+            yield self._stub_html(user_prompt)
+            return
+
+        model_name = self._vertex._builder_model_name()
+        max_tokens = getattr(
+            self._vertex.settings, "builder_codegen_max_output_tokens", 48_000
+        )
+
+        try:
+            client = self._vertex._client()
+            if client is None:
+                yield self._stub_html(user_prompt)
+                return
+
+            config = {"temperature": 0.7, "max_output_tokens": max_tokens}
+            async for chunk in client.models.generate_content_stream(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            ):
+                if chunk.text:
+                    yield chunk.text
+        except Exception as exc:
+            logger.exception("Streaming codegen failed: %s", exc)
+            yield f"<!-- Generation error: {str(exc)[:100]} -->"
+
+    def _build_prompt(
+        self,
+        *,
+        user_prompt: str,
+        history: list[ConversationMessage],
+        current_html: str,
+        genre_hint: str,
+    ) -> str:
+        """Build a clean, concise prompt for game generation.
+
+        Key difference from legacy: no 300-line contract soup.
+        LLM gets freedom to create, with only essential constraints.
+        """
+        is_modification = bool(current_html.strip())
+
+        history_section = ""
+        if history:
+            recent = history[-10:]  # Keep last 10 messages for context
+            history_lines = []
+            for msg in recent:
+                role_label = msg.role.upper()
+                history_lines.append(f"[{role_label}]: {msg.content[:500]}")
+            history_section = (
+                "=== Conversation History ===\n"
+                + "\n".join(history_lines)
+                + "\n\n"
+            )
+
+        if is_modification:
+            return (
+                "You are a principal web game engineer.\n"
+                "Modify the existing game based on the user's request.\n\n"
+                f"{history_section}"
+                f"User request: {user_prompt}\n\n"
+                "Rules:\n"
+                "- Return the COMPLETE modified HTML (not a diff)\n"
+                "- Preserve working game mechanics unless asked to change them\n"
+                "- Keep window.__iis_game_boot_ok = true\n"
+                "- Keep window.IISLeaderboard contract\n"
+                "- Return only HTML, no markdown fences\n\n"
+                f"Current game HTML:\n{current_html}"
+            )
+
+        return (
+            "You are a principal web game engineer.\n"
+            "Create a complete, high-quality, playable HTML5 browser game.\n\n"
+            f"{history_section}"
+            f"User request: {user_prompt}\n"
+            f"{'Genre hint: ' + genre_hint if genre_hint else ''}\n\n"
+            "Requirements:\n"
+            "- Single complete HTML document with inline JS and CSS\n"
+            "- Use Three.js (import from CDN) for 3D games\n"
+            "- Use Phaser.js (script from CDN) for 2D games\n"
+            "- Choose 3D or 2D based on the game concept\n"
+            "- Must include: game loop, keyboard/mouse controls, score system, "
+            "restart on game-over\n"
+            "- Must set window.__iis_game_boot_ok = true when ready\n"
+            "- Must expose window.IISLeaderboard = { postScore: (s) => "
+            "console.log('IIS:score', s) }\n"
+            "- Production quality: custom shaders/particles, rich visuals, "
+            "smooth animations\n"
+            "- No external image dependencies — use procedural graphics\n"
+            "- Must work in an embedded iframe\n"
+            "- Return only the HTML document, no markdown fences\n\n"
+            f"Three.js CDN: {_THREE_CDN}\n"
+            f"Phaser CDN: {_PHASER_CDN}\n"
+        )
+
+    @staticmethod
+    def _extract_html(raw: str) -> str:
+        """Extract HTML from LLM response, stripping markdown fences."""
+        text = raw.strip()
+        for fence in ("```html", "```HTML"):
+            if text.startswith(fence):
+                text = text[len(fence) :]
+                break
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        # Ensure it looks like HTML
+        if not text.lower().startswith(("<!doctype", "<html", "<head")):
+            # Try to find HTML in the response
+            for marker in ("<!doctype", "<!DOCTYPE", "<html"):
+                idx = text.find(marker)
+                if idx >= 0:
+                    text = text[idx:]
+                    break
+        return text
+
+    @staticmethod
+    def _stub_html(prompt: str) -> str:
+        """Minimal stub for when Vertex AI is not available."""
+        return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>IIS Game Stub</title>
+<style>
+html, body {{ margin: 0; height: 100%; background: #0a0a1a; color: #e2e8f0;
+  font-family: system-ui; display: grid; place-items: center; }}
+.stub {{ text-align: center; padding: 2rem; }}
+h1 {{ color: #60a5fa; }}
+</style>
+</head>
+<body>
+<div class="stub">
+  <h1>🎮 Game Generation Pending</h1>
+  <p>Prompt: {prompt[:200]}</p>
+  <p>Vertex AI is not configured. Connect your API credentials to generate games.</p>
+</div>
+<script>
+window.__iis_game_boot_ok = true;
+window.IISLeaderboard = {{ postScore: (s) => console.log('IIS:score', s) }};
+</script>
+</body>
+</html>"""

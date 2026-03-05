@@ -1,12 +1,61 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
-from app.orchestration.nodes.builder_parts.genre_engine import get_genre_quality_floor, resolve_genre_engine
 from app.core.config import Settings
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult
-from app.services.visual_contract import resolve_visual_contract_profile
+
+
+# --- Inline fallbacks for deleted modules (genre_engine, visual_contract) ---
+
+def resolve_genre_engine(genre_or_engine: str, *, keyword: str = "") -> str:
+    """Minimal genre engine resolver (inline fallback)."""
+    combined = f"{genre_or_engine} {keyword}".strip().casefold()
+    if any(t in combined for t in ("racing", "f1", "formula", "drift")):
+        return "f1_formula_circuit_3d"
+    if any(t in combined for t in ("flight", "space", "pilot", "dogfight")):
+        return "space_combat"
+    if any(t in combined for t in ("roguelike", "topdown", "dungeon")):
+        return "topdown_roguelike_shooter"
+    return "webgl_three_runner"
+
+
+def get_genre_quality_floor(genre_engine: str) -> dict[str, int]:
+    """Minimal genre quality floor (inline fallback)."""
+    return {
+        "min_functions": 15,
+        "min_lines": 800,
+        "min_shaders": 1,
+        "min_states": 2,
+    }
+
+
+@dataclass
+class _VisualContract:
+    contrast_min: float = 0.03
+    color_diversity_min: float = 8.0
+    composition_non_dark_min: float = 0.05
+    composition_non_dark_max: float = 0.95
+    edge_energy_min: float = 0.005
+    motion_delta_min: float = 0.001
+    cohesion_contrast_min: float = 0.02
+    cohesion_edge_min: float = 0.003
+    cohesion_color_min: float = 6.0
+    advanced_density_enabled: bool = False
+    advanced_density_color_min: float = 12.0
+    advanced_density_edge_min: float = 0.01
+
+
+def resolve_visual_contract_profile(
+    core_loop_type: str | None = None,
+    runtime_engine_mode: str | None = None,
+    contract_version: str = "v2",
+    keyword: str = "",
+) -> _VisualContract:
+    """Minimal visual contract profile (inline fallback)."""
+    return _VisualContract()
 
 
 def evaluate_quality_contract(

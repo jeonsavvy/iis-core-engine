@@ -22,6 +22,30 @@ app = FastAPI(title=settings.app_name)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
 
 
+# ---------------------------------------------------------------------------
+# Agent lifecycle: initialize on startup
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _init_agents() -> None:
+    """Initialize agent loop and attach to app state."""
+    from app.services.vertex_service import VertexService
+    from app.agents.codegen_agent import CodegenAgent
+    from app.agents.visual_qa_agent import VisualQAAgent
+    from app.agents.playtester_agent import PlaytesterAgent
+    from app.agents.agent_loop import AgentLoop
+
+    vertex = VertexService(settings)
+    codegen = CodegenAgent(vertex_service=vertex)
+    visual_qa = VisualQAAgent(vertex_service=vertex)
+    playtester = PlaytesterAgent()
+    loop = AgentLoop(codegen=codegen, visual_qa=visual_qa, playtester=playtester)
+
+    app.state.vertex_service = vertex
+    app.state.codegen_agent = codegen
+    app.state.agent_loop = loop
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, object]:
     return cast(dict[str, object], healthz_payload())
