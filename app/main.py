@@ -28,12 +28,14 @@ app.include_router(v1_router, prefix=settings.api_v1_prefix)
 
 @app.on_event("startup")
 async def _init_agents() -> None:
-    """Initialize agent loop and attach to app state."""
+    """Initialize agent loop, publisher, and session persistence."""
     from app.services.vertex_service import VertexService
     from app.agents.codegen_agent import CodegenAgent
     from app.agents.visual_qa_agent import VisualQAAgent
     from app.agents.playtester_agent import PlaytesterAgent
     from app.agents.agent_loop import AgentLoop
+    from app.services.session_publisher import SessionPublisher
+    from app.services.session_store import enable_supabase_persistence
 
     vertex = VertexService(settings)
     codegen = CodegenAgent(vertex_service=vertex)
@@ -44,6 +46,10 @@ async def _init_agents() -> None:
     app.state.vertex_service = vertex
     app.state.codegen_agent = codegen
     app.state.agent_loop = loop
+
+    # Phase 3-4: Publishing + Persistence
+    app.state.publisher_service = SessionPublisher(settings)
+    enable_supabase_persistence(app, settings)
 
 
 @app.get("/healthz")
