@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-from app.orchestration.nodes.builder_parts.production_pipeline import build_production_artifact
+from app.orchestration.nodes.builder_parts.production_pipeline import (
+    _classify_blocking_reasons,
+    build_production_artifact,
+)
 from app.schemas.payloads import DesignSpecPayload, GDDPayload
 from app.schemas.pipeline import PipelineStatus
 from app.services.quality_types import GameplayGateResult, QualityGateResult, SmokeCheckResult
@@ -257,6 +260,20 @@ def test_build_production_artifact_marks_fallback_blocked_metadata() -> None:
     assert result.metadata["deterministic_fallback_used"] is False
     assert result.metadata["fallback_blocked"] is True
     assert result.selected_generation_meta["generation_source"] == "stub"
+
+
+def test_blocking_reason_classifier_maps_checklist_into_visual_runtime() -> None:
+    groups = _classify_blocking_reasons(
+        [
+            "generation_checklist_unmet",
+            "other:checklist:visual_contrast",
+            "checklist:input_reaction",
+        ]
+    )
+    assert groups["quality"] == ["generation_checklist_unmet"]
+    assert groups["visual"] == ["checklist:visual_contrast"]
+    assert groups["runtime"] == ["checklist:input_reaction"]
+    assert "other" not in groups
 
 
 def test_build_production_artifact_marks_retryable_when_codegen_quota_exhausted() -> None:

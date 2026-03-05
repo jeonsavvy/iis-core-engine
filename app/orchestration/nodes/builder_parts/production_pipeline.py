@@ -406,6 +406,56 @@ def _should_prefer_kernel_candidate(
 
 
 def _classify_blocking_reasons(reasons: list[str]) -> dict[str, list[str]]:
+    known_prefixes = (
+        "visual:",
+        "runtime:",
+        "intent:",
+        "gameplay:",
+        "quality:",
+        "codegen:",
+        "other:",
+    )
+
+    def _strip_known_prefixes(value: str) -> str:
+        token = value
+        while True:
+            lowered_token = token.casefold()
+            matched = False
+            for prefix in known_prefixes:
+                if lowered_token.startswith(prefix):
+                    token = token[len(prefix) :].strip()
+                    matched = True
+                    break
+            if not matched:
+                break
+        return token
+
+    def _checklist_group(value: str) -> str:
+        if (
+            value.startswith("visual_")
+            or value.startswith("color_")
+            or "contrast" in value
+            or "diversity" in value
+            or "edge" in value
+            or "motion" in value
+            or "composition" in value
+        ):
+            return "visual"
+        if (
+            value.startswith("input_")
+            or value.startswith("state_")
+            or value.startswith("restart_")
+            or value.startswith("runtime_")
+        ):
+            return "runtime"
+        if (
+            value.startswith("gameplay_")
+            or value.startswith("core_loop")
+            or value.startswith("progression")
+        ):
+            return "gameplay"
+        return "quality"
+
     groups: dict[str, list[str]] = {
         "visual": [],
         "runtime": [],
@@ -418,9 +468,12 @@ def _classify_blocking_reasons(reasons: list[str]) -> dict[str, list[str]]:
 
     for row in reasons:
         token = str(row).strip()
-        lowered = token.casefold()
+        normalized = _strip_known_prefixes(token)
+        lowered = normalized.casefold()
         target = "other"
-        if lowered.startswith("intent:") or lowered.startswith("intent_") or lowered == "intent_gate_unmet":
+        if lowered.startswith("checklist:"):
+            target = _checklist_group(lowered[len("checklist:") :])
+        elif lowered.startswith("intent:") or lowered.startswith("intent_") or lowered == "intent_gate_unmet":
             target = "intent"
         elif lowered.startswith("codegen_") or lowered.startswith("codegen:") or lowered.startswith("codegen_reason:") or lowered.startswith("codegen_error:"):
             target = "codegen"
@@ -445,9 +498,9 @@ def _classify_blocking_reasons(reasons: list[str]) -> dict[str, list[str]]:
             target = "visual"
         elif lowered.startswith("gameplay_") or lowered == "gameplay_gate_unmet":
             target = "gameplay"
-        elif lowered.startswith("quality_") or lowered == "quality_gate_unmet":
+        elif lowered.startswith("quality_") or lowered in {"quality_gate_unmet", "generation_checklist_unmet"}:
             target = "quality"
-        groups[target].append(token)
+        groups[target].append(normalized or token)
 
     return {key: value for key, value in groups.items() if value}
 
