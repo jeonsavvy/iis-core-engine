@@ -62,6 +62,14 @@ run_healthcheck() {
     "${HEALTHCHECK_URL}" >/dev/null
 }
 
+dump_service_diagnostics() {
+  local service_name="$1"
+  echo "===== systemd status: ${service_name} ====="
+  sudo systemctl --no-pager --full status "${service_name}" || true
+  echo "===== journal tail: ${service_name} ====="
+  sudo journalctl --no-pager -u "${service_name}" -n 120 || true
+}
+
 ensure_git_writable() {
   if [[ -w ".git" && -w ".git/refs" ]]; then
     return
@@ -177,6 +185,9 @@ fi
 sudo systemctl restart "${API_SERVICE}" "${WORKER_SERVICE}"
 
 if ! run_healthcheck; then
+  echo "Healthcheck failed on target commit ${TARGET_COMMIT}. Capturing diagnostics."
+  dump_service_diagnostics "${API_SERVICE}"
+  dump_service_diagnostics "${WORKER_SERVICE}"
   echo "Healthcheck failed. Rolling back to ${PREVIOUS_COMMIT}"
   git reset --hard "${PREVIOUS_COMMIT}"
   "${VENV_DIR}/bin/pip" install -r requirements.txt
