@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any
 
@@ -267,7 +268,7 @@ def build_codegen_prompt(
         runtime_engine_mode=runtime_engine_mode,
         keyword=keyword,
     )
-    visual_contract_json = json.dumps(visual_contract.as_dict(), ensure_ascii=False)
+    visual_contract_json = json.dumps(dataclasses.asdict(visual_contract), ensure_ascii=False)
     required_asset_usage = []
     visual_rows = shared_generation_contract.get("visual") if isinstance(shared_generation_contract, dict) else None
     if isinstance(visual_rows, dict):
