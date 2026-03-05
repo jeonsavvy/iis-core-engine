@@ -84,18 +84,23 @@ class CodegenAgent:
             max_tokens = getattr(
                 self._vertex.settings, "builder_codegen_max_output_tokens", 48_000
             )
-            result = await self._vertex._genai_text(
+            raw_text, usage = self._vertex._genai_text(
                 model_name=model_name,
                 prompt=prompt,
                 temperature=0.7,
                 max_output_tokens=max_tokens,
             )
-            raw_text = str(result).strip()
-            html = self._extract_html(raw_text)
+            html = self._extract_html(str(raw_text).strip())
+            total_tokens = 0
+            if isinstance(usage, dict):
+                value = usage.get("total_tokens", 0)
+                if isinstance(value, int):
+                    total_tokens = value
             return CodegenResult(
                 html=html,
                 generation_source="vertex",
                 model_name=model_name,
+                tokens_used=total_tokens,
             )
         except Exception as exc:
             logger.exception("Codegen generation failed: %s", exc)
