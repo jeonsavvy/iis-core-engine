@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "bash -lc 'set -euo pipefail; bash \"${DEPLOY_PATH:-/opt/iis-core-engine}/scripts/deploy_remote.sh\" \"${DEPLOY_PATH:-/opt/iis-core-engine}\" main'"; then
+            "bash -lc 'set -euo pipefail; export SESSION_SCHEMA_EXPECTED=v2; bash \"${DEPLOY_PATH:-/opt/iis-core-engine}/scripts/deploy_remote.sh\" \"${DEPLOY_PATH:-/opt/iis-core-engine}\" main'"; then
             if [[ "${DEPLOY_REQUIRED:-true}" == "true" ]]; then
               echo "Deploy SSH command failed and BACKEND_DEPLOY_REQUIRED=true."
               exit 1
