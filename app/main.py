@@ -44,6 +44,7 @@ async def _init_agents() -> None:
     app.state.codegen_agent = None
     app.state.agent_loop = None
     app.state.publisher_service = None
+    app.state.session_run_tasks = {}
 
     try:
         vertex = VertexService(settings)

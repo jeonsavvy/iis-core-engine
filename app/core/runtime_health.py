@@ -12,9 +12,9 @@ except ImportError:  # pragma: no cover - optional dependency in test environmen
     create_client = None
 
 
-SESSION_SCHEMA_VERSION = "v1"
+SESSION_SCHEMA_VERSION = "v2"
 LEGACY_PIPELINE_SCHEMA_VERSION = "v2"
-RUNTIME_MODULE_SIGNATURE = "session_editor_loop_v1"
+RUNTIME_MODULE_SIGNATURE = "session_editor_loop_v2"
 
 
 @lru_cache(maxsize=1)
@@ -40,19 +40,20 @@ def verify_session_schema_signature(settings: Settings) -> None:
     if create_client is None:
         return
     client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    response = (
-        client.table("sessions")
-        .select("id")
-        .limit(1)
-        .execute()
-    )
-    error = getattr(response, "error", None)
-    if not error:
-        return
-    detail = str(getattr(error, "message", "") or error)
-    lowered = detail.casefold()
-    if "relation" in lowered and "sessions" in lowered:
-        raise RuntimeError(f"session_schema_mismatch: {detail}")
+    for table_name in ("sessions", "session_runs"):
+        response = (
+            client.table(table_name)
+            .select("id")
+            .limit(1)
+            .execute()
+        )
+        error = getattr(response, "error", None)
+        if not error:
+            continue
+        detail = str(getattr(error, "message", "") or error)
+        lowered = detail.casefold()
+        if "relation" in lowered and table_name in lowered:
+            raise RuntimeError(f"session_schema_mismatch({table_name}): {detail}")
 
 
 def healthz_payload(settings: Settings | None = None) -> dict[str, str]:

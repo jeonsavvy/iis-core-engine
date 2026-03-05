@@ -21,6 +21,10 @@ class SupabaseSessionStore:
     def __init__(self, client: Any) -> None:
         self._client = client
 
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
     def create_session(
         self,
         *,
@@ -37,8 +41,8 @@ class SupabaseSessionStore:
             "status": "active",
             "current_html": "",
             "score": 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": self._now_iso(),
+            "updated_at": self._now_iso(),
         }
         result = self._client.table("sessions").insert(row).execute()
         if hasattr(result, "error") and result.error:
@@ -73,19 +77,23 @@ class SupabaseSessionStore:
         self._client.table("sessions").update({
             "current_html": html,
             "score": score,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": self._now_iso(),
         }).eq("id", session_id).execute()
 
     def update_session_status(self, session_id: str, status: str) -> None:
         self._client.table("sessions").update({
             "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": self._now_iso(),
         }).eq("id", session_id).execute()
 
     def delete_session(self, session_id: str) -> None:
         self._client.table("sessions").delete().eq("id", session_id).execute()
         self._client.table("conversation_history").delete().eq("session_id", session_id).execute()
         self._client.table("session_events").delete().eq("session_id", session_id).execute()
+        self._client.table("session_runs").delete().eq("session_id", session_id).execute()
+        self._client.table("session_issues").delete().eq("session_id", session_id).execute()
+        self._client.table("session_issue_proposals").delete().eq("session_id", session_id).execute()
+        self._client.table("session_publish_approvals").delete().eq("session_id", session_id).execute()
         self._client.table("session_publish_history").delete().eq("session_id", session_id).execute()
 
     def add_conversation_message(
@@ -104,7 +112,7 @@ class SupabaseSessionStore:
             "role": role,
             "content": safe_content[:10000],
             "metadata": safe_metadata,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": self._now_iso(),
         }
         self._client.table("conversation_history").insert(row).execute()
 
@@ -158,7 +166,7 @@ class SupabaseSessionStore:
             "confidence": float(confidence) if isinstance(confidence, (int, float)) else None,
             "error_code": str(error_code).strip() if isinstance(error_code, str) and error_code.strip() else None,
             "metadata": redact_sensitive_data(metadata or {}),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": self._now_iso(),
         }
         self._client.table("session_events").insert(row).execute()
         return row
@@ -202,9 +210,193 @@ class SupabaseSessionStore:
             "play_url": play_url,
             "public_url": public_url,
             "metadata": redact_sensitive_data(metadata or {}),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": self._now_iso(),
         }
         self._client.table("session_publish_history").insert(row).execute()
+
+    def create_session_run(
+        self,
+        *,
+        session_id: str,
+        prompt: str,
+        auto_qa: bool,
+        status: str = "queued",
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "prompt": redact_sensitive_data(prompt)[:10000],
+            "auto_qa": bool(auto_qa),
+            "status": status,
+            "error_code": None,
+            "error_detail": "",
+            "final_score": 0,
+            "activities": [],
+            "created_at": self._now_iso(),
+            "started_at": None,
+            "finished_at": None,
+            "updated_at": self._now_iso(),
+        }
+        self._client.table("session_runs").insert(row).execute()
+        return row
+
+    def get_session_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
+        result = (
+            self._client.table("session_runs")
+            .select("*")
+            .eq("session_id", session_id)
+            .eq("id", run_id)
+            .single()
+            .execute()
+        )
+        return result.data if hasattr(result, "data") else None
+
+    def update_session_run(self, session_id: str, run_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        safe_fields = dict(fields)
+        if "error_detail" in safe_fields:
+            safe_fields["error_detail"] = redact_sensitive_data(str(safe_fields["error_detail"]))[:10000]
+        if "activities" in safe_fields:
+            safe_fields["activities"] = redact_sensitive_data(safe_fields["activities"])
+        safe_fields["updated_at"] = self._now_iso()
+        self._client.table("session_runs").update(safe_fields).eq("session_id", session_id).eq("id", run_id).execute()
+
+    def create_session_issue(
+        self,
+        *,
+        session_id: str,
+        title: str,
+        details: str,
+        category: str,
+        created_by: str = "master_admin",
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "title": redact_sensitive_data(title)[:300],
+            "details": redact_sensitive_data(details)[:4000],
+            "category": category,
+            "status": "open",
+            "created_by": created_by,
+            "created_at": self._now_iso(),
+            "updated_at": self._now_iso(),
+        }
+        self._client.table("session_issues").insert(row).execute()
+        return row
+
+    def get_session_issue(self, session_id: str, issue_id: str) -> dict[str, Any] | None:
+        result = (
+            self._client.table("session_issues")
+            .select("*")
+            .eq("session_id", session_id)
+            .eq("id", issue_id)
+            .single()
+            .execute()
+        )
+        return result.data if hasattr(result, "data") else None
+
+    def update_session_issue(self, session_id: str, issue_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        safe_fields = dict(fields)
+        if "details" in safe_fields:
+            safe_fields["details"] = redact_sensitive_data(str(safe_fields["details"]))[:4000]
+        if "title" in safe_fields:
+            safe_fields["title"] = redact_sensitive_data(str(safe_fields["title"]))[:300]
+        safe_fields["updated_at"] = self._now_iso()
+        self._client.table("session_issues").update(safe_fields).eq("session_id", session_id).eq("id", issue_id).execute()
+
+    def create_issue_proposal(
+        self,
+        *,
+        session_id: str,
+        issue_id: str,
+        summary: str,
+        proposal_prompt: str,
+        preview_html: str,
+        proposed_by: str = "codegen",
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "issue_id": issue_id,
+            "summary": redact_sensitive_data(summary)[:1000],
+            "proposal_prompt": redact_sensitive_data(proposal_prompt)[:4000],
+            "preview_html": preview_html,
+            "status": "proposed",
+            "proposed_by": proposed_by,
+            "created_at": self._now_iso(),
+            "updated_at": self._now_iso(),
+        }
+        self._client.table("session_issue_proposals").insert(row).execute()
+        return row
+
+    def get_issue_proposal(self, session_id: str, issue_id: str, proposal_id: str) -> dict[str, Any] | None:
+        result = (
+            self._client.table("session_issue_proposals")
+            .select("*")
+            .eq("session_id", session_id)
+            .eq("issue_id", issue_id)
+            .eq("id", proposal_id)
+            .single()
+            .execute()
+        )
+        return result.data if hasattr(result, "data") else None
+
+    def get_latest_issue_proposal(self, session_id: str, issue_id: str) -> dict[str, Any] | None:
+        result = (
+            self._client.table("session_issue_proposals")
+            .select("*")
+            .eq("session_id", session_id)
+            .eq("issue_id", issue_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data if hasattr(result, "data") and isinstance(result.data, list) else []
+        return rows[0] if rows else None
+
+    def update_issue_proposal(self, session_id: str, issue_id: str, proposal_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        safe_fields = dict(fields)
+        if "summary" in safe_fields:
+            safe_fields["summary"] = redact_sensitive_data(str(safe_fields["summary"]))[:1000]
+        safe_fields["updated_at"] = self._now_iso()
+        self._client.table("session_issue_proposals").update(safe_fields).eq("session_id", session_id).eq("issue_id", issue_id).eq("id", proposal_id).execute()
+
+    def create_publish_approval(
+        self,
+        *,
+        session_id: str,
+        approved_by: str = "master_admin",
+        note: str = "",
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "approved_by": approved_by,
+            "note": redact_sensitive_data(note)[:1000],
+            "approved_at": self._now_iso(),
+        }
+        self._client.table("session_publish_approvals").insert(row).execute()
+        return row
+
+    def get_latest_publish_approval(self, session_id: str) -> dict[str, Any] | None:
+        result = (
+            self._client.table("session_publish_approvals")
+            .select("*")
+            .eq("session_id", session_id)
+            .order("approved_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data if hasattr(result, "data") and isinstance(result.data, list) else []
+        return rows[0] if rows else None
+
+    def clear_publish_approvals(self, session_id: str) -> None:
+        self._client.table("session_publish_approvals").delete().eq("session_id", session_id).execute()
 
 
 def enable_supabase_persistence(app: Any, settings: Any) -> None:

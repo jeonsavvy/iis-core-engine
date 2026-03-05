@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     http_max_retries: int = Field(default=3, ge=1, le=5)
 
+    prompt_async_enabled: bool = True
+    human_agent_issue_loop_enabled: bool = True
+    publish_approval_required: bool = True
+    engine_audit_enabled: bool = True
+    prompt_run_timeout_seconds: float = Field(default=150.0, ge=10.0, le=900.0)
+
     def telegram_allowed_chat_id_set(self) -> set[str]:
         return {chat_id.strip() for chat_id in self.telegram_allowed_chat_ids.split(",") if chat_id.strip()}
 

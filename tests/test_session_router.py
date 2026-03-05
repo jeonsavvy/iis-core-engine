@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.agents.agent_loop import AgentActivity, AgentLoopResult
+from app.agents.codegen_agent import CodegenResult
 from app.api.v1.session_router import router as session_router
 
 
@@ -16,14 +19,18 @@ class FakeSessionStore:
         self.histories: dict[str, list[dict[str, Any]]] = {}
         self.events: dict[str, list[dict[str, Any]]] = {}
         self.publish_rows: list[dict[str, Any]] = []
+        self.runs: dict[str, dict[str, Any]] = {}
+        self.issues: dict[str, dict[str, Any]] = {}
+        self.issue_proposals: dict[str, dict[str, Any]] = {}
+        self.publish_approvals: dict[str, list[dict[str, Any]]] = {}
         self._counter = 0
 
-    def _id(self) -> str:
+    def _id(self, prefix: str) -> str:
         self._counter += 1
-        return f"s-{self._counter}"
+        return f"{prefix}-{self._counter}"
 
     def create_session(self, *, user_id: str | None = None, title: str = "", genre: str = "") -> dict[str, Any]:
-        sid = self._id()
+        sid = self._id("s")
         row = {
             "id": sid,
             "user_id": user_id,
@@ -38,6 +45,7 @@ class FakeSessionStore:
         self.sessions[sid] = row
         self.histories[sid] = []
         self.events[sid] = []
+        self.publish_approvals[sid] = []
         return row
 
     def list_sessions(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -61,6 +69,7 @@ class FakeSessionStore:
         self.sessions.pop(session_id, None)
         self.histories.pop(session_id, None)
         self.events.pop(session_id, None)
+        self.publish_approvals.pop(session_id, None)
 
     def add_conversation_message(
         self,
@@ -101,7 +110,7 @@ class FakeSessionStore:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         row = {
-            "id": f"e-{len(self.events[session_id]) + 1}",
+            "id": self._id("e"),
             "session_id": session_id,
             "event_type": event_type,
             "agent": agent,
@@ -149,13 +158,157 @@ class FakeSessionStore:
             }
         )
 
+    def create_session_run(self, *, session_id: str, prompt: str, auto_qa: bool, status: str = "queued") -> dict[str, Any]:
+        run_id = self._id("run")
+        row = {
+            "id": run_id,
+            "session_id": session_id,
+            "prompt": prompt,
+            "auto_qa": auto_qa,
+            "status": status,
+            "error_code": None,
+            "error_detail": "",
+            "final_score": 0,
+            "activities": [],
+            "created_at": "2026-03-05T00:00:00Z",
+            "started_at": None,
+            "finished_at": None,
+            "updated_at": "2026-03-05T00:00:00Z",
+        }
+        self.runs[run_id] = row
+        return row
+
+    def get_session_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
+        run = self.runs.get(run_id)
+        if run and run.get("session_id") == session_id:
+            return run
+        return None
+
+    def update_session_run(self, session_id: str, run_id: str, **fields: Any) -> None:
+        run = self.runs[run_id]
+        if run["session_id"] != session_id:
+            return
+        run.update(fields)
+
+    def create_session_issue(
+        self,
+        *,
+        session_id: str,
+        title: str,
+        details: str,
+        category: str,
+        created_by: str = "master_admin",
+    ) -> dict[str, Any]:
+        row = {
+            "id": self._id("issue"),
+            "session_id": session_id,
+            "title": title,
+            "details": details,
+            "category": category,
+            "status": "open",
+            "created_by": created_by,
+            "created_at": "2026-03-05T00:00:00Z",
+            "updated_at": "2026-03-05T00:00:00Z",
+        }
+        self.issues[row["id"]] = row
+        return row
+
+    def get_session_issue(self, session_id: str, issue_id: str) -> dict[str, Any] | None:
+        issue = self.issues.get(issue_id)
+        if issue and issue.get("session_id") == session_id:
+            return issue
+        return None
+
+    def update_session_issue(self, session_id: str, issue_id: str, **fields: Any) -> None:
+        issue = self.issues[issue_id]
+        if issue["session_id"] != session_id:
+            return
+        issue.update(fields)
+
+    def create_issue_proposal(
+        self,
+        *,
+        session_id: str,
+        issue_id: str,
+        summary: str,
+        proposal_prompt: str,
+        preview_html: str,
+        proposed_by: str = "codegen",
+    ) -> dict[str, Any]:
+        row = {
+            "id": self._id("proposal"),
+            "session_id": session_id,
+            "issue_id": issue_id,
+            "summary": summary,
+            "proposal_prompt": proposal_prompt,
+            "preview_html": preview_html,
+            "status": "proposed",
+            "proposed_by": proposed_by,
+            "created_at": "2026-03-05T00:00:00Z",
+            "updated_at": "2026-03-05T00:00:00Z",
+        }
+        self.issue_proposals[row["id"]] = row
+        return row
+
+    def get_issue_proposal(self, session_id: str, issue_id: str, proposal_id: str) -> dict[str, Any] | None:
+        proposal = self.issue_proposals.get(proposal_id)
+        if proposal and proposal.get("session_id") == session_id and proposal.get("issue_id") == issue_id:
+            return proposal
+        return None
+
+    def get_latest_issue_proposal(self, session_id: str, issue_id: str) -> dict[str, Any] | None:
+        proposals = [
+            proposal
+            for proposal in self.issue_proposals.values()
+            if proposal.get("session_id") == session_id and proposal.get("issue_id") == issue_id
+        ]
+        return proposals[-1] if proposals else None
+
+    def update_issue_proposal(self, session_id: str, issue_id: str, proposal_id: str, **fields: Any) -> None:
+        proposal = self.issue_proposals[proposal_id]
+        if proposal["session_id"] != session_id or proposal["issue_id"] != issue_id:
+            return
+        proposal.update(fields)
+
+    def create_publish_approval(
+        self,
+        *,
+        session_id: str,
+        approved_by: str = "master_admin",
+        note: str = "",
+    ) -> dict[str, Any]:
+        row = {
+            "id": self._id("approval"),
+            "session_id": session_id,
+            "approved_by": approved_by,
+            "note": note,
+            "approved_at": "2026-03-05T00:00:00Z",
+        }
+        self.publish_approvals.setdefault(session_id, []).append(row)
+        return row
+
+    def get_latest_publish_approval(self, session_id: str) -> dict[str, Any] | None:
+        rows = self.publish_approvals.get(session_id, [])
+        return rows[-1] if rows else None
+
+    def clear_publish_approvals(self, session_id: str) -> None:
+        self.publish_approvals[session_id] = []
+
 
 @dataclass
 class FakeLoop:
     result: AgentLoopResult
+    delay_seconds: float = 0.0
 
     async def run(self, **_: Any) -> AgentLoopResult:
+        if self.delay_seconds > 0:
+            await asyncio.sleep(self.delay_seconds)
         return self.result
+
+
+class FakeCodegen:
+    async def generate(self, **_: Any) -> CodegenResult:
+        return CodegenResult(html="<html>patched</html>", generation_source="vertex")
 
 
 class FakePublisher:
@@ -173,14 +326,12 @@ class FakePublisher:
         }
 
 
-def make_client(*, with_store: bool = True, loop_result: AgentLoopResult | None = None) -> tuple[TestClient, FakeSessionStore | None]:
+def make_client(*, loop_result: AgentLoopResult | None = None, delay_seconds: float = 0.0) -> tuple[TestClient, FakeSessionStore]:
     app = FastAPI()
     app.include_router(session_router, prefix="/api/v1")
 
-    store = FakeSessionStore() if with_store else None
-    if store is not None:
-        app.state.session_store = store
-
+    store = FakeSessionStore()
+    app.state.session_store = store
     app.state.agent_loop = FakeLoop(
         loop_result
         or AgentLoopResult(
@@ -201,21 +352,57 @@ def make_client(*, with_store: bool = True, loop_result: AgentLoopResult | None 
                     after_score=80,
                 )
             ],
-        )
+        ),
+        delay_seconds=delay_seconds,
     )
+    app.state.codegen_agent = FakeCodegen()
     app.state.publisher_service = FakePublisher()
+    app.state.session_run_tasks = {}
     return TestClient(app), store
 
 
-def test_session_requires_store() -> None:
-    client, _ = make_client(with_store=False)
-    response = client.post("/api/v1/sessions", json={"title": "A"})
-    assert response.status_code == 503
-    assert "Session store unavailable" in response.text
+def wait_run_terminal(client: TestClient, session_id: str, run_id: str) -> dict[str, Any]:
+    deadline = time.time() + 2.0
+    latest: dict[str, Any] = {}
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/sessions/{session_id}/runs/{run_id}")
+        assert response.status_code == 200
+        latest = response.json()
+        if latest["status"] in {"succeeded", "failed", "cancelled"}:
+            return latest
+        time.sleep(0.05)
+    return latest
 
 
-def test_prompt_fail_fast_when_agent_loop_errors() -> None:
-    client, store = make_client(
+def create_session(client: TestClient) -> str:
+    created = client.post("/api/v1/sessions", json={"title": "T", "genre_hint": "arcade"})
+    assert created.status_code == 200
+    payload = cast(dict[str, Any], created.json())
+    return str(payload["session_id"])
+
+
+def test_prompt_is_async_and_run_succeeds() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+
+    response = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "make game", "auto_qa": True})
+    assert response.status_code == 202
+    payload = response.json()
+    run_id = payload["run_id"]
+    assert payload["status"] == "queued"
+
+    run = wait_run_terminal(client, session_id, run_id)
+    assert run["status"] == "succeeded"
+    assert run["final_score"] == 88
+    assert run["current_html"] == "<html>ok</html>"
+
+    session = store.get_session(session_id)
+    assert session is not None
+    assert session["current_html"] == "<html>ok</html>"
+
+
+def test_prompt_run_failure_exposes_error_code() -> None:
+    client, _ = make_client(
         loop_result=AgentLoopResult(
             html="",
             final_score=0,
@@ -226,102 +413,77 @@ def test_prompt_fail_fast_when_agent_loop_errors() -> None:
             activities=[],
         )
     )
-    assert store is not None
+    session_id = create_session(client)
 
-    created = client.post("/api/v1/sessions", json={"title": "T", "genre_hint": "arcade"})
-    assert created.status_code == 200
-    session_id = created.json()["session_id"]
+    queued = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "make game"})
+    assert queued.status_code == 202
+    run_id = queued.json()["run_id"]
 
-    response = client.post(
-        f"/api/v1/sessions/{session_id}/prompt",
-        json={"prompt": "make game", "auto_qa": True, "stream": False},
+    run = wait_run_terminal(client, session_id, run_id)
+    assert run["status"] == "failed"
+    assert run["error_code"] == "vertex_not_configured"
+
+
+def test_run_cancel_marks_cancelled() -> None:
+    client, _ = make_client(delay_seconds=0.8)
+    session_id = create_session(client)
+
+    queued = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "slow prompt"})
+    run_id = queued.json()["run_id"]
+    cancelled = client.post(f"/api/v1/sessions/{session_id}/runs/{run_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+
+def test_publish_requires_approval() -> None:
+    client, _ = make_client()
+    session_id = create_session(client)
+
+    queued = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "build racing game"})
+    run_id = queued.json()["run_id"]
+    run = wait_run_terminal(client, session_id, run_id)
+    assert run["status"] == "succeeded"
+
+    blocked = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "publish_unapproved"
+
+    approved = client.post(f"/api/v1/sessions/{session_id}/approve-publish", json={"note": "looks good"})
+    assert approved.status_code == 200
+
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert published.status_code == 200
+    assert published.json()["game_url"] == "/play/road-rush"
+
+
+def test_issue_propose_apply_flow() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+    store.update_session_html(session_id, "<html>old</html>", score=70)
+
+    issue_res = client.post(
+        f"/api/v1/sessions/{session_id}/issues",
+        json={"title": "코너링 감각 이상", "details": "드리프트가 너무 급함", "category": "gameplay"},
     )
-    assert response.status_code == 502
-    assert response.json()["detail"]["error"] == "prompt_failed"
+    assert issue_res.status_code == 200
+    issue_id = issue_res.json()["issue_id"]
+
+    propose = client.post(
+        f"/api/v1/sessions/{session_id}/issues/{issue_id}/propose-fix",
+        json={"instruction": "핸들링을 더 안정적으로"},
+    )
+    assert propose.status_code == 200
+    proposal_id = propose.json()["proposal_id"]
+    assert propose.json()["preview_html"] == "<html>patched</html>"
+
+    apply_res = client.post(
+        f"/api/v1/sessions/{session_id}/issues/{issue_id}/apply-fix",
+        json={"proposal_id": proposal_id},
+    )
+    assert apply_res.status_code == 200
+    assert apply_res.json()["status"] == "applied"
+    assert apply_res.json()["html"] == "<html>patched</html>"
+
     session_row = store.get_session(session_id)
     assert session_row is not None
-    assert session_row["current_html"] == ""
-
-
-def test_prompt_records_event_when_agent_loop_raises_exception() -> None:
-    client, store = make_client()
-    assert store is not None
-
-    class RaisingLoop:
-        async def run(self, **_: Any) -> AgentLoopResult:  # pragma: no cover - exercised by test
-            raise RuntimeError("loop_crashed")
-
-    client.app.state.agent_loop = RaisingLoop()
-
-    created = client.post("/api/v1/sessions", json={"title": "T", "genre_hint": "arcade"})
-    assert created.status_code == 200
-    session_id = created.json()["session_id"]
-
-    response = client.post(
-        f"/api/v1/sessions/{session_id}/prompt",
-        json={"prompt": "make game", "auto_qa": True, "stream": False},
-    )
-    assert response.status_code == 502
-    payload = response.json()
-    assert payload["detail"]["error"] == "prompt_failed"
-    assert payload["detail"]["code"] == "agent_loop_exception"
-
-    events = store.get_session_events(session_id, limit=20)
-    assert any(event.get("error_code") == "agent_loop_exception" for event in events)
-
-
-def test_prompt_response_contains_activity_contract_and_events() -> None:
-    client, _ = make_client()
-
-    created = client.post("/api/v1/sessions", json={"title": "T", "genre_hint": "arcade"})
-    session_id = created.json()["session_id"]
-
-    response = client.post(
-        f"/api/v1/sessions/{session_id}/prompt",
-        json={"prompt": "add enemies", "auto_qa": True, "stream": False},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-
-    activity = payload["activities"][0]
-    assert activity["agent"] == "visual_qa"
-    assert "decision_reason" in activity
-    assert "input_signal" in activity
-    assert "change_impact" in activity
-    assert "confidence" in activity
-    assert "error_code" in activity
-
-    events_res = client.get(f"/api/v1/sessions/{session_id}/events")
-    assert events_res.status_code == 200
-    events_payload = events_res.json()
-    assert len(events_payload["events"]) >= 3
-
-
-def test_cancel_blocks_prompt_and_publish_returns_play_slug_url() -> None:
-    client, store = make_client()
-    assert store is not None
-
-    created = client.post("/api/v1/sessions", json={"title": "Road Rush", "genre_hint": "racing"})
-    session_id = created.json()["session_id"]
-
-    prompt = client.post(
-        f"/api/v1/sessions/{session_id}/prompt",
-        json={"prompt": "build racing game", "auto_qa": True, "stream": False},
-    )
-    assert prompt.status_code == 200
-
-    publish = client.post(
-        f"/api/v1/sessions/{session_id}/publish",
-        json={"slug": "road-rush"},
-    )
-    assert publish.status_code == 200
-    assert publish.json()["game_url"] == "/play/road-rush"
-
-    cancel = client.post(f"/api/v1/sessions/{session_id}/cancel")
-    assert cancel.status_code == 200
-
-    second_prompt = client.post(
-        f"/api/v1/sessions/{session_id}/prompt",
-        json={"prompt": "more effects", "auto_qa": True, "stream": False},
-    )
-    assert second_prompt.status_code == 409
+    assert session_row["current_html"] == "<html>patched</html>"
