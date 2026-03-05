@@ -7,8 +7,14 @@ from functools import lru_cache
 from app.core.config import Settings, get_settings
 from app.schemas.pipeline import PipelineAgentName
 
+try:
+    from supabase import create_client
+except ImportError:  # pragma: no cover - optional dependency in test environments
+    create_client = None
+
 
 PIPELINE_SCHEMA_VERSION = "v2"
+RUNTIME_MODULE_SIGNATURE = "session_editor_loop_v1"
 
 
 def pipeline_agent_enum_signature() -> str:
@@ -35,26 +41,23 @@ def resolve_git_sha() -> str:
 def verify_pipeline_schema_signature(settings: Settings) -> None:
     if not settings.supabase_url or not settings.supabase_service_role_key:
         return
-    try:
-        from supabase import create_client
-
-        client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        response = (
-            client.table("pipeline_logs")
-            .select("id")
-            .eq("agent_name", PipelineAgentName.REPORTER.value)
-            .limit(1)
-            .execute()
-        )
-        error = getattr(response, "error", None)
-        if not error:
-            return
-        detail = str(getattr(error, "message", "") or error)
-        lowered = detail.casefold()
-        if "pipeline_agent_name" in lowered or "invalid input value for enum" in lowered:
-            raise RuntimeError(f"pipeline_schema_mismatch: {detail}")
-    except ImportError:
-        pass
+    if create_client is None:
+        return
+    client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    response = (
+        client.table("pipeline_logs")
+        .select("id")
+        .eq("agent_name", PipelineAgentName.REPORTER.value)
+        .limit(1)
+        .execute()
+    )
+    error = getattr(response, "error", None)
+    if not error:
+        return
+    detail = str(getattr(error, "message", "") or error)
+    lowered = detail.casefold()
+    if "pipeline_agent_name" in lowered or "invalid input value for enum" in lowered:
+        raise RuntimeError(f"pipeline_schema_mismatch: {detail}")
 
 
 def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
@@ -67,6 +70,8 @@ def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
         "pipeline_schema_version": PIPELINE_SCHEMA_VERSION,
         "pipeline_agent_enum_signature": pipeline_agent_enum_signature(),
         "generation_engine_version": resolved.generation_engine_version,
+        "rqc_version": resolved.generation_engine_version,
+        "module_signature": RUNTIME_MODULE_SIGNATURE,
         "builder_codegen_enabled": "true" if resolved.builder_codegen_enabled else "false",
         "vertex_project_configured": "true" if bool(resolved.vertex_project_id) else "false",
         "vertex_credentials_path_configured": "true" if bool(credentials_path) else "false",

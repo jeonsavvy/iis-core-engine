@@ -99,7 +99,7 @@ def test_evaluate_visual_gate_uses_multi_frame_samples_for_motion() -> None:
         "edge_energy": 0.023,
         "edge_energy_samples": [0.022, 0.024, 0.023, 0.025],
         "motion_delta": 0.0002,
-        "motion_delta_samples": [0.0002, 0.00095, 0.00084],
+        "motion_delta_samples": [0.0002, 0.0012, 0.00084],
         "frame_probe_count": 4,
     }
 
