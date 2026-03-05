@@ -1,4 +1,5 @@
 from typing import cast
+import logging
 
 from fastapi import FastAPI
 
@@ -17,6 +18,8 @@ settings = get_settings()
 ensure_internal_api_token_on_production(settings)
 if settings.app_env.strip().lower() in {"production", "prod"}:
     verify_pipeline_schema_signature(settings)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
@@ -37,19 +40,35 @@ async def _init_agents() -> None:
     from app.services.session_publisher import SessionPublisher
     from app.services.session_store import enable_supabase_persistence
 
-    vertex = VertexService(settings)
-    codegen = CodegenAgent(vertex_service=vertex)
-    visual_qa = VisualQAAgent(vertex_service=vertex)
-    playtester = PlaytesterAgent()
-    loop = AgentLoop(codegen=codegen, visual_qa=visual_qa, playtester=playtester)
+    app.state.vertex_service = None
+    app.state.codegen_agent = None
+    app.state.agent_loop = None
+    app.state.publisher_service = None
 
-    app.state.vertex_service = vertex
-    app.state.codegen_agent = codegen
-    app.state.agent_loop = loop
+    try:
+        vertex = VertexService(settings)
+        codegen = CodegenAgent(vertex_service=vertex)
+        visual_qa = VisualQAAgent(vertex_service=vertex)
+        playtester = PlaytesterAgent()
+        loop = AgentLoop(codegen=codegen, visual_qa=visual_qa, playtester=playtester)
 
-    # Phase 3-4: Publishing + Persistence
-    app.state.publisher_service = SessionPublisher(settings)
-    enable_supabase_persistence(app, settings)
+        app.state.vertex_service = vertex
+        app.state.codegen_agent = codegen
+        app.state.agent_loop = loop
+        logger.info("Agent loop initialized.")
+    except Exception:
+        logger.exception("Agent loop initialization failed. /sessions/{id}/prompt will return 503.")
+
+    try:
+        app.state.publisher_service = SessionPublisher(settings)
+    except Exception:
+        logger.exception("Session publisher initialization failed. Publish endpoint will stay disabled.")
+        app.state.publisher_service = None
+
+    try:
+        enable_supabase_persistence(app, settings)
+    except Exception:
+        logger.exception("Supabase session persistence initialization failed. Falling back to in-memory sessions.")
 
 
 @app.get("/healthz")
