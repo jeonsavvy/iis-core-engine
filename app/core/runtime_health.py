@@ -13,6 +13,7 @@ except ImportError:  # pragma: no cover - optional dependency in test environmen
 
 
 SESSION_SCHEMA_VERSION = "v1"
+LEGACY_PIPELINE_SCHEMA_VERSION = "v2"
 RUNTIME_MODULE_SIGNATURE = "session_editor_loop_v1"
 
 
@@ -62,6 +63,9 @@ def healthz_payload(settings: Settings | None = None) -> dict[str, str]:
         "service": "IIS Game Editor",
         "git_sha": resolve_git_sha(),
         "session_schema_version": SESSION_SCHEMA_VERSION,
+        # Backward compatibility for older deploy scripts that still probe
+        # pipeline_schema_version during health signature checks.
+        "pipeline_schema_version": LEGACY_PIPELINE_SCHEMA_VERSION,
         "generation_engine_version": resolved.generation_engine_version,
         "rqc_version": resolved.generation_engine_version,
         "module_signature": RUNTIME_MODULE_SIGNATURE,
