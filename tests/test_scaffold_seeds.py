@@ -19,6 +19,8 @@ def test_racing_scaffold_contains_required_runtime_tokens() -> None:
     assert "checkpoint" in html
     assert "throttle" in html
     assert "brake" in html
+    assert "respawntocheckpoint" in html
+    assert "wrongwaytimer" in html or "wrong way" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
 

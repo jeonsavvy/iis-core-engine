@@ -137,6 +137,8 @@ RACING_HTML = dedent(
         ground.position.y = -0.08;
         scene.add(ground);
 
+        const startPosition = trackCurve.getPointAt(0.0);
+        const trackHalfWidth = 4.2;
         const checkpointMarkers = [];
         const checkpointState = {
           currentCheckpointIndex: 0,
@@ -146,20 +148,29 @@ RACING_HTML = dedent(
           lapStartMs: performance.now(),
           bestLapMs: null,
           lastLapMs: null,
+          lastSafePoint: startPosition.clone(),
+          lastSafeHeading: 0,
         };
         [0.02, 0.27, 0.53, 0.78].forEach((t, index) => {
           const position = trackCurve.getPointAt(t);
-          const marker = new THREE.Mesh(
-            new THREE.TorusGeometry(1.8, 0.15, 12, 32),
-            new THREE.MeshBasicMaterial({ color: index === 0 ? 0x34d399 : 0x7c3aed }),
+          const tangent = trackCurve.getTangentAt(t).normalize();
+          const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+          const gate = new THREE.Group();
+          const postMaterial = new THREE.MeshStandardMaterial({ color: index === 0 ? 0x34d399 : 0x7c3aed, emissive: index === 0 ? 0x052e16 : 0x2e1065 });
+          const postLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 3.6, 10), postMaterial);
+          const postRight = postLeft.clone();
+          postLeft.position.copy(position).add(normal.clone().multiplyScalar(trackHalfWidth - 0.65)).add(new THREE.Vector3(0, 1.8, 0));
+          postRight.position.copy(position).add(normal.clone().multiplyScalar(-(trackHalfWidth - 0.65))).add(new THREE.Vector3(0, 1.8, 0));
+          const gateBar = new THREE.Mesh(
+            new THREE.BoxGeometry(trackHalfWidth * 1.5, 0.16, 0.16),
+            new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x111827 })
           );
-          marker.position.copy(position).add(new THREE.Vector3(0, 1.4, 0));
-          marker.rotation.x = Math.PI / 2;
-          scene.add(marker);
-          checkpointMarkers.push({ marker, position, threshold: 5.4 });
+          gateBar.position.copy(position).add(new THREE.Vector3(0, 3.35, 0));
+          gateBar.rotation.y = Math.atan2(tangent.x, tangent.z);
+          gate.add(postLeft, postRight, gateBar);
+          scene.add(gate);
+          checkpointMarkers.push({ marker: gate, position, tangent, normal, threshold: 4.4 });
         });
-
-        const startPosition = trackCurve.getPointAt(0.0);
         const startGateLeft = new THREE.Mesh(
           new THREE.BoxGeometry(0.28, 5.0, 0.28),
           new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x082f49 })
@@ -214,11 +225,24 @@ RACING_HTML = dedent(
           heading: 0,
           speed: 0,
           steerVelocity: 0,
-          accelRate: 22,
-          brakeRate: 28,
+          accelRate: 19,
+          brakeRate: 32,
           offTrackTimer: 0,
           wrongWayTimer: 0,
         };
+
+        function respawnToCheckpoint(reason) {
+          const safePoint = checkpointState.lastSafePoint ?? trackCurve.getPointAt(0.0);
+          carState.position.copy(safePoint);
+          carState.position.y = 0;
+          carState.speed = 0;
+          carState.steerVelocity = 0;
+          carState.heading = checkpointState.lastSafeHeading || 0;
+          carState.offTrackTimer = 0;
+          carState.wrongWayTimer = 0;
+          hintStateEl.textContent = reason;
+          statusStateEl.textContent = "TRACK LOCKED";
+        }
 
         function resetRace() {
           carState.position.copy(trackCurve.getPointAt(0.0));
@@ -230,10 +254,16 @@ RACING_HTML = dedent(
           checkpointState.lapCount = 1;
           checkpointState.lapStartMs = performance.now();
           checkpointState.lapTimerMs = 0;
+          checkpointState.lastSafePoint = startPosition.clone();
+          checkpointState.lastSafeHeading = 0;
           carState.offTrackTimer = 0;
           carState.wrongWayTimer = 0;
           checkpointMarkers.forEach(({ marker }, index) => {
-            marker.material.color.set(index === 0 ? 0x34d399 : 0x7c3aed);
+            marker.children.forEach((child, childIndex) => {
+              if (child.material) {
+                child.material.color.set(index === 0 ? 0x34d399 : (childIndex === 2 ? 0xf8fafc : 0x7c3aed));
+              }
+            });
           });
           hintStateEl.textContent = "Reset complete — attack the circuit again";
           statusStateEl.textContent = "TRACK LOCKED";
@@ -262,9 +292,13 @@ RACING_HTML = dedent(
           const distance = active.position.distanceTo(carState.position);
           if (distance > active.threshold) return;
 
-          active.marker.material.color.set(0x22d3ee);
+          active.marker.children.forEach((child) => {
+            if (child.material) child.material.color.set(0x22d3ee);
+          });
           checkpointState.checkpointPassed += 1;
           checkpointState.currentCheckpointIndex += 1;
+          checkpointState.lastSafePoint = active.position.clone();
+          checkpointState.lastSafeHeading = Math.atan2(active.tangent.x, active.tangent.z);
 
           if (checkpointState.currentCheckpointIndex >= checkpointMarkers.length) {
             const lapTime = nowMs - checkpointState.lapStartMs;
@@ -276,10 +310,16 @@ RACING_HTML = dedent(
             window.IISLeaderboard.postScore(Math.max(1, Math.round(90000 - lapTime)));
             hintStateEl.textContent = `Last lap ${formatLap(lapTime)} · Best ${formatLap(checkpointState.bestLapMs)}`;
             checkpointMarkers.forEach(({ marker }, index) => {
-              marker.material.color.set(index === 0 ? 0x34d399 : 0x7c3aed);
+              marker.children.forEach((child, childIndex) => {
+                if (child.material) {
+                  child.material.color.set(index === 0 ? 0x34d399 : (childIndex === 2 ? 0xf8fafc : 0x7c3aed));
+                }
+              });
             });
           } else {
-            checkpointMarkers[checkpointState.currentCheckpointIndex].marker.material.color.set(0x34d399);
+            checkpointMarkers[checkpointState.currentCheckpointIndex].marker.children.forEach((child) => {
+              if (child.material) child.material.color.set(0x34d399);
+            });
           }
         }
 
@@ -304,7 +344,8 @@ RACING_HTML = dedent(
           const point = roadPoints[bestIndex];
           const next = roadPoints[(bestIndex + 1) % roadPoints.length];
           const tangent = next.clone().sub(point).normalize();
-          return { point, tangent, distance: Math.sqrt(bestDistance) };
+          const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+          return { point, tangent, normal, distance: Math.sqrt(bestDistance) };
         }
 
         let lastTime = performance.now();
@@ -314,45 +355,42 @@ RACING_HTML = dedent(
 
           if (input.throttle) carState.speed += carState.accelRate * dt;
           if (input.brake) carState.speed -= carState.brakeRate * dt;
-          carState.speed *= input.brake ? 0.988 : 0.996;
-          carState.speed = THREE.MathUtils.clamp(carState.speed, 0, 72);
+          carState.speed *= input.brake ? 0.985 : 0.994;
+          carState.speed = THREE.MathUtils.clamp(carState.speed, 0, 68);
 
           const steerInput = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-          carState.steerVelocity = THREE.MathUtils.lerp(carState.steerVelocity, steerInput * 1.25, 4 * dt);
-          carState.heading += carState.steerVelocity * dt * (0.4 + carState.speed * 0.03);
+          const steerAuthority = THREE.MathUtils.mapLinear(carState.speed, 0, 68, 1.05, 0.42);
+          carState.steerVelocity = THREE.MathUtils.lerp(carState.steerVelocity, steerInput * 1.1, 5 * dt);
+          carState.heading += carState.steerVelocity * dt * steerAuthority;
 
           const forward = new THREE.Vector3(Math.sin(carState.heading), 0, Math.cos(carState.heading));
           carState.position.addScaledVector(forward, carState.speed * dt * 0.32);
 
           const nearest = nearestTrackSample(carState.position);
-          const pull = nearest.point.clone().sub(carState.position).multiplyScalar(0.055);
-          carState.position.add(pull);
-          const offTrack = nearest.distance > 4.65;
+          const relative = carState.position.clone().sub(nearest.point);
+          const lateralOffset = relative.dot(nearest.normal);
+          const clampedLateral = THREE.MathUtils.clamp(lateralOffset, -(trackHalfWidth - 0.72), trackHalfWidth - 0.72);
+          const alignedPosition = nearest.point.clone().add(nearest.normal.clone().multiplyScalar(clampedLateral));
+          carState.position.lerp(alignedPosition, 0.82);
+          const offTrack = Math.abs(lateralOffset) > trackHalfWidth - 0.45;
           if (offTrack) {
             carState.offTrackTimer += dt;
-            carState.speed *= 0.93;
-            carState.steerVelocity *= 1.08;
+            carState.speed *= 0.84;
+            carState.heading = THREE.MathUtils.lerp(carState.heading, Math.atan2(nearest.tangent.x, nearest.tangent.z), dt * 4.2);
+            carState.steerVelocity *= 0.72;
           } else {
-            carState.offTrackTimer = Math.max(0, carState.offTrackTimer - dt * 2.5);
+            carState.offTrackTimer = Math.max(0, carState.offTrackTimer - dt * 3.2);
+            checkpointState.lastSafePoint = alignedPosition.clone();
+            checkpointState.lastSafeHeading = Math.atan2(nearest.tangent.x, nearest.tangent.z);
           }
-          if (carState.offTrackTimer > 1.4) {
-            carState.position.lerp(nearest.point, 0.18);
-            hintStateEl.textContent = "OFF TRACK · return to the circuit";
+          if (carState.offTrackTimer > 0.5) {
+            hintStateEl.textContent = "OFF TRACK · penalty active";
           }
-          if (nearest.distance > 6.4) {
-            carState.position.copy(nearest.point.clone().add(new THREE.Vector3(0, 0, 0)));
-            carState.speed *= 0.76;
-          }
-          if (carState.offTrackTimer > 2.8) {
-            const restartPoint = checkpointMarkers[Math.max(0, checkpointState.currentCheckpointIndex - 1)]?.position ?? trackCurve.getPointAt(0.0);
-            carState.position.copy(restartPoint);
-            carState.speed = 0;
-            carState.heading = Math.atan2(nearest.tangent.x, nearest.tangent.z);
-            carState.offTrackTimer = 0;
-            hintStateEl.textContent = "OFF TRACK RESET · attack the lap again";
+          if (carState.offTrackTimer > 1.5 || carState.position.y < -2 || !Number.isFinite(carState.position.x) || !Number.isFinite(carState.position.z)) {
+            respawnToCheckpoint("OFF TRACK RESET · respawned to last checkpoint");
           }
 
-          const wrongWay = forward.dot(nearest.tangent) < -0.12;
+          const wrongWay = carState.speed > 8 && !offTrack && forward.dot(nearest.tangent) < -0.18;
           if (wrongWay) {
             carState.wrongWayTimer += dt;
             carState.speed *= 0.985;
@@ -365,10 +403,10 @@ RACING_HTML = dedent(
           car.position.y = 0.18;
           car.rotation.y = carState.heading;
 
-          const cameraOffset = new THREE.Vector3(0, 2.0, -5.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+          const cameraOffset = new THREE.Vector3(0, 2.7, -6.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
           const desiredCamera = car.position.clone().add(cameraOffset);
-          camera.position.lerp(desiredCamera, 0.12);
-          camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(18)).add(new THREE.Vector3(0, 1.0, 0)));
+          camera.position.lerp(desiredCamera, 0.14);
+          camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(20)).add(new THREE.Vector3(0, 1.25, 0)));
 
           checkpointState.lapTimerMs = nowMs - checkpointState.lapStartMs;
           updateCheckpoints(nowMs);
@@ -395,7 +433,7 @@ SEED = ScaffoldSeed(
     key="three_openwheel_circuit_seed",
     archetype="racing_openwheel_circuit_3d",
     engine_mode="3d_three",
-    version="v1",
+    version="v2",
     html=RACING_HTML,
     acceptance_tags=[
         "three",
@@ -405,8 +443,12 @@ SEED = ScaffoldSeed(
         "steer",
         "throttle",
         "brake",
+        "track_confinement",
+        "off_track_penalty",
+        "start_finish_gate",
+        "lap_progression",
         "requestAnimationFrame",
         "boot_flag",
     ],
-    summary="Open-wheel circuit racing baseline with lap timer, checkpoints, chase cam, and analog control separation.",
+    summary="Open-wheel circuit racing baseline with checkpoint triggers, hard track confinement, off-track reset, and chase-camera lap progression.",
 )

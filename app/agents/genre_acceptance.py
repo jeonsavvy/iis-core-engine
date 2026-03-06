@@ -42,6 +42,8 @@ def validate_racing_acceptance(html: str) -> AcceptanceReport:
         failures.append("animation_loop_missing")
     if "offtracktimer" not in lowered and "off track" not in lowered:
         failures.append("off_track_penalty_missing")
+    if "respawntocheckpoint" not in lowered:
+        failures.append("checkpoint_respawn_missing")
     if "wrong way" not in lowered and "wrongwaytimer" not in lowered:
         failures.append("wrong_way_detection_missing")
     if "nearesttracksample" not in lowered:

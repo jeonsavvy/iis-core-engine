@@ -259,9 +259,15 @@ class CodegenAgent:
                 for item in genre_brief.get("must_have_mechanics", [])
                 if str(item).strip()
             ]
+            structural_contracts = [
+                str(item).strip()
+                for item in genre_brief.get("structural_contracts", [])
+                if str(item).strip()
+            ]
             degradation_section = "".join(f"- Degradation guard: {guard}\n" for guard in degradation_guards)
             first_frame_section = "".join(f"- First frame requirement: {requirement}\n" for requirement in first_frame_requirements)
             preserve_section = "".join(f"- Preserve system: {item}\n" for item in preserve_systems)
+            contract_section = "".join(f"- Structural contract: {item}\n" for item in structural_contracts)
             return (
                 "You are a principal web game engineer.\n"
                 "You are extending a production baseline, not inventing a new game from scratch.\n"
@@ -283,6 +289,7 @@ class CodegenAgent:
                 "- Keep window.IISLeaderboard contract\n"
                 "- Never violate degradation guards from the genre brief\n"
                 f"{preserve_section}"
+                f"{contract_section}"
                 f"{degradation_section}"
                 "- The first visible frame must sell the fantasy immediately\n"
                 f"{first_frame_section}"

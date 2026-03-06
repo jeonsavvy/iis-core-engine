@@ -28,6 +28,7 @@ def test_initial_racing_prompt_uses_hard_scaffold_html() -> None:
     assert "First frame requirement" in prompt
     assert "extending a production baseline" in prompt.lower()
     assert "Preserve system" in prompt
+    assert "Structural contract" in prompt
 
 
 def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
