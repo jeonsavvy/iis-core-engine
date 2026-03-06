@@ -66,6 +66,9 @@ class FakeSessionStore:
     def update_session_status(self, session_id: str, status: str) -> None:
         self.sessions[session_id]["status"] = status
 
+    def update_session(self, session_id: str, **fields: Any) -> None:
+        self.sessions[session_id].update(fields)
+
     def delete_session(self, session_id: str) -> None:
         self.sessions.pop(session_id, None)
         self.histories.pop(session_id, None)
@@ -442,6 +445,13 @@ def create_session(client: TestClient) -> str:
     return str(payload["session_id"])
 
 
+def create_named_session(client: TestClient, title: str, genre_hint: str = "arcade") -> str:
+    created = client.post("/api/v1/sessions", json={"title": title, "genre_hint": genre_hint})
+    assert created.status_code == 200
+    payload = cast(dict[str, Any], created.json())
+    return str(payload["session_id"])
+
+
 def test_prompt_is_async_and_run_succeeds() -> None:
     client, store = make_client()
     session_id = create_session(client)
@@ -460,6 +470,26 @@ def test_prompt_is_async_and_run_succeeds() -> None:
     session = store.get_session(session_id)
     assert session is not None
     assert session["current_html"] == "<html>ok</html>"
+
+
+def test_generic_session_title_is_replaced_for_publish_name() -> None:
+    client, store = make_client()
+    session_id = create_named_session(client, "New Session", "flight")
+
+    queued = client.post(
+        f"/api/v1/sessions/{session_id}/prompt",
+        json={"prompt": "따뜻한 일몰 조명 아래 섬과 바다 위를 프로펠러 비행기로 돌아다니며 링을 통과하는 플라이트 게임"},
+    )
+    run_id = queued.json()["run_id"]
+    run = wait_run_terminal(client, session_id, run_id)
+    assert run["status"] == "succeeded"
+
+    approved = client.post(f"/api/v1/sessions/{session_id}/approve-publish", json={"note": "looks good"})
+    assert approved.status_code == 200
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "golden-isles-flight"})
+    assert published.status_code == 200
+    publisher_calls = client.app.state.publisher_service.calls
+    assert publisher_calls[-1]["game_name"] == "Golden Isles Flight"
 
 
 def test_prompt_run_failure_exposes_error_code() -> None:

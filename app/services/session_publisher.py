@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from app.core.config import Settings
+from app.services.quality_service import QualityService
 from app.services.publisher_service import PublisherService
 from app.services.github_service import GitHubArchiveService
 from app.services.telegram_service import TelegramService
@@ -23,6 +24,7 @@ class SessionPublisher:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._publisher = PublisherService(settings)
+        self._quality = QualityService(settings)
         self._telegram = TelegramService(settings)
         self._vertex: Any | None = None
         try:
@@ -65,6 +67,14 @@ class SessionPublisher:
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
         play_url = f"/play/{slug}"
+        screenshot_url: str | None = None
+        if result.get("status") == "published":
+            try:
+                smoke = self._quality.run_smoke_check(html_content)
+                if smoke.screenshot_bytes:
+                    screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=smoke.screenshot_bytes)
+            except Exception as exc:
+                logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],
@@ -89,6 +99,8 @@ class SessionPublisher:
         self._publisher.update_game_marketing(
             slug=slug,
             ai_review="\n".join(str(item) for item in publish_copy.get("play_overview", [])[:3]).strip() or None,
+            screenshot_url=screenshot_url,
+            thumbnail_url=screenshot_url,
             marketing_summary=str(publish_copy.get("marketing_summary", "")).strip() or None,
             play_overview=[str(item) for item in publish_copy.get("play_overview", [])] if isinstance(publish_copy.get("play_overview"), list) else None,
             controls_guide=[str(item) for item in publish_copy.get("controls_guide", [])] if isinstance(publish_copy.get("controls_guide"), list) else None,
@@ -127,6 +139,7 @@ class SessionPublisher:
             "game_id": str(game_id),
             "game_slug": slug,
             "play_url": play_url,
+            "screenshot_url": screenshot_url,
             "marketing_summary": str(publish_copy.get("marketing_summary", "")),
             "play_overview": publish_copy.get("play_overview", []),
             "controls_guide": publish_copy.get("controls_guide", []),

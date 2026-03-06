@@ -158,6 +158,7 @@ class PublisherService:
         slug: str,
         ai_review: str | None = None,
         screenshot_url: str | None = None,
+        thumbnail_url: str | None = None,
         marketing_summary: str | None = None,
         play_overview: list[str] | None = None,
         controls_guide: list[str] | None = None,
@@ -171,6 +172,8 @@ class PublisherService:
             update_dist["ai_review"] = ai_review
         if screenshot_url is not None:
             update_dist["screenshot_url"] = screenshot_url
+        if thumbnail_url is not None:
+            update_dist["thumbnail_url"] = thumbnail_url
         if marketing_summary is not None:
             update_dist["marketing_summary"] = marketing_summary
         if play_overview is not None:

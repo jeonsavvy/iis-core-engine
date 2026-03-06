@@ -293,6 +293,9 @@ class SessionStoreProtocol(Protocol):
     def update_session_status(self, session_id: str, status: str) -> None:
         ...
 
+    def update_session(self, session_id: str, **fields: Any) -> None:
+        ...
+
     def delete_session(self, session_id: str) -> None:
         ...
 
@@ -441,6 +444,25 @@ def _normalize_slug(raw: str) -> str:
     candidate = _SLUG_PATTERN.sub("-", candidate)
     candidate = candidate.strip("-")
     return candidate[:64] if candidate else ""
+
+
+def _is_generic_session_title(title: str) -> bool:
+    normalized = title.strip().casefold()
+    return normalized in {"", "new session", "newsession"} or normalized.startswith("game #") or normalized.startswith("game ")
+
+
+def _suggest_session_title(*, prompt: str, genre_brief: dict[str, Any]) -> str:
+    archetype = str(genre_brief.get("archetype", "")).strip()
+    if archetype == "racing_openwheel_circuit_3d":
+        return "Neon Grid Grand Prix"
+    if archetype == "flight_lowpoly_island_3d":
+        return "Golden Isles Flight"
+    if archetype == "flight_shooter_space_dogfight_3d":
+        return "Skyline Jet Dogfight"
+    if archetype == "topdown_shooter_twinstick_2d":
+        return "Lowpoly Siege"
+    snippet = prompt.strip().replace("\n", " ")[:32].strip()
+    return snippet or "IIS Game"
 
 
 def _normalize_error_code(raw: str) -> str:
@@ -1437,6 +1459,14 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
     scaffold_seed = scaffold_seed_for_brief(genre_brief)
     scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
     attachment_meta = _attachment_metadata(body.image_attachment)
+    current_title = str(session.get("title", ""))
+    if _is_generic_session_title(current_title):
+        store.update_session(
+            session_id,
+            title=_suggest_session_title(prompt=body.prompt, genre_brief=genre_brief),
+            genre=str(session.get("genre", "")) or str(genre_brief.get("archetype", ""))[:80],
+        )
+        session = store.get_session(session_id) or session
 
     store.add_conversation_message(
         session_id=session_id,
@@ -1861,13 +1891,20 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     preferred_slug = _normalize_slug(body.slug)
     fallback_slug = _normalize_slug(str(session.get("title", "")))[:32]
     slug = preferred_slug or fallback_slug or session_id[:8]
-    game_name = body.game_name or str(session.get("title", f"Game {slug}"))
     recent_history = store.get_conversation_history(session_id, limit=20)
     recent_events = store.get_session_events(session_id, limit=20)
     genre_brief = build_genre_brief(
         user_prompt="\n".join(str(message.get("content", "")) for message in recent_history[-6:]),
         genre_hint=str(session.get("genre", "")),
     )
+    session_title = str(session.get("title", ""))
+    derived_name = _suggest_session_title(
+        prompt="\n".join(str(message.get("content", "")) for message in recent_history[-6:]) or session_title,
+        genre_brief=genre_brief,
+    )
+    game_name = body.game_name or (derived_name if _is_generic_session_title(session_title) else session_title or f"Game {slug}")
+    if session_title != game_name:
+        store.update_session(session_id, title=game_name)
 
     publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
     if not publishable:

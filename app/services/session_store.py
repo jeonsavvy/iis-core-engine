@@ -86,6 +86,17 @@ class SupabaseSessionStore:
             "updated_at": self._now_iso(),
         }).eq("id", session_id).execute()
 
+    def update_session(self, session_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        safe_fields = dict(fields)
+        if "title" in safe_fields:
+            safe_fields["title"] = redact_sensitive_data(str(safe_fields["title"]))[:300]
+        if "genre" in safe_fields:
+            safe_fields["genre"] = redact_sensitive_data(str(safe_fields["genre"]))[:120]
+        safe_fields["updated_at"] = self._now_iso()
+        self._client.table("sessions").update(safe_fields).eq("id", session_id).execute()
+
     def delete_session(self, session_id: str) -> None:
         self._client.table("sessions").delete().eq("id", session_id).execute()
         self._client.table("conversation_history").delete().eq("session_id", session_id).execute()

@@ -57,9 +57,10 @@ ISLAND_FLIGHT_HTML = dedent(
         const statusReadout = document.getElementById("status-readout");
         const countdownEl = document.getElementById("countdown");
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x000000, 0);
         document.getElementById("app").appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
@@ -71,6 +72,12 @@ ISLAND_FLIGHT_HTML = dedent(
         scene.add(sun);
         scene.add(new THREE.HemisphereLight(0xfde68a, 0x0f172a, 0.9));
 
+        const skyDome = new THREE.Mesh(
+          new THREE.SphereGeometry(260, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.BackSide, transparent: true, opacity: 0.18 })
+        );
+        scene.add(skyDome);
+
         const sea = new THREE.Mesh(
           new THREE.CircleGeometry(220, 64),
           new THREE.MeshStandardMaterial({ color: 0x0ea5e9, flatShading: true, roughness: 0.42, metalness: 0.06 })
@@ -81,6 +88,7 @@ ISLAND_FLIGHT_HTML = dedent(
 
         const islands = new THREE.Group();
         scene.add(islands);
+        const islandDefs = [];
         const islandLayout = [
           { x: 0, z: -18, scale: 1.6 },
           { x: 22, z: -42, scale: 1.0 },
@@ -95,6 +103,7 @@ ISLAND_FLIGHT_HTML = dedent(
           );
           island.position.set(item.x, 0, item.z);
           islands.add(island);
+          islandDefs.push({ x: item.x, z: item.z, radius: 12.5 * item.scale, topY: (6 + item.scale * 8) * 0.5 });
           const beach = new THREE.Mesh(
             new THREE.CylinderGeometry(7 * item.scale, 15 * item.scale, 1.2, 7),
             new THREE.MeshStandardMaterial({ color: 0xfcd34d, flatShading: true, roughness: 0.95 })
@@ -151,14 +160,14 @@ ISLAND_FLIGHT_HTML = dedent(
 
         const ringMeshes = [];
         [
-          { x: 0, y: 8, z: -24 },
-          { x: 18, y: 10, z: -36 },
-          { x: -18, y: 11, z: -52 },
-          { x: 8, y: 14, z: -72 },
-          { x: -10, y: 10, z: -88 },
-          { x: 24, y: 12, z: -102 },
-          { x: -22, y: 9, z: -118 },
-          { x: 0, y: 13, z: -134 },
+          { x: 0, y: 12, z: -30 },
+          { x: 26, y: 14, z: -52 },
+          { x: -4, y: 15, z: -68 },
+          { x: -24, y: 13, z: -86 },
+          { x: 24, y: 14, z: -102 },
+          { x: 0, y: 15, z: -118 },
+          { x: -28, y: 13, z: -136 },
+          { x: 14, y: 15, z: -154 },
         ].forEach((ring, index) => {
           const mesh = new THREE.Mesh(
             new THREE.TorusGeometry(2.4, 0.28, 10, 36),
@@ -186,6 +195,19 @@ ISLAND_FLIGHT_HTML = dedent(
           lastSafeYaw: 0,
         };
 
+        function terrainHeightAt(x, z) {
+          let height = -1.8;
+          islandDefs.forEach((island) => {
+            const dx = x - island.x;
+            const dz = z - island.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            if (distance <= island.radius) {
+              height = Math.max(height, island.topY + 0.4);
+            }
+          });
+          return height;
+        }
+
         function respawn(reason) {
           state.position.copy(state.lastSafePoint);
           state.velocity.set(0, 0, -18);
@@ -196,6 +218,7 @@ ISLAND_FLIGHT_HTML = dedent(
           state.speed = 18;
           state.yaw = state.lastSafeYaw;
           statusReadout.textContent = reason;
+          ringReadout.textContent = `Rings ${state.rings} / ${ringMeshes.length}`;
         }
 
         function resetFlight() {
@@ -299,6 +322,13 @@ ISLAND_FLIGHT_HTML = dedent(
           state.position.addScaledVector(state.velocity, dt);
           state.climbVelocity = THREE.MathUtils.lerp(state.climbVelocity, state.pitch * 14, dt * 2.4);
           state.position.y = THREE.MathUtils.clamp(state.position.y + state.climbVelocity * dt, 5.5, 28);
+          const terrainHeight = terrainHeightAt(state.position.x, state.position.z);
+          const minClearance = terrainHeight + 2.6;
+          if (state.position.y < minClearance) {
+            state.position.y = THREE.MathUtils.lerp(state.position.y, minClearance, 0.42);
+            state.climbVelocity = Math.max(state.climbVelocity, 2.4);
+            statusReadout.textContent = "Terrain clearance assist engaged";
+          }
           if (state.position.y <= 5.6 || state.position.z < -150 || Math.abs(state.position.x) > 90 || !Number.isFinite(state.position.x) || !Number.isFinite(state.position.y) || !Number.isFinite(state.position.z)) {
             respawn("Low altitude recovery · returning to safe route");
           }
