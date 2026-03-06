@@ -788,6 +788,7 @@ async def _execute_prompt_run(
             metadata={
                 "generation_source": result.generation_source,
                 "auto_refined": result.auto_refined,
+                "reverted_to_baseline": result.reverted_to_baseline,
                 "run_id": run_id,
             },
         )
@@ -854,8 +855,26 @@ async def _execute_prompt_run(
             input_signal=prompt[:500],
             change_impact="session_html_updated",
             confidence=1.0,
-            metadata={"run_id": run_id, "auto_refined": result.auto_refined, "refinement_rounds": result.refinement_rounds},
+            metadata={
+                "run_id": run_id,
+                "auto_refined": result.auto_refined,
+                "refinement_rounds": result.refinement_rounds,
+                "reverted_to_baseline": result.reverted_to_baseline,
+            },
         )
+        if result.reverted_to_baseline:
+            store.add_session_event(
+                session_id=session_id,
+                event_type="scaffold_reverted_to_baseline",
+                agent="codegen",
+                action="revert",
+                summary="Specialization rejected, reverted to deterministic scaffold baseline",
+                decision_reason="genre_acceptance_rejected_specialization",
+                input_signal=prompt[:500],
+                change_impact="baseline_preserved",
+                confidence=1.0,
+                metadata={"run_id": run_id},
+            )
     except asyncio.CancelledError:
         store.update_session_run(
             session_id,

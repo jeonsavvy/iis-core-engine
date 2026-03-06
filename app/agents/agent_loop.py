@@ -59,6 +59,7 @@ class AgentLoopResult:
     auto_refined: bool = False
     refinement_rounds: int = 0
     error: str = ""
+    reverted_to_baseline: bool = False
 
 
 @dataclass
@@ -369,9 +370,11 @@ class AgentLoop:
                 auto_refined=False,
                 refinement_rounds=0,
                 error=codegen_result.error,
+                reverted_to_baseline=False,
             )
 
         final_html = codegen_result.html
+        reverted_to_baseline = False
         if scaffold is not None and not is_modification:
             acceptance = validate_genre_acceptance(
                 archetype=str(genre_brief.get("archetype", "")),
@@ -401,6 +404,7 @@ class AgentLoop:
                     )
                 )
                 final_html = baseline_html
+                reverted_to_baseline = True
         refinement_rounds = 0
         latest_issues: list[LoopIssue] = []
 
@@ -474,6 +478,7 @@ class AgentLoop:
                         auto_refined=refinement_rounds > 0,
                         refinement_rounds=refinement_rounds,
                         error=refine_result.error,
+                        reverted_to_baseline=reverted_to_baseline,
                     )
 
                 final_html = refine_result.html
@@ -508,6 +513,7 @@ class AgentLoop:
                 auto_refined=refinement_rounds > 0,
                 refinement_rounds=refinement_rounds,
                 error=f"fatal_runtime_unresolved: {_truncate_issue_lines(fatal_messages)}",
+                reverted_to_baseline=reverted_to_baseline,
             )
 
         return AgentLoopResult(
@@ -517,4 +523,5 @@ class AgentLoop:
             generation_source=codegen_result.generation_source,
             auto_refined=refinement_rounds > 0,
             refinement_rounds=refinement_rounds,
+            reverted_to_baseline=reverted_to_baseline,
         )
