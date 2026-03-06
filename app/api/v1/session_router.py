@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from app.agents.codegen_agent import ConversationMessage
+from app.agents.genre_briefs import build_genre_brief
 from app.api.security import verify_internal_api_token
 from app.core.config import Settings, get_settings
 
@@ -75,6 +76,11 @@ class SessionResponse(BaseModel):
     current_html: str = ""
     score: int = 0
     conversation_count: int = 0
+    current_run_id: str | None = None
+    current_run_status: str | None = None
+    last_issue_id: str | None = None
+    last_proposal_id: str | None = None
+    last_preview_html: str | None = None
 
 
 class SessionSummary(BaseModel):
@@ -121,7 +127,7 @@ class PlanDraftResponse(BaseModel):
 class CreateIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
     details: str = Field(default="", max_length=4000)
-    category: str = Field(default="gameplay", max_length=40)
+    category: str = Field(default="gameplay_bug", max_length=40)
 
 
 class SessionIssueResponse(BaseModel):
@@ -182,6 +188,28 @@ class PublishResponse(BaseModel):
     game_slug: str = ""
     game_url: str = ""
     error: str = ""
+    marketing_summary: str = ""
+    play_overview: list[str] = Field(default_factory=list)
+    controls_guide: list[str] = Field(default_factory=list)
+
+
+class ConversationMessageResponse(BaseModel):
+    role: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ConversationHistoryResponse(BaseModel):
+    messages: list[ConversationMessageResponse] = Field(default_factory=list)
+
+
+class LatestIssueSnapshotResponse(BaseModel):
+    issue: SessionIssueResponse | None = None
+    proposal_id: str | None = None
+    proposal_status: str | None = None
+    routed_agents: list[str] = Field(default_factory=list)
+    preview_html: str | None = None
 
 
 class SessionEventResponse(BaseModel):
@@ -488,6 +516,49 @@ def _build_issue_fix_prompt(issue: dict[str, Any], instruction: str) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _latest_run_snapshot(store: SessionStoreProtocol, session_id: str) -> tuple[str | None, str | None]:
+    events = store.get_session_events(session_id, limit=80)
+    for event in events:
+        event_type = str(event.get("event_type", ""))
+        metadata = cast(dict[str, Any], event.get("metadata")) if isinstance(event.get("metadata"), dict) else {}
+        run_id = str(metadata.get("run_id", "")).strip() or None
+        if not run_id:
+            continue
+        if event_type == "prompt_run_started":
+            return run_id, "running"
+        if event_type == "prompt_run_queued":
+            return run_id, "queued"
+        if event_type == "prompt_run_succeeded":
+            return run_id, "succeeded"
+        if event_type == "prompt_run_failed":
+            return run_id, "failed"
+        if event_type == "prompt_run_cancelled":
+            return run_id, "cancelled"
+    return None, None
+
+
+def _latest_issue_snapshot(store: SessionStoreProtocol, session_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[str]]:
+    events = store.get_session_events(session_id, limit=80)
+    issue_id: str | None = None
+    routed_agents: list[str] = []
+    for event in events:
+        metadata = cast(dict[str, Any], event.get("metadata")) if isinstance(event.get("metadata"), dict) else {}
+        maybe_issue_id = metadata.get("issue_id")
+        if isinstance(maybe_issue_id, str) and maybe_issue_id.strip():
+            issue_id = maybe_issue_id.strip()
+            raw_routed = metadata.get("routed_agents")
+            if isinstance(raw_routed, list):
+                routed_agents = [str(agent) for agent in raw_routed if str(agent).strip()]
+            break
+
+    if not issue_id:
+        return None, None, []
+
+    issue = store.get_session_issue(session_id, issue_id)
+    proposal = store.get_latest_issue_proposal(session_id, issue_id)
+    return issue, proposal, routed_agents
 
 
 def _serialize_activity(activity: Any) -> dict[str, Any]:
@@ -858,6 +929,8 @@ async def get_session(session_id: str, request: Request) -> SessionResponse:
     store = _get_session_store(request)
     session = _load_session_or_404(store, session_id)
     history = store.get_conversation_history(session_id, limit=200)
+    current_run_id, current_run_status = _latest_run_snapshot(store, session_id)
+    latest_issue, latest_proposal, _ = _latest_issue_snapshot(store, session_id)
     return SessionResponse(
         session_id=str(session.get("id", session_id)),
         title=str(session.get("title", "")),
@@ -866,6 +939,59 @@ async def get_session(session_id: str, request: Request) -> SessionResponse:
         current_html=str(session.get("current_html", "")),
         score=int(session.get("score", 0) or 0),
         conversation_count=len(history),
+        current_run_id=current_run_id,
+        current_run_status=current_run_status,
+        last_issue_id=str(latest_issue.get("id")) if latest_issue else None,
+        last_proposal_id=str(latest_proposal.get("id")) if latest_proposal else None,
+        last_preview_html=str(latest_proposal.get("preview_html", "")) if latest_proposal else None,
+    )
+
+
+@router.get("/{session_id}/conversation", response_model=ConversationHistoryResponse)
+async def get_session_conversation(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=80, ge=1, le=200),
+) -> ConversationHistoryResponse:
+    store = _get_session_store(request)
+    _load_session_or_404(store, session_id)
+    history = store.get_conversation_history(session_id, limit=limit)
+    return ConversationHistoryResponse(
+        messages=[
+            ConversationMessageResponse(
+                role=str(message.get("role", "user")),
+                content=str(message.get("content", "")),
+                metadata=message.get("metadata") if isinstance(message.get("metadata"), dict) else {},
+                created_at=str(message.get("created_at", "")),
+            )
+            for message in history
+        ]
+    )
+
+
+@router.get("/{session_id}/issues/latest", response_model=LatestIssueSnapshotResponse)
+async def get_latest_issue_snapshot(session_id: str, request: Request) -> LatestIssueSnapshotResponse:
+    store = _get_session_store(request)
+    _load_session_or_404(store, session_id)
+    issue, proposal, routed_agents = _latest_issue_snapshot(store, session_id)
+    if not issue:
+        return LatestIssueSnapshotResponse()
+
+    return LatestIssueSnapshotResponse(
+        issue=SessionIssueResponse(
+            issue_id=str(issue.get("id", "")),
+            session_id=session_id,
+            title=str(issue.get("title", "")),
+            details=str(issue.get("details", "")),
+            category=str(issue.get("category", "gameplay_bug")),
+            status=str(issue.get("status", "open")),
+            created_at=str(issue.get("created_at", _now_iso())),
+            updated_at=str(issue.get("updated_at")) if issue.get("updated_at") else None,
+        ),
+        proposal_id=str(proposal.get("id")) if proposal else None,
+        proposal_status=str(proposal.get("status")) if proposal else None,
+        routed_agents=routed_agents,
+        preview_html=str(proposal.get("preview_html", "")) if proposal else None,
     )
 
 
@@ -1354,6 +1480,12 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     fallback_slug = _normalize_slug(str(session.get("title", "")))[:32]
     slug = preferred_slug or fallback_slug or session_id[:8]
     game_name = body.game_name or str(session.get("title", f"Game {slug}"))
+    recent_history = store.get_conversation_history(session_id, limit=20)
+    recent_events = store.get_session_events(session_id, limit=20)
+    genre_brief = build_genre_brief(
+        user_prompt="\n".join(str(message.get("content", "")) for message in recent_history[-6:]),
+        genre_hint=str(session.get("genre", "")),
+    )
 
     publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
     if not publishable:
@@ -1382,6 +1514,9 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             game_name=game_name,
             genre=str(session.get("genre", "")),
             html_content=html,
+            recent_history=recent_history,
+            recent_events=recent_events,
+            genre_brief=genre_brief,
         )
         store.update_session_status(session_id, "published")
         game_slug = str(publish_result.get("game_slug", slug))
@@ -1392,7 +1527,12 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             game_slug=game_slug,
             play_url=game_url,
             public_url=str(publish_result.get("public_url")) if publish_result.get("public_url") else None,
-            metadata={"game_name": game_name},
+            metadata={
+                "game_name": game_name,
+                "marketing_summary": publish_result.get("marketing_summary", ""),
+                "play_overview": publish_result.get("play_overview", []),
+                "controls_guide": publish_result.get("controls_guide", []),
+            },
         )
         store.add_session_event(
             session_id=session_id,
@@ -1409,6 +1549,9 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             success=True,
             game_slug=game_slug,
             game_url=game_url,
+            marketing_summary=str(publish_result.get("marketing_summary", "")),
+            play_overview=publish_result.get("play_overview") if isinstance(publish_result.get("play_overview"), list) else [],
+            controls_guide=publish_result.get("controls_guide") if isinstance(publish_result.get("controls_guide"), list) else [],
         )
     except Exception as exc:
         logger.exception("Publish failed: %s", exc)

@@ -9,9 +9,12 @@ Responsibilities:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
+
+from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +168,8 @@ class CodegenAgent:
         LLM gets freedom to create, with only essential constraints.
         """
         is_modification = bool(current_html.strip())
+        genre_brief = build_genre_brief(user_prompt=user_prompt, genre_hint=genre_hint)
+        scaffold_seed = scaffold_seed_for_brief(genre_brief)
 
         history_section = ""
         if history:
@@ -203,6 +208,8 @@ class CodegenAgent:
             f"{history_section}"
             f"User request: {user_prompt}\n"
             f"{'Genre hint: ' + genre_hint if genre_hint else ''}\n\n"
+            f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"
+            f"{'Scaffold seed JSON: ' + json.dumps(scaffold_seed, ensure_ascii=False) + chr(10) if scaffold_seed else ''}\n"
             "Requirements:\n"
             "- Single complete HTML document with inline JS and CSS\n"
             "- Use Three.js (import from CDN) for 3D games\n"
@@ -217,6 +224,10 @@ class CodegenAgent:
             "smooth animations\n"
             "- No external image dependencies — use procedural graphics\n"
             "- Must work in an embedded iframe\n"
+            "- Respect the genre brief and scaffold seed when provided\n"
+            "- Never collapse a racing brief into an endless obstacle dodger\n"
+            "- Never collapse a dogfight brief into a simple forward auto-scroll shooter\n"
+            "- Never collapse a twin-stick brief into a basic 8-way clicker shooter\n"
             "- Return only the HTML document, no markdown fences\n\n"
             f"Three.js CDN: {_THREE_CDN}\n"
             f"Phaser CDN: {_PHASER_CDN}\n"

@@ -152,7 +152,17 @@ class PublisherService:
         except Exception:
             return None
 
-    def update_game_marketing(self, *, slug: str, ai_review: str | None = None, screenshot_url: str | None = None) -> bool:
+    def update_game_marketing(
+        self,
+        *,
+        slug: str,
+        ai_review: str | None = None,
+        screenshot_url: str | None = None,
+        marketing_summary: str | None = None,
+        play_overview: list[str] | None = None,
+        controls_guide: list[str] | None = None,
+        publish_copy_version: str | None = None,
+    ) -> bool:
         if not self.client:
             return False
 
@@ -161,6 +171,14 @@ class PublisherService:
             update_dist["ai_review"] = ai_review
         if screenshot_url is not None:
             update_dist["screenshot_url"] = screenshot_url
+        if marketing_summary is not None:
+            update_dist["marketing_summary"] = marketing_summary
+        if play_overview is not None:
+            update_dist["play_overview"] = play_overview
+        if controls_guide is not None:
+            update_dist["controls_guide"] = controls_guide
+        if publish_copy_version is not None:
+            update_dist["publish_copy_version"] = publish_copy_version
 
         if not update_dist:
             return True

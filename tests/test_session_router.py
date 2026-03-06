@@ -336,14 +336,37 @@ class FakePublisher:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def publish(self, *, slug: str, game_name: str, genre: str, html_content: str) -> dict[str, Any]:
-        self.calls.append({"slug": slug, "game_name": game_name, "genre": genre, "html_content": html_content})
+    async def publish(
+        self,
+        *,
+        slug: str,
+        game_name: str,
+        genre: str,
+        html_content: str,
+        recent_history: list[dict[str, Any]] | None = None,
+        recent_events: list[dict[str, Any]] | None = None,
+        genre_brief: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "slug": slug,
+                "game_name": game_name,
+                "genre": genre,
+                "html_content": html_content,
+                "recent_history": recent_history or [],
+                "recent_events": recent_events or [],
+                "genre_brief": genre_brief or {},
+            }
+        )
         return {
             "success": True,
             "public_url": f"https://cdn.example.com/games/{slug}/index.html",
             "game_id": "game-1",
             "game_slug": slug,
             "play_url": f"/play/{slug}",
+            "marketing_summary": f"{game_name} summary",
+            "play_overview": ["overview"],
+            "controls_guide": ["controls"],
         }
 
 
@@ -481,6 +504,9 @@ def test_publish_requires_approval() -> None:
     published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
     assert published.status_code == 200
     assert published.json()["game_url"] == "/play/road-rush"
+    assert published.json()["marketing_summary"] == "T summary"
+    assert published.json()["play_overview"] == ["overview"]
+    assert published.json()["controls_guide"] == ["controls"]
 
 
 def test_publish_blocks_when_runtime_fatal_exists() -> None:
@@ -528,3 +554,40 @@ def test_issue_propose_apply_flow() -> None:
     session_row = store.get_session(session_id)
     assert session_row is not None
     assert session_row["current_html"] == "<html>patched</html>"
+
+
+def test_session_snapshot_conversation_and_latest_issue_endpoints() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+
+    queued = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "build racing game"})
+    run_id = queued.json()["run_id"]
+    run = wait_run_terminal(client, session_id, run_id)
+    assert run["status"] == "succeeded"
+
+    issue_res = client.post(
+        f"/api/v1/sessions/{session_id}/issues",
+        json={"title": "랩타이머 강화", "details": "랩타임이 더 잘 보였으면 함", "category": "ux_copy"},
+    )
+    issue_id = issue_res.json()["issue_id"]
+    propose = client.post(
+        f"/api/v1/sessions/{session_id}/issues/{issue_id}/propose-fix",
+        json={"instruction": "랩타임 표시를 더 크게"},
+    )
+    proposal_id = propose.json()["proposal_id"]
+
+    snapshot = client.get(f"/api/v1/sessions/{session_id}")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["current_run_id"] == run_id
+    assert snapshot.json()["current_run_status"] == "succeeded"
+    assert snapshot.json()["last_issue_id"] == issue_id
+    assert snapshot.json()["last_proposal_id"] == proposal_id
+
+    conversation = client.get(f"/api/v1/sessions/{session_id}/conversation?limit=20")
+    assert conversation.status_code == 200
+    assert any(row["role"] == "user" for row in conversation.json()["messages"])
+
+    latest_issue = client.get(f"/api/v1/sessions/{session_id}/issues/latest")
+    assert latest_issue.status_code == 200
+    assert latest_issue.json()["issue"]["issue_id"] == issue_id
+    assert latest_issue.json()["proposal_id"] == proposal_id

@@ -24,6 +24,13 @@ class SessionPublisher:
         self.settings = settings
         self._publisher = PublisherService(settings)
         self._telegram = TelegramService(settings)
+        self._vertex: Any | None = None
+        try:
+            from app.services.vertex_service import VertexService
+
+            self._vertex = VertexService(settings)
+        except Exception:
+            logger.warning("Vertex service unavailable for publish copy generation.")
         self._archiver: GitHubArchiveService | None = None
         if settings.archive_repo_local_path:
             try:
@@ -38,6 +45,9 @@ class SessionPublisher:
         game_name: str,
         genre: str,
         html_content: str,
+        recent_history: list[dict[str, Any]] | None = None,
+        recent_events: list[dict[str, Any]] | None = None,
+        genre_brief: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Publish game HTML to Supabase storage + games_metadata.
 
@@ -56,6 +66,35 @@ class SessionPublisher:
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
         play_url = f"/play/{slug}"
+        publish_copy = {
+            "marketing_summary": "",
+            "play_overview": [],
+            "controls_guide": [],
+        }
+
+        if self._vertex is not None:
+            try:
+                generated = self._vertex.generate_publish_copy(
+                    game_name=game_name,
+                    genre=genre,
+                    current_html=html_content,
+                    recent_history=recent_history,
+                    recent_events=recent_events,
+                    genre_brief=genre_brief,
+                )
+                if isinstance(generated.payload, dict):
+                    publish_copy.update(generated.payload)
+            except Exception as exc:
+                logger.warning("Publish copy generation failed (fallback in use): %s", exc)
+
+        self._publisher.update_game_marketing(
+            slug=slug,
+            ai_review="\n".join(str(item) for item in publish_copy.get("play_overview", [])[:3]).strip() or None,
+            marketing_summary=str(publish_copy.get("marketing_summary", "")).strip() or None,
+            play_overview=[str(item) for item in publish_copy.get("play_overview", [])] if isinstance(publish_copy.get("play_overview"), list) else None,
+            controls_guide=[str(item) for item in publish_copy.get("controls_guide", [])] if isinstance(publish_copy.get("controls_guide"), list) else None,
+            publish_copy_version="v1",
+        )
 
         # Archive to GitHub repo (best-effort, non-blocking)
         if self._archiver and public_url:
@@ -89,4 +128,7 @@ class SessionPublisher:
             "game_id": str(game_id),
             "game_slug": slug,
             "play_url": play_url,
+            "marketing_summary": str(publish_copy.get("marketing_summary", "")),
+            "play_overview": publish_copy.get("play_overview", []),
+            "controls_guide": publish_copy.get("controls_guide", []),
         }

@@ -31,6 +31,7 @@ from app.services.vertex_text_generation import (
     generate_codegen_candidate_artifact as generate_codegen_candidate_artifact_text,
     generate_grounded_ai_review as generate_grounded_ai_review_text,
     generate_marketing_copy as generate_marketing_copy_text,
+    generate_publish_copy as generate_publish_copy_text,
     polish_hybrid_artifact as polish_hybrid_artifact_text,
 )
 from app.services.vertex_text_utils import strip_code_fences
@@ -405,6 +406,26 @@ class VertexService:
             slug=slug,
             genre=genre,
             game_name=game_name,
+        )
+
+    def generate_publish_copy(
+        self,
+        *,
+        game_name: str,
+        genre: str,
+        current_html: str,
+        recent_history: list[dict[str, Any]] | None = None,
+        recent_events: list[dict[str, Any]] | None = None,
+        genre_brief: dict[str, Any] | None = None,
+    ) -> VertexGenerationResult:
+        return generate_publish_copy_text(
+            self,
+            game_name=game_name,
+            genre=genre,
+            current_html=current_html,
+            recent_history=recent_history,
+            recent_events=recent_events,
+            genre_brief=genre_brief,
         )
 
     def generate_ai_review(

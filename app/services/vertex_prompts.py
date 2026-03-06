@@ -195,6 +195,43 @@ def build_marketing_copy_prompt(*, keyword: str, display_name: str, genre: str) 
     )
 
 
+def build_publish_copy_prompt(
+    *,
+    game_name: str,
+    genre: str,
+    current_html: str,
+    recent_history: list[dict[str, Any]] | None = None,
+    recent_events: list[dict[str, Any]] | None = None,
+    genre_brief: dict[str, Any] | None = None,
+) -> str:
+    history_json = json.dumps(recent_history or [], ensure_ascii=False)
+    events_json = json.dumps(recent_events or [], ensure_ascii=False)
+    brief_json = json.dumps(genre_brief or {}, ensure_ascii=False)
+    html_excerpt = current_html[:12000]
+    return (
+        "Return JSON only.\n"
+        f"게임 이름: {game_name}\n"
+        f"장르: {genre}\n"
+        f"GenreBrief JSON: {brief_json}\n"
+        f"RecentConversation JSON: {history_json}\n"
+        f"RecentEvents JSON: {events_json}\n"
+        "현재 HTML 일부:\n"
+        f"{html_excerpt}\n\n"
+        "출력 필드 정확히:\n"
+        "- marketing_summary: string\n"
+        "- play_overview: string[]\n"
+        "- controls_guide: string[]\n\n"
+        "규칙:\n"
+        "- 한국어(ko-KR)\n"
+        "- 과장 금지, 실제 플레이 루프 중심\n"
+        "- controls_guide는 실제 게임 문법과 맞는 키만 적을 것\n"
+        "- play_overview는 2~4개 bullet\n"
+        "- controls_guide는 2~5개 bullet\n"
+        "- HTML/대화/이벤트에 근거 없는 기능을 발명하지 말 것\n"
+        "- 랩타임, 도그파이트, 트윈스틱 등 장르 fantasy는 GenreBrief에 맞게 유지\n"
+    )
+
+
 def build_ai_review_prompt(*, keyword: str, game_name: str, genre: str, objective: str) -> str:
     return (
         f"게임 이름: {game_name}\n"

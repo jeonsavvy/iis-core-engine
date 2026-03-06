@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Protocol
@@ -9,6 +10,7 @@ from app.services.vertex_fallback_text import (
     build_ai_review_fallback,
     build_grounded_ai_review_fallback,
     build_marketing_fallback_copy,
+    build_publish_copy_fallback,
 )
 from app.services.vertex_prompts import (
     build_ai_review_prompt,
@@ -16,6 +18,7 @@ from app.services.vertex_prompts import (
     build_grounded_ai_review_prompt,
     build_marketing_copy_prompt,
     build_polish_prompt,
+    build_publish_copy_prompt,
 )
 from app.services.vertex_text_utils import (
     compile_generated_artifact,
@@ -50,6 +53,28 @@ class VertexTextGenerationClient(Protocol):
     def _builder_model(self): ...
 
     def _builder_model_name(self) -> str: ...
+
+
+def _normalize_publish_copy_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    marketing_summary = str(payload.get("marketing_summary", "")).strip()
+    play_overview_raw = payload.get("play_overview")
+    controls_raw = payload.get("controls_guide")
+
+    play_overview = [str(item).strip() for item in play_overview_raw if str(item).strip()] if isinstance(play_overview_raw, list) else []
+    controls_guide = [str(item).strip() for item in controls_raw if str(item).strip()] if isinstance(controls_raw, list) else []
+
+    if not marketing_summary:
+        raise ValueError("empty_marketing_summary")
+    if not play_overview:
+        raise ValueError("empty_play_overview")
+    if not controls_guide:
+        raise ValueError("empty_controls_guide")
+
+    return {
+        "marketing_summary": marketing_summary[:240],
+        "play_overview": play_overview[:4],
+        "controls_guide": controls_guide[:5],
+    }
 
 
 def generate_marketing_copy(
@@ -106,6 +131,71 @@ def generate_marketing_copy(
         )
         return VertexGenerationResult(
             payload={"marketing_copy": fallback_text},
+            meta={
+                "generation_source": "stub",
+                "reason": f"vertex_error:{type(exc).__name__}",
+                "vertex_error": str(exc),
+            },
+        )
+
+
+def generate_publish_copy(
+    service: VertexTextGenerationClient,
+    *,
+    game_name: str,
+    genre: str,
+    current_html: str,
+    recent_history: list[dict[str, Any]] | None = None,
+    recent_events: list[dict[str, Any]] | None = None,
+    genre_brief: dict[str, Any] | None = None,
+) -> VertexGenerationResult:
+    fallback_payload = build_publish_copy_fallback(display_name=game_name, genre=genre)
+    if not service._is_enabled():
+        return VertexGenerationResult(
+            payload=fallback_payload,
+            meta={"generation_source": "stub", "reason": "vertex_not_configured"},
+        )
+
+    prompt = build_publish_copy_prompt(
+        game_name=game_name,
+        genre=genre,
+        current_html=current_html,
+        recent_history=recent_history,
+        recent_events=recent_events,
+        genre_brief=genre_brief,
+    )
+    started = time.perf_counter()
+    try:
+        usage: dict[str, Any] = {}
+        if service._use_genai_sdk():
+            text, usage = service._genai_text(
+                model_name=service.settings.gemini_flash_model,
+                prompt=prompt,
+                temperature=0.3,
+                max_output_tokens=1024,
+            )
+        else:
+            model = service._flash_model()
+            from langchain_core.messages import HumanMessage
+
+            result = model.invoke([HumanMessage(content=prompt)])
+            text = strip_code_fences(coerce_message_text(result.content))
+        parsed = json.loads(strip_code_fences(str(text).strip()))
+        normalized = _normalize_publish_copy_payload(parsed if isinstance(parsed, dict) else {})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return VertexGenerationResult(
+            payload=normalized,
+            meta={
+                "generation_source": "vertex",
+                "model": service.settings.gemini_flash_model,
+                "latency_ms": latency_ms,
+                "usage": usage,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Vertex publish copy generation failed: %s", exc)
+        return VertexGenerationResult(
+            payload=fallback_payload,
             meta={
                 "generation_source": "stub",
                 "reason": f"vertex_error:{type(exc).__name__}",
