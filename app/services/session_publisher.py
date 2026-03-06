@@ -32,11 +32,10 @@ class SessionPublisher:
         except Exception:
             logger.warning("Vertex service unavailable for publish copy generation.")
         self._archiver: GitHubArchiveService | None = None
-        if settings.archive_repo_local_path:
-            try:
-                self._archiver = GitHubArchiveService(settings)
-            except Exception:
-                logger.warning("GitHub archive service not available, skipping.")
+        try:
+            self._archiver = GitHubArchiveService(settings)
+        except Exception:
+            logger.warning("GitHub archive service not available, skipping.")
 
     async def publish(
         self,
