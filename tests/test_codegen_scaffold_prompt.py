@@ -46,6 +46,20 @@ def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
     assert "extending a production baseline" in prompt.lower()
 
 
+def test_initial_island_flight_prompt_uses_hard_scaffold_html() -> None:
+    agent = CodegenAgent(vertex_service=DummyVertex())
+    prompt = agent._build_prompt(  # noqa: SLF001
+        user_prompt="따뜻한 일몰 조명 아래 섬과 바다 위를 프로펠러 비행기로 돌아다니며 링을 통과하는 플라이트 게임 만들어줘",
+        history=[],
+        current_html="",
+        genre_hint="flight",
+    )
+
+    assert "three_lowpoly_island_flight_seed" in prompt
+    assert "Asset pack key: island_flight_pack_v1" in prompt
+    assert "Visual contract" in prompt
+
+
 def test_initial_topdown_prompt_uses_hard_scaffold_html() -> None:
     agent = CodegenAgent(vertex_service=DummyVertex())
     prompt = agent._build_prompt(  # noqa: SLF001

@@ -1,5 +1,6 @@
 from app.agents.genre_acceptance import (
     validate_flight_acceptance,
+    validate_island_flight_acceptance,
     validate_racing_acceptance,
     validate_topdown_acceptance,
 )
@@ -17,6 +18,13 @@ def test_flight_seed_passes_acceptance() -> None:
     seed = get_scaffold_seed("three_space_dogfight_seed")
     assert seed is not None
     report = validate_flight_acceptance(seed.html)
+    assert report.ok is True
+
+
+def test_island_flight_seed_passes_acceptance() -> None:
+    seed = get_scaffold_seed("three_lowpoly_island_flight_seed")
+    assert seed is not None
+    report = validate_island_flight_acceptance(seed.html)
     assert report.ok is True
 
 
@@ -39,6 +47,14 @@ def test_flight_corridor_demo_fails_acceptance() -> None:
     )
     assert report.ok is False
     assert "corridor_regression" in report.failures
+
+
+def test_island_flight_void_demo_fails_acceptance() -> None:
+    report = validate_island_flight_acceptance(
+        "<html><body>flight void propeller requestAnimationFrame dark empty void</body></html>"
+    )
+    assert report.ok is False
+    assert "ring_collect_missing" in report.failures
 
 
 def test_topdown_flat_shooter_fails_acceptance() -> None:

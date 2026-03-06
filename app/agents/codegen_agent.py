@@ -283,10 +283,17 @@ class CodegenAgent:
                 for item in genre_brief.get("structural_contracts", [])
                 if str(item).strip()
             ]
+            visual_contracts = [
+                str(item).strip()
+                for item in genre_brief.get("visual_contracts", [])
+                if str(item).strip()
+            ]
+            asset_pack_key = str(genre_brief.get("asset_pack_key", "") or "").strip()
             degradation_section = "".join(f"- Degradation guard: {guard}\n" for guard in degradation_guards)
             first_frame_section = "".join(f"- First frame requirement: {requirement}\n" for requirement in first_frame_requirements)
             preserve_section = "".join(f"- Preserve system: {item}\n" for item in preserve_systems)
             contract_section = "".join(f"- Structural contract: {item}\n" for item in structural_contracts)
+            visual_section = "".join(f"- Visual contract: {item}\n" for item in visual_contracts)
             return (
                 "You are a principal web game engineer.\n"
                 "You are extending a production baseline, not inventing a new game from scratch.\n"
@@ -307,8 +314,10 @@ class CodegenAgent:
                 "- Keep window.__iis_game_boot_ok = true when ready\n"
                 "- Keep window.IISLeaderboard contract\n"
                 "- Never violate degradation guards from the genre brief\n"
+                f"{'Asset pack key: ' + asset_pack_key + chr(10) if asset_pack_key else ''}"
                 f"{preserve_section}"
                 f"{contract_section}"
+                f"{visual_section}"
                 f"{degradation_section}"
                 "- The first visible frame must sell the fantasy immediately\n"
                 f"{first_frame_section}"

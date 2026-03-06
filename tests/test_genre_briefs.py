@@ -25,6 +25,16 @@ def test_flight_brief_selects_space_dogfight_archetype() -> None:
     assert brief["first_frame_requirements"]
 
 
+def test_island_flight_brief_selects_lowpoly_island_archetype() -> None:
+    brief = build_genre_brief(
+        user_prompt="따뜻한 일몰 조명 아래 섬과 바다 위를 프로펠러 비행기로 돌아다니며 링을 통과하는 플라이트 게임",
+        genre_hint="flight",
+    )
+    assert brief["archetype"] == "flight_lowpoly_island_3d"
+    assert brief["scaffold_key"] == "three_lowpoly_island_flight_seed"
+    assert brief["asset_pack_key"] == "island_flight_pack_v1"
+
+
 def test_topdown_brief_selects_twinstick_archetype() -> None:
     brief = build_genre_brief(
         user_prompt="트윈스틱 이동과 에임, 대시가 있는 탑뷰 슈팅 게임",

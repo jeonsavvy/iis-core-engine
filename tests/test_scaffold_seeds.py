@@ -4,6 +4,7 @@ from app.agents.scaffolds import get_scaffold_seed, list_scaffold_keys
 def test_scaffold_registry_lists_three_supported_genres() -> None:
     assert list_scaffold_keys() == [
         "phaser_twinstick_arena_seed",
+        "three_lowpoly_island_flight_seed",
         "three_openwheel_circuit_seed",
         "three_space_dogfight_seed",
     ]
@@ -43,6 +44,20 @@ def test_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "__iis_game_boot_ok" in html
 
 
+def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
+    seed = get_scaffold_seed("three_lowpoly_island_flight_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "<!doctype html>" in html
+    assert "three" in html
+    assert "propeller" in html
+    assert "ring" in html
+    assert "island" in html
+    assert "fog" in html
+    assert "requestanimationframe" in html
+    assert "__iis_game_boot_ok" in html
+
+
 def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     seed = get_scaffold_seed("phaser_twinstick_arena_seed")
     assert seed is not None
@@ -55,5 +70,6 @@ def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     assert "fire" in html
     assert "enemybullets" in html or "fireenemybullet" in html
     assert "coverblocks" in html
+    assert "title-screen" in html or "start run" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html

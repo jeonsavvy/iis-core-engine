@@ -98,6 +98,37 @@ def validate_flight_acceptance(html: str) -> AcceptanceReport:
     )
 
 
+def validate_island_flight_acceptance(html: str) -> AcceptanceReport:
+    lowered = html.casefold()
+    failures: list[str] = []
+    for token in ("pitch", "bank", "throttle"):
+        if token not in lowered:
+            failures.append(f"{token}_missing")
+    if "propeller" not in lowered:
+        failures.append("propeller_missing")
+    if "ring" not in lowered:
+        failures.append("ring_collect_missing")
+    if "fog" not in lowered:
+        failures.append("fog_missing")
+    if "directionallight" not in lowered:
+        failures.append("warm_light_missing")
+    if "island" not in lowered and "sea" not in lowered:
+        failures.append("island_landmark_missing")
+    if "requestanimationframe" not in lowered:
+        failures.append("animation_loop_missing")
+    if any(token in lowered for token in ("dogfight", "enemylaser", "target locked")):
+        failures.append("dogfight_regression")
+    return _report(
+        genre="island_flight",
+        failures=failures,
+        heuristics={
+            "has_propeller": "propeller" in lowered,
+            "has_ring_loop": "ring" in lowered,
+            "has_island_depth": "island" in lowered and "fog" in lowered,
+        },
+    )
+
+
 def validate_topdown_acceptance(html: str) -> AcceptanceReport:
     lowered = html.casefold()
     failures: list[str] = []
@@ -115,10 +146,14 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
         failures.append("crosshair_missing")
     if "comboreadout" not in lowered:
         failures.append("arena_hud_missing")
+    if "title-screen" not in lowered and "start run" not in lowered:
+        failures.append("title_menu_missing")
     if "enemybullets" not in lowered and "fireenemybullet" not in lowered:
         failures.append("enemy_pressure_missing")
     if "coverblocks" not in lowered and "arena cover" not in lowered:
         failures.append("arena_landmark_missing")
+    if "shake(" not in lowered:
+        failures.append("screen_shake_missing")
     if "requestanimationframe" not in lowered:
         failures.append("animation_loop_missing")
     if any(token in lowered for token in ("clicker", "auto click", "8-way shooter")):
@@ -137,6 +172,8 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
 def validate_genre_acceptance(*, archetype: str, html: str) -> AcceptanceReport:
     if archetype == "racing_openwheel_circuit_3d":
         return validate_racing_acceptance(html)
+    if archetype == "flight_lowpoly_island_3d":
+        return validate_island_flight_acceptance(html)
     if archetype == "flight_shooter_space_dogfight_3d":
         return validate_flight_acceptance(html)
     if archetype == "topdown_shooter_twinstick_2d":

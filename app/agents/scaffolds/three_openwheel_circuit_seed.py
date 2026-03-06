@@ -14,7 +14,7 @@ RACING_HTML = dedent(
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>IIS Openwheel Circuit Seed</title>
       <style>
-        html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #253d7a 0%, #081127 50%, #02030a 100%); font-family: Inter, system-ui, sans-serif; color: #eef2ff; }
+        html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #7c3aed 0%, #0f172a 50%, #02030a 100%); font-family: Inter, system-ui, sans-serif; color: #eef2ff; }
         #app { position: relative; width: 100%; height: 100%; }
         canvas { display: block; width: 100%; height: 100%; }
         #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; padding: 12px 14px; background: rgba(2, 6, 23, 0.46); border: 1px solid rgba(148, 163, 184, 0.26); border-radius: 14px; backdrop-filter: blur(10px); pointer-events: none; min-width: 220px; }
@@ -22,6 +22,7 @@ RACING_HTML = dedent(
         #hud span { font-size: 12px; color: #dbeafe; }
         #banner { position: absolute; top: 18px; right: 18px; padding: 12px 14px; background: rgba(15, 23, 42, 0.55); border-radius: 12px; border: 1px solid rgba(244, 114, 182, 0.28); max-width: 280px; line-height: 1.45; font-size: 12px; color: #e5e7eb; }
         #banner b { color: #fbbf24; }
+        #countdown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 86px; font-weight: 900; color: rgba(250, 204, 21, 0.95); text-shadow: 0 0 28px rgba(236, 72, 153, 0.42); pointer-events: none; transition: opacity 220ms ease; }
       </style>
     </head>
     <body>
@@ -39,6 +40,7 @@ RACING_HTML = dedent(
           Throttle / Brake: W / S or ↑ / ↓<br />
           Reset: R
         </div>
+        <div id="countdown">3</div>
       </div>
       <script type="module">
         import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";
@@ -52,6 +54,7 @@ RACING_HTML = dedent(
         const lapStateEl = document.getElementById("lap-state");
         const speedStateEl = document.getElementById("speed-state");
         const hintStateEl = document.getElementById("hint-state");
+        const countdownEl = document.getElementById("countdown");
         const statusStateEl = document.createElement("span");
         statusStateEl.id = "status-state";
         statusStateEl.style.color = "#fbbf24";
@@ -103,6 +106,14 @@ RACING_HTML = dedent(
         const laneGeometry = new THREE.BufferGeometry().setFromPoints(roadPoints.map((point) => point.clone().add(new THREE.Vector3(0, 0.03, 0))));
         const laneLine = new THREE.Line(laneGeometry, new THREE.LineBasicMaterial({ color: 0xffd166 }));
         scene.add(laneLine);
+        roadPoints.filter((_, index) => index % 3 === 0).forEach((point, index) => {
+          const zLine = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.01, 10),
+            new THREE.MeshBasicMaterial({ color: index % 2 === 0 ? 0x22d3ee : 0xf472b6 })
+          );
+          zLine.position.copy(point).add(new THREE.Vector3(0, -0.01, 0));
+          scene.add(zLine);
+        });
 
         const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.15 });
         roadPoints.filter((_, index) => index % 24 === 0).forEach((point, index) => {
@@ -218,6 +229,16 @@ RACING_HTML = dedent(
           car.add(wheel);
         });
         scene.add(car);
+        const trailGroup = new THREE.Group();
+        scene.add(trailGroup);
+        const trailParticles = Array.from({ length: 10 }, (_, index) => {
+          const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.12 + index * 0.02, 8, 8),
+            new THREE.MeshBasicMaterial({ color: index % 2 === 0 ? 0x22d3ee : 0xf472b6, transparent: true, opacity: 0.36 })
+          );
+          trailGroup.add(particle);
+          return particle;
+        });
 
         const input = { throttle: false, brake: false, left: false, right: false };
         const carState = {
@@ -229,6 +250,8 @@ RACING_HTML = dedent(
           brakeRate: 32,
           offTrackTimer: 0,
           wrongWayTimer: 0,
+          countdown: 3,
+          started: false,
         };
 
         function respawnToCheckpoint(reason) {
@@ -258,6 +281,8 @@ RACING_HTML = dedent(
           checkpointState.lastSafeHeading = 0;
           carState.offTrackTimer = 0;
           carState.wrongWayTimer = 0;
+          carState.countdown = 3;
+          carState.started = false;
           checkpointMarkers.forEach(({ marker }, index) => {
             marker.children.forEach((child, childIndex) => {
               if (child.material) {
@@ -267,6 +292,8 @@ RACING_HTML = dedent(
           });
           hintStateEl.textContent = "Reset complete — attack the circuit again";
           statusStateEl.textContent = "TRACK LOCKED";
+          countdownEl.textContent = "3";
+          countdownEl.style.opacity = "1";
         }
 
         function onKey(event, pressed) {
@@ -353,6 +380,20 @@ RACING_HTML = dedent(
           const dt = Math.min(0.033, (nowMs - lastTime) / 1000);
           lastTime = nowMs;
 
+          if (!carState.started) {
+            carState.countdown = Math.max(0, carState.countdown - dt);
+            const shown = Math.ceil(carState.countdown);
+            countdownEl.textContent = shown > 0 ? String(shown) : "GO!";
+            if (carState.countdown <= 0) {
+              carState.started = true;
+              setTimeout(() => { countdownEl.style.opacity = "0"; }, 260);
+            } else {
+              renderer.render(scene, camera);
+              window.requestAnimationFrame(animate);
+              return;
+            }
+          }
+
           if (input.throttle) carState.speed += carState.accelRate * dt;
           if (input.brake) carState.speed -= carState.brakeRate * dt;
           carState.speed *= input.brake ? 0.985 : 0.994;
@@ -402,11 +443,18 @@ RACING_HTML = dedent(
           car.position.copy(carState.position);
           car.position.y = 0.18;
           car.rotation.y = carState.heading;
+          trailParticles.forEach((particle, index) => {
+            const offset = new THREE.Vector3(0, 0.18, -0.85 - index * 0.34).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+            particle.position.copy(car.position).add(offset);
+            particle.material.opacity = Math.max(0.08, Math.min(0.46, carState.speed / 120));
+          });
 
           const cameraOffset = new THREE.Vector3(0, 2.7, -6.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
           const desiredCamera = car.position.clone().add(cameraOffset);
           camera.position.lerp(desiredCamera, 0.14);
           camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(20)).add(new THREE.Vector3(0, 1.25, 0)));
+          camera.fov = THREE.MathUtils.lerp(camera.fov, 64 + Math.min(14, carState.speed * 0.16), dt * 4.5);
+          camera.updateProjectionMatrix();
 
           checkpointState.lapTimerMs = nowMs - checkpointState.lapStartMs;
           updateCheckpoints(nowMs);
