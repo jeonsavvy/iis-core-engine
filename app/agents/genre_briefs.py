@@ -22,6 +22,12 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "quality_target": "web_high_fidelity_racing",
             "benchmark_reference": "openwheel_circuit_baseline_v1",
             "degradation_guard": ["endless obstacle runner", "single-lane dodge game"],
+            "first_frame_requirements": [
+                "visible vehicle in lower third",
+                "visible circuit path in center field",
+                "readable lap timer",
+                "clear start-finish or checkpoint indicator",
+            ],
         }
 
     if any(token in text for token in ("flight", "dogfight", "pilot", "space shooter", "우주", "도그파이트", "비행")):
@@ -38,6 +44,12 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "quality_target": "quality_idea_plus",
             "benchmark_reference": "/root/workspace/create/coding/iis/quality_idea.md",
             "degradation_guard": ["forward auto-scroll shooter", "flat lane shooter"],
+            "first_frame_requirements": [
+                "visible reticle",
+                "target/combat context",
+                "ship movement cues",
+                "space depth layers",
+            ],
         }
 
     if any(token in text for token in ("top-down", "topdown", "탑뷰", "twin-stick", "twinstick", "아레나 슈터")):
@@ -54,6 +66,12 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "quality_target": "web_high_fidelity_twinstick",
             "benchmark_reference": "twinstick_arena_baseline_v1",
             "degradation_guard": ["single-button clicker", "basic 8-way shooter without dash"],
+            "first_frame_requirements": [
+                "player/enemy separation",
+                "readable arena",
+                "combat feedback cues",
+                "wave pressure state",
+            ],
         }
 
     return {
@@ -68,6 +86,7 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
         "quality_target": "generic_playable",
         "benchmark_reference": None,
         "degradation_guard": [],
+        "first_frame_requirements": [],
     }
 
 

@@ -293,6 +293,42 @@ class VertexService:
             }
         return strip_code_fences(self._coerce_genai_text(response)), usage
 
+    def _genai_text_with_image(
+        self,
+        *,
+        model_name: str,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str,
+        temperature: float,
+        max_output_tokens: int | None = None,
+    ) -> tuple[str, dict[str, int]]:
+        if genai_types is None:  # pragma: no cover - import guard
+            raise RuntimeError("google_genai types are not available")
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "response_mime_type": "text/plain",
+        }
+        if isinstance(max_output_tokens, int) and max_output_tokens > 0:
+            config_kwargs["max_output_tokens"] = max_output_tokens
+        parts = [
+            genai_types.Part.from_text(text=prompt),
+            genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+        ]
+        response = self._genai_generate_parts_with_retry(
+            model_name=model_name,
+            parts=parts,
+            config=genai_types.GenerateContentConfig(**config_kwargs),
+        )
+        usage = {}
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = {
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+            }
+        return strip_code_fences(self._coerce_genai_text(response)), usage
+
     def _coerce_genai_text(self, response: Any) -> str:
         try:
             text = getattr(response, "text", "")
@@ -334,6 +370,20 @@ class VertexService:
         return client.models.generate_content(
             model=model_name,
             contents=prompt,
+            config=config,
+        )
+
+    @retry(
+        reraise=True,
+        retry=retry_if_exception(_is_retryable_vertex_exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.5, max=3),
+    )
+    def _genai_generate_parts_with_retry(self, *, model_name: str, parts: list[Any], config: Any):
+        client = self._client()
+        return client.models.generate_content(
+            model=model_name,
+            contents=parts,
             config=config,
         )
 

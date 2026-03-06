@@ -14,12 +14,12 @@ RACING_HTML = dedent(
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>IIS Openwheel Circuit Seed</title>
       <style>
-        html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #18254d 0%, #060814 62%, #02030a 100%); font-family: Inter, system-ui, sans-serif; color: #eef2ff; }
+        html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(circle at top, #253d7a 0%, #081127 50%, #02030a 100%); font-family: Inter, system-ui, sans-serif; color: #eef2ff; }
         #app { position: relative; width: 100%; height: 100%; }
         canvas { display: block; width: 100%; height: 100%; }
-        #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; padding: 14px 16px; background: rgba(2, 6, 23, 0.52); border: 1px solid rgba(148, 163, 184, 0.32); border-radius: 14px; backdrop-filter: blur(12px); pointer-events: none; min-width: 220px; }
-        #hud strong { font-size: 28px; color: #7dd3fc; }
-        #hud span { font-size: 13px; color: #cbd5e1; }
+        #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; padding: 12px 14px; background: rgba(2, 6, 23, 0.46); border: 1px solid rgba(148, 163, 184, 0.26); border-radius: 14px; backdrop-filter: blur(10px); pointer-events: none; min-width: 220px; }
+        #hud strong { font-size: 26px; color: #7dd3fc; }
+        #hud span { font-size: 12px; color: #dbeafe; }
         #banner { position: absolute; top: 18px; right: 18px; padding: 12px 14px; background: rgba(15, 23, 42, 0.55); border-radius: 12px; border: 1px solid rgba(244, 114, 182, 0.28); max-width: 280px; line-height: 1.45; font-size: 12px; color: #e5e7eb; }
         #banner b { color: #fbbf24; }
       </style>
@@ -65,6 +65,11 @@ RACING_HTML = dedent(
         const sun = new THREE.DirectionalLight(0xffffff, 1.2);
         sun.position.set(12, 18, 10);
         scene.add(ambient, sun);
+        const sky = new THREE.Mesh(
+          new THREE.SphereGeometry(220, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0x3357aa, side: THREE.BackSide })
+        );
+        scene.add(sky);
 
         const trackCurve = new THREE.CatmullRomCurve3([
           new THREE.Vector3(0, 0, -26),
@@ -79,8 +84,8 @@ RACING_HTML = dedent(
 
         const roadPoints = trackCurve.getPoints(240);
         const roadShape = new THREE.Shape();
-        roadShape.moveTo(-2.8, 0);
-        roadShape.lineTo(2.8, 0);
+        roadShape.moveTo(-4.2, 0);
+        roadShape.lineTo(4.2, 0);
         const roadGeometry = new THREE.ExtrudeGeometry(roadShape, {
           steps: roadPoints.length - 1,
           bevelEnabled: false,
@@ -94,6 +99,16 @@ RACING_HTML = dedent(
         const laneGeometry = new THREE.BufferGeometry().setFromPoints(roadPoints.map((point) => point.clone().add(new THREE.Vector3(0, 0.03, 0))));
         const laneLine = new THREE.Line(laneGeometry, new THREE.LineBasicMaterial({ color: 0xffd166 }));
         scene.add(laneLine);
+
+        const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.15 });
+        roadPoints.filter((_, index) => index % 24 === 0).forEach((point, index) => {
+          const leftPylon = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.5, 0.25), markerMaterial);
+          leftPylon.position.copy(point).add(new THREE.Vector3(-4.4, 0.75, 0));
+          scene.add(leftPylon);
+          const rightPylon = leftPylon.clone();
+          rightPylon.position.copy(point).add(new THREE.Vector3(4.4, 0.75, 0));
+          scene.add(rightPylon);
+        });
 
         const ground = new THREE.Mesh(
           new THREE.CircleGeometry(120, 64),
@@ -125,32 +140,49 @@ RACING_HTML = dedent(
           checkpointMarkers.push({ marker, position, threshold: 5.4 });
         });
 
+        const startPosition = trackCurve.getPointAt(0.0);
+        const startGateLeft = new THREE.Mesh(
+          new THREE.BoxGeometry(0.28, 5.0, 0.28),
+          new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x082f49 })
+        );
+        startGateLeft.position.copy(startPosition).add(new THREE.Vector3(-4.0, 2.5, 0.5));
+        scene.add(startGateLeft);
+        const startGateRight = startGateLeft.clone();
+        startGateRight.position.copy(startPosition).add(new THREE.Vector3(4.0, 2.5, 0.5));
+        scene.add(startGateRight);
+        const startGateBar = new THREE.Mesh(
+          new THREE.BoxGeometry(8.5, 0.18, 0.18),
+          new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x111827 })
+        );
+        startGateBar.position.copy(startPosition).add(new THREE.Vector3(0, 4.8, 0.5));
+        scene.add(startGateBar);
+
         const car = new THREE.Group();
         const body = new THREE.Mesh(
-          new THREE.BoxGeometry(1.2, 0.35, 2.6),
+          new THREE.BoxGeometry(1.55, 0.42, 3.1),
           new THREE.MeshStandardMaterial({ color: 0xe11d48, metalness: 0.45, roughness: 0.4 }),
         );
-        body.position.y = 0.55;
+        body.position.y = 0.62;
         car.add(body);
         const nose = new THREE.Mesh(
-          new THREE.ConeGeometry(0.4, 1.4, 4),
+          new THREE.ConeGeometry(0.48, 1.8, 4),
           new THREE.MeshStandardMaterial({ color: 0xfb7185, metalness: 0.2, roughness: 0.45 }),
         );
         nose.rotation.x = Math.PI / 2;
-        nose.position.set(0, 0.55, 1.9);
+        nose.position.set(0, 0.62, 2.2);
         car.add(nose);
         const wing = new THREE.Mesh(
-          new THREE.BoxGeometry(1.8, 0.1, 0.3),
+          new THREE.BoxGeometry(2.2, 0.1, 0.32),
           new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }),
         );
-        wing.position.set(0, 0.82, -1.1);
+        wing.position.set(0, 0.94, -1.35);
         car.add(wing);
         const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.9 });
         const wheelOffsets = [
-          [-0.75, 0.28, 1.0], [0.75, 0.28, 1.0], [-0.75, 0.28, -0.85], [0.75, 0.28, -0.85]
+          [-0.95, 0.3, 1.2], [0.95, 0.3, 1.2], [-0.95, 0.3, -1.05], [0.95, 0.3, -1.05]
         ];
         wheelOffsets.forEach(([x, y, z]) => {
-          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.26, 16), wheelMaterial);
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.3, 16), wheelMaterial);
           wheel.rotation.z = Math.PI / 2;
           wheel.position.set(x, y, z);
           car.add(wheel);
@@ -257,12 +289,12 @@ RACING_HTML = dedent(
           carState.position.add(pull);
 
           car.position.copy(carState.position);
-          car.position.y = 0.02;
+          car.position.y = 0.18;
           car.rotation.y = carState.heading;
 
-          const cameraOffset = new THREE.Vector3(0, 3.8, -8.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+          const cameraOffset = new THREE.Vector3(0, 2.35, -6.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
           camera.position.copy(car.position).add(cameraOffset);
-          camera.lookAt(car.position.clone().add(forward.clone().multiplyScalar(8)).add(new THREE.Vector3(0, 1.3, 0)));
+          camera.lookAt(car.position.clone().add(forward.clone().multiplyScalar(16)).add(new THREE.Vector3(0, 0.9, 0)));
 
           checkpointState.lapTimerMs = nowMs - checkpointState.lapStartMs;
           updateCheckpoints(nowMs);

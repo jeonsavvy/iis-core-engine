@@ -43,10 +43,17 @@ class CreateSessionResponse(BaseModel):
     status: str = "active"
 
 
+class ImageAttachmentRequest(BaseModel):
+    name: str = Field(default="", max_length=200)
+    mime_type: str = Field(..., min_length=6, max_length=100)
+    data_url: str = Field(..., min_length=24, max_length=2_500_000)
+
+
 class PromptRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=4000)
     auto_qa: bool = True
     stream: bool = False
+    image_attachment: ImageAttachmentRequest | None = None
 
 
 class PromptQueuedResponse(BaseModel):
@@ -128,7 +135,8 @@ class PlanDraftResponse(BaseModel):
 class CreateIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
     details: str = Field(default="", max_length=4000)
-    category: str = Field(default="gameplay_bug", max_length=40)
+    category: str = Field(default="auto", max_length=40)
+    image_attachment: ImageAttachmentRequest | None = None
 
 
 class SessionIssueResponse(BaseModel):
@@ -144,6 +152,7 @@ class SessionIssueResponse(BaseModel):
 
 class ProposeFixRequest(BaseModel):
     instruction: str = Field(default="", max_length=2000)
+    image_attachment: ImageAttachmentRequest | None = None
 
 
 class ProposeFixResponse(BaseModel):
@@ -259,6 +268,7 @@ _ISSUE_CATEGORY_ALIASES = {
     "publish": "publish_blocker",
 }
 _PUBLISH_BLOCKING_ISSUES = {"fatal_runtime", "publish_blocker"}
+_SUPPORTED_ATTACHMENT_MIME_PREFIXES = ("image/png", "image/jpeg", "image/webp")
 
 
 class SessionStoreProtocol(Protocol):
@@ -488,7 +498,50 @@ def _normalize_issue_category(category: str) -> str:
     return _ISSUE_CATEGORY_ALIASES.get(normalized, normalized or "gameplay_bug")
 
 
-def _build_issue_fix_prompt(issue: dict[str, Any], instruction: str) -> str:
+def _attachment_metadata(image_attachment: ImageAttachmentRequest | None) -> dict[str, Any] | None:
+    if image_attachment is None:
+        return None
+    mime_type = image_attachment.mime_type.strip().lower()
+    data_url = image_attachment.data_url.strip()
+    if not mime_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_image_mime", "code": "image_attachment_invalid"},
+        )
+    if not any(mime_type.startswith(prefix) for prefix in _SUPPORTED_ATTACHMENT_MIME_PREFIXES):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "unsupported_image_mime", "code": "image_attachment_unsupported"},
+        )
+    if not data_url.startswith(f"data:{mime_type};base64,"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_image_payload", "code": "image_attachment_invalid"},
+        )
+    return {
+        "name": image_attachment.name.strip() or "attachment",
+        "mime_type": mime_type,
+        "has_image": True,
+    }
+
+
+def _infer_issue_category(*, title: str, details: str, has_attachment: bool) -> str:
+    text = f"{title} {details}".casefold()
+
+    if any(token in text for token in ("퍼블리시", "publish", "출시", "승인", "차단")):
+        return "publish_blocker"
+    if any(token in text for token in ("안 떠", "안뜸", "검은 화면", "부팅", "실행 안", "error", "오류", "버그", "튕김", "크래시")):
+        return "fatal_runtime"
+    if any(token in text for token in ("조작", "핸들링", "코너링", "브레이크", "속도감", "충돌", "랩타임", "난이도", "gameplay")):
+        return "gameplay_bug"
+    if any(token in text for token in ("문구", "설명", "조작법", "안내", "카피", "텍스트")):
+        return "ux_copy"
+    if has_attachment or any(token in text for token in ("화면", "비주얼", "가독성", "느낌", "스타일", "연출", "색감", "이미지")):
+        return "visual_polish"
+    return "gameplay_bug"
+
+
+def _build_issue_fix_prompt(issue: dict[str, Any], instruction: str, attachment_meta: dict[str, Any] | None = None) -> str:
     category = _normalize_issue_category(str(issue.get("category", "")))
     lines = [
         "사용자가 현재 게임 결과에 대해 구체적인 수정 요청을 보냈습니다.",
@@ -500,6 +553,10 @@ def _build_issue_fix_prompt(issue: dict[str, Any], instruction: str) -> str:
     ]
     if instruction.strip():
         lines.append(f"- extra instruction: {instruction.strip()}")
+    if attachment_meta:
+        lines.append(
+            f"- reference image attached: {attachment_meta.get('name', 'attachment')} ({attachment_meta.get('mime_type', 'image')})"
+        )
 
     lines.extend(
         [
@@ -650,6 +707,7 @@ async def _execute_prompt_run(
     session_id: str,
     prompt: str,
     auto_qa: bool,
+    image_attachment: ImageAttachmentRequest | None,
     timeout_seconds: float,
     settings_obj: Settings,
 ) -> None:
@@ -685,6 +743,13 @@ async def _execute_prompt_run(
                 current_html=str(session.get("current_html", "")),
                 genre_hint=str(session.get("genre", "")),
                 auto_qa=auto_qa,
+                image_attachment={
+                    "mime_type": image_attachment.mime_type,
+                    "data_url": image_attachment.data_url,
+                    "name": image_attachment.name,
+                }
+                if image_attachment
+                else None,
             ),
             timeout=timeout_seconds,
         )
@@ -1099,12 +1164,13 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
     genre_brief = build_genre_brief(user_prompt=body.prompt, genre_hint=str(session.get("genre", "")))
     scaffold_seed = scaffold_seed_for_brief(genre_brief)
     scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
+    attachment_meta = _attachment_metadata(body.image_attachment)
 
     store.add_conversation_message(
         session_id=session_id,
         role="user",
         content=body.prompt,
-        metadata={"stream": False, "auto_qa": body.auto_qa},
+        metadata={"stream": False, "auto_qa": body.auto_qa, "attachment": attachment_meta} if attachment_meta else {"stream": False, "auto_qa": body.auto_qa},
     )
     store.add_session_event(
         session_id=session_id,
@@ -1115,6 +1181,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
         decision_reason="user_instruction_received",
         change_impact="agent_loop_triggered",
         confidence=1.0,
+        metadata={"has_image_attachment": bool(attachment_meta)} if attachment_meta else {},
     )
 
     store.clear_publish_approvals(session_id)
@@ -1145,6 +1212,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
             "scaffold_key": scaffold.key if scaffold else None,
             "scaffold_version": scaffold.version if scaffold else None,
             "generation_mode": "scaffold_seeded" if scaffold else "blank",
+            "has_image_attachment": bool(attachment_meta),
         },
     )
 
@@ -1157,6 +1225,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
                 session_id=session_id,
                 prompt=body.prompt,
                 auto_qa=body.auto_qa,
+                image_attachment=body.image_attachment,
                 timeout_seconds=settings.prompt_run_timeout_seconds,
                 settings_obj=settings,
             )
@@ -1170,6 +1239,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
             session_id=session_id,
             prompt=body.prompt,
             auto_qa=body.auto_qa,
+            image_attachment=body.image_attachment,
             timeout_seconds=settings.prompt_run_timeout_seconds,
             settings_obj=settings,
         )
@@ -1232,12 +1302,25 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
     store = _get_session_store(request)
     _load_session_or_404(store, session_id)
 
-    normalized_category = _normalize_issue_category(body.category)
+    attachment_meta = _attachment_metadata(body.image_attachment)
+    normalized_category = (
+        _infer_issue_category(title=body.title, details=body.details, has_attachment=bool(attachment_meta))
+        if body.category.strip().casefold() in {"", "auto"}
+        else _normalize_issue_category(body.category)
+    )
     issue = store.create_session_issue(
         session_id=session_id,
         title=body.title,
         details=body.details,
         category=normalized_category,
+    )
+    store.add_conversation_message(
+        session_id=session_id,
+        role="user",
+        content=body.details or body.title,
+        metadata={"issue_id": issue.get("id"), "category": normalized_category, "attachment": attachment_meta}
+        if attachment_meta
+        else {"issue_id": issue.get("id"), "category": normalized_category},
     )
     routed_agents = _route_issue_agents(normalized_category)
     store.add_session_event(
@@ -1249,7 +1332,12 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
         decision_reason="human_feedback_received",
         change_impact="issue_queue_updated",
         confidence=1.0,
-        metadata={"issue_id": issue.get("id"), "category": normalized_category, "routed_agents": routed_agents},
+        metadata={
+            "issue_id": issue.get("id"),
+            "category": normalized_category,
+            "routed_agents": routed_agents,
+            "has_image_attachment": bool(attachment_meta),
+        },
     )
 
     return SessionIssueResponse(
@@ -1280,6 +1368,7 @@ async def propose_issue_fix(
     store = _get_session_store(request)
     session = _load_session_or_404(store, session_id)
     issue = _load_issue_or_404(store, session_id, issue_id)
+    attachment_meta = _attachment_metadata(body.image_attachment)
 
     routed_agents = _route_issue_agents(str(issue.get("category", "gameplay")))
     store.add_session_event(
@@ -1302,7 +1391,7 @@ async def propose_issue_fix(
         )
 
     instruction = body.instruction.strip()
-    proposal_prompt = _build_issue_fix_prompt(issue, instruction)
+    proposal_prompt = _build_issue_fix_prompt(issue, instruction, attachment_meta)
     history_rows = store.get_conversation_history(session_id, limit=100)
     history = [
         ConversationMessage(role=str(msg.get("role", "user")), content=str(msg.get("content", "")))
@@ -1314,6 +1403,13 @@ async def propose_issue_fix(
         history=history,
         current_html=str(session.get("current_html", "")),
         genre_hint=str(session.get("genre", "")),
+        image_attachment={
+            "mime_type": body.image_attachment.mime_type,
+            "data_url": body.image_attachment.data_url,
+            "name": body.image_attachment.name,
+        }
+        if body.image_attachment
+        else None,
     )
     if result.error:
         error_code = _normalize_error_code(result.error)
@@ -1354,7 +1450,12 @@ async def propose_issue_fix(
         input_signal=proposal_prompt[:500],
         change_impact="proposal_ready_for_review",
         confidence=0.86,
-        metadata={"issue_id": issue_id, "proposal_id": proposal.get("id"), "routed_agents": routed_agents},
+        metadata={
+            "issue_id": issue_id,
+            "proposal_id": proposal.get("id"),
+            "routed_agents": routed_agents,
+            "has_image_attachment": bool(attachment_meta),
+        },
     )
 
     return ProposeFixResponse(

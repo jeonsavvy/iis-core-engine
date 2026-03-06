@@ -25,6 +25,7 @@ def test_initial_racing_prompt_uses_hard_scaffold_html() -> None:
     assert "Base scaffold HTML:" in prompt
     assert "lap timer" in prompt.lower() or "lap-timer" in prompt.lower()
     assert "endless obstacle runner" in prompt.lower()
+    assert "First frame requirement" in prompt
 
 
 def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:

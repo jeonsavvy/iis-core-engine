@@ -296,6 +296,7 @@ class AgentLoop:
         current_html: str = "",
         genre_hint: str = "",
         auto_qa: bool = True,
+        image_attachment: dict[str, str] | None = None,
     ) -> AgentLoopResult:
         activities: list[AgentActivity] = []
 
@@ -313,6 +314,7 @@ class AgentLoop:
             history=history,
             current_html=current_html,
             genre_hint=genre_hint,
+            image_attachment=image_attachment,
         )
 
         activities.append(
@@ -390,6 +392,7 @@ class AgentLoop:
                     history=history,
                     current_html=final_html,
                     genre_hint=genre_hint,
+                    image_attachment=image_attachment,
                 )
 
                 if refine_result.error:

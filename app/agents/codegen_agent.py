@@ -9,6 +9,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from dataclasses import dataclass, field
@@ -39,6 +40,13 @@ class ConversationMessage:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _decode_data_url_image(data_url: str) -> bytes:
+    if ";base64," not in data_url:
+        raise ValueError("invalid_image_data_url")
+    _, encoded = data_url.split(";base64,", 1)
+    return base64.b64decode(encoded)
+
+
 class CodegenAgent:
     """Interactive codegen agent for game generation/modification.
 
@@ -59,6 +67,7 @@ class CodegenAgent:
         history: list[ConversationMessage] | None = None,
         current_html: str = "",
         genre_hint: str = "",
+        image_attachment: dict[str, str] | None = None,
     ) -> CodegenResult:
         """Generate or modify game code based on user prompt.
 
@@ -73,6 +82,7 @@ class CodegenAgent:
             history=history or [],
             current_html=current_html,
             genre_hint=genre_hint,
+            image_attachment=image_attachment,
         )
 
         if not self._vertex._is_enabled():
@@ -88,12 +98,22 @@ class CodegenAgent:
             max_tokens = getattr(
                 self._vertex.settings, "builder_codegen_max_output_tokens", 48_000
             )
-            raw_text, usage = self._vertex._genai_text(
-                model_name=model_name,
-                prompt=prompt,
-                temperature=0.7,
-                max_output_tokens=max_tokens,
-            )
+            if image_attachment and self._vertex._use_genai_sdk():
+                raw_text, usage = self._vertex._genai_text_with_image(
+                    model_name=model_name,
+                    prompt=prompt,
+                    image_bytes=_decode_data_url_image(str(image_attachment.get("data_url", ""))),
+                    mime_type=str(image_attachment.get("mime_type", "image/png")),
+                    temperature=0.7,
+                    max_output_tokens=max_tokens,
+                )
+            else:
+                raw_text, usage = self._vertex._genai_text(
+                    model_name=model_name,
+                    prompt=prompt,
+                    temperature=0.7,
+                    max_output_tokens=max_tokens,
+                )
             html = self._extract_html(str(raw_text).strip())
             total_tokens = 0
             if isinstance(usage, dict):
@@ -162,6 +182,7 @@ class CodegenAgent:
         history: list[ConversationMessage],
         current_html: str,
         genre_hint: str,
+        image_attachment: dict[str, str] | None = None,
     ) -> str:
         """Build a clean, concise prompt for game generation.
 
@@ -180,10 +201,24 @@ class CodegenAgent:
             for msg in recent:
                 role_label = msg.role.upper()
                 history_lines.append(f"[{role_label}]: {msg.content[:500]}")
+                attachment_meta = msg.metadata.get("attachment") if isinstance(msg.metadata, dict) else None
+                if isinstance(attachment_meta, dict) and attachment_meta.get("has_image"):
+                    history_lines.append(
+                        f"[{role_label}_IMAGE]: {attachment_meta.get('name', 'attachment')} ({attachment_meta.get('mime_type', 'image')})"
+                    )
             history_section = (
                 "=== Conversation History ===\n"
                 + "\n".join(history_lines)
                 + "\n\n"
+            )
+
+        image_context = ""
+        if image_attachment:
+            image_context = (
+                "Reference image is attached with this request.\n"
+                f"- attachment_name: {image_attachment.get('name', 'attachment')}\n"
+                f"- mime_type: {image_attachment.get('mime_type', 'image/png')}\n"
+                "Use it as visual guidance for composition, styling, and correction targets when relevant.\n\n"
             )
 
         if is_modification:
@@ -192,6 +227,7 @@ class CodegenAgent:
                 "Modify the existing game based on the user's request.\n"
                 "Work in a DIFF mindset: keep the current game structure unless the request requires a local replacement.\n\n"
                 f"{history_section}"
+                f"{image_context}"
                 f"User request: {user_prompt}\n\n"
                 f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"
                 f"{'Active scaffold JSON: ' + json.dumps(scaffold_seed, ensure_ascii=False) + chr(10) if scaffold_seed else ''}\n"
@@ -213,11 +249,18 @@ class CodegenAgent:
                 for item in genre_brief.get("degradation_guard", [])
                 if str(item).strip()
             ]
+            first_frame_requirements = [
+                str(item).strip()
+                for item in genre_brief.get("first_frame_requirements", [])
+                if str(item).strip()
+            ]
             degradation_section = "".join(f"- Degradation guard: {guard}\n" for guard in degradation_guards)
+            first_frame_section = "".join(f"- First frame requirement: {requirement}\n" for requirement in first_frame_requirements)
             return (
                 "You are a principal web game engineer.\n"
                 "Specialize and expand the provided hard scaffold into a polished browser game.\n\n"
                 f"{history_section}"
+                f"{image_context}"
                 f"User request: {user_prompt}\n"
                 f"{'Genre hint: ' + genre_hint if genre_hint else ''}\n\n"
                 f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"
@@ -232,6 +275,8 @@ class CodegenAgent:
                 "- Keep window.IISLeaderboard contract\n"
                 "- Never violate degradation guards from the genre brief\n"
                 f"{degradation_section}"
+                "- The first visible frame must sell the fantasy immediately\n"
+                f"{first_frame_section}"
                 "- Return only the final HTML document, no markdown fences\n\n"
                 f"Base scaffold HTML:\n{scaffold.html}"
             )
@@ -240,6 +285,7 @@ class CodegenAgent:
             "You are a principal web game engineer.\n"
             "Create a complete, high-quality, playable HTML5 browser game.\n\n"
             f"{history_section}"
+            f"{image_context}"
             f"User request: {user_prompt}\n"
             f"{'Genre hint: ' + genre_hint if genre_hint else ''}\n\n"
             f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"

@@ -556,6 +556,47 @@ def test_issue_propose_apply_flow() -> None:
     assert session_row["current_html"] == "<html>patched</html>"
 
 
+def test_issue_auto_classifies_visual_feedback_with_attachment() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+
+    issue_res = client.post(
+        f"/api/v1/sessions/{session_id}/issues",
+        json={
+            "title": "이 화면 느낌을 바꿔줘",
+            "details": "첨부 이미지처럼 더 공격적인 비주얼로 바꿔줘",
+            "image_attachment": {
+                "name": "reference.png",
+                "mime_type": "image/png",
+                "data_url": "data:image/png;base64,aGVsbG8=",
+            },
+        },
+    )
+    assert issue_res.status_code == 200
+    assert issue_res.json()["category"] == "visual_polish"
+    assert store.histories[session_id][-1]["metadata"]["attachment"]["has_image"] is True
+
+
+def test_prompt_accepts_image_attachment_metadata() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+
+    queued = client.post(
+        f"/api/v1/sessions/{session_id}/prompt",
+        json={
+            "prompt": "첨부 이미지 같은 컬러감의 레이싱 게임 만들어줘",
+            "image_attachment": {
+                "name": "reference.webp",
+                "mime_type": "image/webp",
+                "data_url": "data:image/webp;base64,aGVsbG8=",
+            },
+        },
+    )
+    assert queued.status_code == 202
+    user_rows = [row for row in store.histories[session_id] if row["role"] == "user"]
+    assert user_rows[-1]["metadata"]["attachment"]["mime_type"] == "image/webp"
+
+
 def test_session_snapshot_conversation_and_latest_issue_endpoints() -> None:
     client, store = make_client()
     session_id = create_session(client)
