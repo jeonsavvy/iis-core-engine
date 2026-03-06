@@ -21,15 +21,22 @@ FLIGHT_HTML = dedent(
         #reticle::before, #reticle::after { content: ""; position: absolute; background: rgba(34, 211, 238, 0.9); }
         #reticle::before { width: 2px; height: 40px; left: 50%; top: -6px; transform: translateX(-50%); }
         #reticle::after { width: 40px; height: 2px; top: 50%; left: -6px; transform: translateY(-50%); }
+        #target-box { position: absolute; left: 58%; top: 42%; width: 78px; height: 78px; transform: translate(-50%, -50%); border: 2px solid rgba(248, 113, 113, 0.72); border-radius: 12px; pointer-events: none; box-shadow: 0 0 24px rgba(248, 113, 113, 0.18); }
         #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; padding: 14px 16px; min-width: 240px; border-radius: 14px; background: rgba(2, 6, 23, 0.5); border: 1px solid rgba(56, 189, 248, 0.32); backdrop-filter: blur(12px); }
         #hud strong { font-size: 26px; color: #22d3ee; }
         #hud span { font-size: 13px; color: #dbeafe; }
         #controls { position: absolute; top: 18px; right: 18px; max-width: 290px; padding: 12px 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(148, 163, 184, 0.25); line-height: 1.45; font-size: 12px; }
+        #cockpit-bars { position: absolute; inset: 0; pointer-events: none; }
+        #cockpit-bars::before, #cockpit-bars::after { content: ""; position: absolute; top: 0; bottom: 0; width: 18%; background: linear-gradient(180deg, rgba(10, 18, 35, 0.88), rgba(10, 18, 35, 0.25) 24%, rgba(10, 18, 35, 0.88)); }
+        #cockpit-bars::before { left: 0; clip-path: polygon(0 0, 100% 0, 62% 100%, 0 100%); }
+        #cockpit-bars::after { right: 0; clip-path: polygon(38% 0, 100% 0, 100% 100%, 0 100%); }
       </style>
     </head>
     <body>
       <div id="app">
+        <div id="cockpit-bars"></div>
         <div id="reticle"></div>
+        <div id="target-box"></div>
         <div id="hud">
           <span>SPACE DOGFIGHT</span>
           <strong id="throttle-readout">THROTTLE 0%</strong>
@@ -61,6 +68,7 @@ FLIGHT_HTML = dedent(
         const targetReadout = document.getElementById("target-readout");
         const waveReadout = document.getElementById("wave-readout");
         const statusReadout = document.getElementById("status-readout");
+        const targetBox = document.getElementById("target-box");
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -74,6 +82,11 @@ FLIGHT_HTML = dedent(
         const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
         keyLight.position.set(10, 16, 8);
         scene.add(ambient, keyLight);
+        const nebula = new THREE.Mesh(
+          new THREE.SphereGeometry(180, 24, 24),
+          new THREE.MeshBasicMaterial({ color: 0x1d4ed8, side: THREE.BackSide, transparent: true, opacity: 0.22 })
+        );
+        scene.add(nebula);
 
         const stars = new THREE.Points(
           new THREE.BufferGeometry(),
@@ -102,6 +115,13 @@ FLIGHT_HTML = dedent(
         const engineGlow = new THREE.PointLight(0x38bdf8, 3.0, 18);
         engineGlow.position.set(0, 0, 1.2);
         ship.add(engineGlow);
+        const engineTrail = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.18, 0.55, 3.2, 10, 1, true),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45 })
+        );
+        engineTrail.rotation.x = Math.PI / 2;
+        engineTrail.position.set(0, 0, 2.5);
+        ship.add(engineTrail);
         scene.add(ship);
 
         const enemyGroup = new THREE.Group();
@@ -118,7 +138,9 @@ FLIGHT_HTML = dedent(
         }
 
         const projectileMaterial = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+        const enemyLaserMaterial = new THREE.MeshBasicMaterial({ color: 0xfb7185 });
         const projectiles = [];
+        const enemyLasers = [];
 
         const input = { pitchUp: false, pitchDown: false, rollLeft: false, rollRight: false, yawLeft: false, yawRight: false, fire: false, boost: false };
         const state = {
@@ -159,6 +181,14 @@ FLIGHT_HTML = dedent(
           scene.add(bolt);
           projectiles.push({ mesh: bolt, velocity: forward.multiplyScalar(95) });
           state.fireCooldown = 0.16;
+        }
+
+        function fireEnemyLaser(origin, target) {
+          const direction = target.clone().sub(origin).normalize();
+          const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), enemyLaserMaterial);
+          bolt.position.copy(origin);
+          scene.add(bolt);
+          enemyLasers.push({ mesh: bolt, velocity: direction.multiplyScalar(75) });
         }
 
         function onKey(event, pressed) {
@@ -219,6 +249,19 @@ FLIGHT_HTML = dedent(
               projectiles.splice(index, 1);
             }
           });
+          enemyLasers.forEach((laser, index) => {
+            laser.mesh.position.addScaledVector(laser.velocity, dt);
+            if (laser.mesh.position.distanceTo(ship.position) < 1.4) {
+              statusReadout.textContent = "Incoming hit · break line and recover";
+              scene.remove(laser.mesh);
+              enemyLasers.splice(index, 1);
+              return;
+            }
+            if (laser.mesh.position.length() > 300) {
+              scene.remove(laser.mesh);
+              enemyLasers.splice(index, 1);
+            }
+          });
 
           let liveEnemies = 0;
           let nearestEnemy = null;
@@ -231,6 +274,9 @@ FLIGHT_HTML = dedent(
             enemy.mesh.position.y += Math.cos(drift * 1.3) * dt * 2.4;
             enemy.mesh.position.z += Math.sin(drift * 0.7) * dt * 4.8;
             enemy.mesh.lookAt(ship.position);
+            if (Math.sin(drift * 2.1 + index) > 0.995) {
+              fireEnemyLaser(enemy.mesh.position.clone(), ship.position.clone());
+            }
             const distance = enemy.mesh.position.distanceTo(ship.position);
             if (distance < nearestDistance) {
               nearestDistance = distance;
@@ -269,6 +315,9 @@ FLIGHT_HTML = dedent(
           attitudeReadout.textContent = `Pitch ${state.pitch.toFixed(2)} · Roll ${state.roll.toFixed(2)} · Yaw ${state.yaw.toFixed(2)}`;
           targetReadout.textContent = nearestEnemy ? `Target locked · ${nearestDistance.toFixed(1)}m` : "Target locked: none";
           waveReadout.textContent = `Wave ${state.wave} · Enemies ${liveEnemies}`;
+          if (targetBox) {
+            targetBox.style.opacity = nearestEnemy ? "1" : "0.18";
+          }
 
           renderer.render(scene, camera);
           window.requestAnimationFrame(animate);

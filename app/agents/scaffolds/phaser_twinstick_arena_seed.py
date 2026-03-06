@@ -20,10 +20,12 @@ TOPDOWN_HTML = dedent(
         #hud strong { font-size: 26px; color: #f472b6; }
         #hud span { font-size: 13px; color: #dbeafe; }
         #tips { position: absolute; top: 18px; right: 18px; z-index: 20; padding: 12px 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(148, 163, 184, 0.24); font-size: 12px; line-height: 1.45; pointer-events: none; }
+        #crosshair { position: absolute; width: 22px; height: 22px; border: 2px solid rgba(34, 211, 238, 0.75); border-radius: 999px; transform: translate(-50%, -50%); pointer-events: none; z-index: 15; box-shadow: 0 0 16px rgba(34, 211, 238, 0.2); }
       </style>
     </head>
     <body>
       <div id="game-root">
+        <div id="crosshair"></div>
         <div id="hud">
           <span>TWIN-STICK ARENA</span>
           <strong id="wave-readout">Wave 1</strong>
@@ -47,6 +49,7 @@ TOPDOWN_HTML = dedent(
         window.__iis_game_boot_ok = false;
         // Phaser runs its own requestAnimationFrame loop internally.
 
+        const crosshair = document.getElementById("crosshair");
         const waveReadout = document.getElementById("wave-readout");
         const statusReadout = document.getElementById("status-readout");
         const comboReadout = document.getElementById("combo-readout");
@@ -76,7 +79,7 @@ TOPDOWN_HTML = dedent(
           }
         };
 
-        let sceneRef, player, cursors, keys, bullets, enemies, pointerAim = { x: 0, y: 0 };
+        let sceneRef, player, cursors, keys, bullets, enemies, pointerAim = { x: 0, y: 0 }, dashGhosts;
         const game = new Phaser.Game(config);
 
         function create() {
@@ -97,6 +100,9 @@ TOPDOWN_HTML = dedent(
 
           this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width - 120, this.scale.height - 120, 0x081225, 1)
             .setStrokeStyle(2, 0x1e3a8a, 0.55);
+          for (let i = 0; i < 6; i += 1) {
+            this.add.rectangle(180 + i * 150, 170 + (i % 2) * 260, 48, 16, 0x0f172a, 1).setStrokeStyle(2, 0x334155, 0.45);
+          }
 
           player = this.physics.add.image(this.scale.width / 2, this.scale.height / 2, "player-core");
           player.setCollideWorldBounds(true);
@@ -104,12 +110,17 @@ TOPDOWN_HTML = dedent(
 
           bullets = this.physics.add.group();
           enemies = this.physics.add.group();
+          dashGhosts = this.add.group();
 
           cursors = this.input.keyboard.createCursorKeys();
           keys = this.input.keyboard.addKeys("W,A,S,D,SHIFT,R");
           this.input.on("pointermove", (pointer) => {
             pointerAim.x = pointer.worldX;
             pointerAim.y = pointer.worldY;
+            if (crosshair) {
+              crosshair.style.left = `${pointer.x}px`;
+              crosshair.style.top = `${pointer.y}px`;
+            }
           });
           this.input.on("pointerdown", () => fireBullet());
 
@@ -170,6 +181,7 @@ TOPDOWN_HTML = dedent(
           sceneRef.physics.velocityFromRotation(angle, 620, bullet.body.velocity);
           bullet.setScale(0.75);
           bullet.lifeSpan = 1200;
+          sceneRef.add.circle(player.x, player.y, 12, 0x22d3ee, 0.2).setBlendMode(Phaser.BlendModes.ADD);
           gameState.fireCooldown = 0.12;
         }
 
@@ -179,6 +191,15 @@ TOPDOWN_HTML = dedent(
           const angle = player.rotation;
           sceneRef.physics.velocityFromRotation(angle, 620, player.body.velocity);
           statusReadout.textContent = "Dash committed · reposition and return fire";
+          const ghost = sceneRef.add.circle(player.x, player.y, 18, 0x22d3ee, 0.18);
+          dashGhosts.add(ghost);
+          sceneRef.tweens.add({
+            targets: ghost,
+            alpha: 0,
+            scale: 2.1,
+            duration: 220,
+            onComplete: () => ghost.destroy(),
+          });
         }
 
         function spawnWave(wave) {
@@ -204,6 +225,7 @@ TOPDOWN_HTML = dedent(
             gameState.combo += 1;
             window.IISLeaderboard.postScore(100 + gameState.combo * 25);
             statusReadout.textContent = "Target broken · keep the combo alive";
+            sceneRef.add.circle(enemy.x, enemy.y, 24, 0xfb7185, 0.28).setBlendMode(Phaser.BlendModes.ADD);
             updateHud();
           }
         }
