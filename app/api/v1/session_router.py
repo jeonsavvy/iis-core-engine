@@ -731,6 +731,29 @@ async def _execute_prompt_run(
             ConversationMessage(role=str(msg.get("role", "user")), content=str(msg.get("content", "")))
             for msg in history_rows
         ]
+        genre_brief = build_genre_brief(user_prompt=prompt, genre_hint=str(session.get("genre", "")))
+        scaffold_seed = scaffold_seed_for_brief(genre_brief)
+        scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
+        if scaffold is not None and not str(session.get("current_html", "")).strip():
+            store.update_session_html(session_id, scaffold.html, score=0)
+            store.add_session_event(
+                session_id=session_id,
+                event_type="scaffold_materialized",
+                agent="codegen",
+                action="generate",
+                summary=f"Materialized scaffold {scaffold.key}",
+                decision_reason="deterministic_scaffold_baseline",
+                input_signal=prompt[:500],
+                change_impact="baseline_draft_created",
+                confidence=1.0,
+                metadata={
+                    "run_id": run_id,
+                    "genre_brief": genre_brief,
+                    "scaffold_key": scaffold.key,
+                    "scaffold_version": scaffold.version,
+                    "generation_mode": "deterministic_scaffold",
+                },
+            )
 
         agent_loop = getattr(app.state, "agent_loop", None)
         if agent_loop is None:

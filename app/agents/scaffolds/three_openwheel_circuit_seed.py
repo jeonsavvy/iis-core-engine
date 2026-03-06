@@ -52,6 +52,10 @@ RACING_HTML = dedent(
         const lapStateEl = document.getElementById("lap-state");
         const speedStateEl = document.getElementById("speed-state");
         const hintStateEl = document.getElementById("hint-state");
+        const statusStateEl = document.createElement("span");
+        statusStateEl.id = "status-state";
+        statusStateEl.style.color = "#fbbf24";
+        document.getElementById("hud").appendChild(statusStateEl);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -108,6 +112,21 @@ RACING_HTML = dedent(
           const rightPylon = leftPylon.clone();
           rightPylon.position.copy(point).add(new THREE.Vector3(4.4, 0.75, 0));
           scene.add(rightPylon);
+        });
+        const railMaterial = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, roughness: 0.75, metalness: 0.08 });
+        roadPoints.filter((_, index) => index % 10 === 0).forEach((point) => {
+          const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.2, 1.5), railMaterial);
+          leftRail.position.copy(point).add(new THREE.Vector3(-4.7, 0.62, 0));
+          scene.add(leftRail);
+          const rightRail = leftRail.clone();
+          rightRail.position.copy(point).add(new THREE.Vector3(4.7, 0.62, 0));
+          scene.add(rightRail);
+          const leftCurb = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.06, 1.9), new THREE.MeshStandardMaterial({ color: 0xc81e3a }));
+          leftCurb.position.copy(point).add(new THREE.Vector3(-3.9, 0.04, 0));
+          scene.add(leftCurb);
+          const rightCurb = leftCurb.clone();
+          rightCurb.position.copy(point).add(new THREE.Vector3(3.9, 0.04, 0));
+          scene.add(rightCurb);
         });
 
         const ground = new THREE.Mesh(
@@ -197,6 +216,8 @@ RACING_HTML = dedent(
           steerVelocity: 0,
           accelRate: 22,
           brakeRate: 28,
+          offTrackTimer: 0,
+          wrongWayTimer: 0,
         };
 
         function resetRace() {
@@ -209,10 +230,13 @@ RACING_HTML = dedent(
           checkpointState.lapCount = 1;
           checkpointState.lapStartMs = performance.now();
           checkpointState.lapTimerMs = 0;
+          carState.offTrackTimer = 0;
+          carState.wrongWayTimer = 0;
           checkpointMarkers.forEach(({ marker }, index) => {
             marker.material.color.set(index === 0 ? 0x34d399 : 0x7c3aed);
           });
           hintStateEl.textContent = "Reset complete — attack the circuit again";
+          statusStateEl.textContent = "TRACK LOCKED";
         }
 
         function onKey(event, pressed) {
@@ -264,6 +288,25 @@ RACING_HTML = dedent(
           return total.toFixed(3);
         }
 
+        function nearestTrackSample(position) {
+          let bestIndex = 0;
+          let bestDistance = Infinity;
+          for (let index = 0; index < roadPoints.length; index += 1) {
+            const point = roadPoints[index];
+            const dx = point.x - position.x;
+            const dz = point.z - position.z;
+            const distance = dx * dx + dz * dz;
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestIndex = index;
+            }
+          }
+          const point = roadPoints[bestIndex];
+          const next = roadPoints[(bestIndex + 1) % roadPoints.length];
+          const tangent = next.clone().sub(point).normalize();
+          return { point, tangent, distance: Math.sqrt(bestDistance) };
+        }
+
         let lastTime = performance.now();
         function animate(nowMs) {
           const dt = Math.min(0.033, (nowMs - lastTime) / 1000);
@@ -281,20 +324,51 @@ RACING_HTML = dedent(
           const forward = new THREE.Vector3(Math.sin(carState.heading), 0, Math.cos(carState.heading));
           carState.position.addScaledVector(forward, carState.speed * dt * 0.32);
 
-          const nearest = roadPoints.reduce((best, point) => {
-            const dist = point.distanceToSquared(carState.position);
-            return dist < best.dist ? { point, dist } : best;
-          }, { point: roadPoints[0], dist: Infinity });
-          const pull = nearest.point.clone().sub(carState.position).multiplyScalar(0.04);
+          const nearest = nearestTrackSample(carState.position);
+          const pull = nearest.point.clone().sub(carState.position).multiplyScalar(0.055);
           carState.position.add(pull);
+          const offTrack = nearest.distance > 4.65;
+          if (offTrack) {
+            carState.offTrackTimer += dt;
+            carState.speed *= 0.93;
+            carState.steerVelocity *= 1.08;
+          } else {
+            carState.offTrackTimer = Math.max(0, carState.offTrackTimer - dt * 2.5);
+          }
+          if (carState.offTrackTimer > 1.4) {
+            carState.position.lerp(nearest.point, 0.18);
+            hintStateEl.textContent = "OFF TRACK · return to the circuit";
+          }
+          if (nearest.distance > 6.4) {
+            carState.position.copy(nearest.point.clone().add(new THREE.Vector3(0, 0, 0)));
+            carState.speed *= 0.76;
+          }
+          if (carState.offTrackTimer > 2.8) {
+            const restartPoint = checkpointMarkers[Math.max(0, checkpointState.currentCheckpointIndex - 1)]?.position ?? trackCurve.getPointAt(0.0);
+            carState.position.copy(restartPoint);
+            carState.speed = 0;
+            carState.heading = Math.atan2(nearest.tangent.x, nearest.tangent.z);
+            carState.offTrackTimer = 0;
+            hintStateEl.textContent = "OFF TRACK RESET · attack the lap again";
+          }
+
+          const wrongWay = forward.dot(nearest.tangent) < -0.12;
+          if (wrongWay) {
+            carState.wrongWayTimer += dt;
+            carState.speed *= 0.985;
+          } else {
+            carState.wrongWayTimer = Math.max(0, carState.wrongWayTimer - dt * 2);
+          }
+          statusStateEl.textContent = wrongWay ? "WRONG WAY" : offTrack ? "OFF TRACK" : "TRACK LOCKED";
 
           car.position.copy(carState.position);
           car.position.y = 0.18;
           car.rotation.y = carState.heading;
 
-          const cameraOffset = new THREE.Vector3(0, 2.35, -6.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
-          camera.position.copy(car.position).add(cameraOffset);
-          camera.lookAt(car.position.clone().add(forward.clone().multiplyScalar(16)).add(new THREE.Vector3(0, 0.9, 0)));
+          const cameraOffset = new THREE.Vector3(0, 2.0, -5.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+          const desiredCamera = car.position.clone().add(cameraOffset);
+          camera.position.lerp(desiredCamera, 0.12);
+          camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(18)).add(new THREE.Vector3(0, 1.0, 0)));
 
           checkpointState.lapTimerMs = nowMs - checkpointState.lapStartMs;
           updateCheckpoints(nowMs);
