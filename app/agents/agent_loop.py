@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.codegen_agent import CodegenAgent, ConversationMessage
+from app.agents.genre_acceptance import validate_genre_acceptance
 from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
 from app.agents.scaffolds import get_scaffold_seed
 from app.agents.playtester_agent import PlaytesterAgent, PlaytestResult
@@ -308,11 +309,31 @@ class AgentLoop:
         scaffold_key = scaffold.key if scaffold else None
         scaffold_version = scaffold.version if scaffold else None
         generation_mode = "repair_from_scaffold" if is_modification and scaffold else ("scaffold_seeded" if scaffold else "blank")
+        baseline_html = scaffold.html if scaffold is not None and not is_modification else current_html
+
+        if scaffold is not None and not is_modification:
+            activities.append(
+                AgentActivity(
+                    agent="codegen",
+                    action="generate",
+                    summary=f"Materialized scaffold baseline {scaffold.key}",
+                    decision_reason="deterministic_scaffold_baseline",
+                    input_signal=user_prompt[:500],
+                    change_impact="baseline_draft_created",
+                    confidence=1.0,
+                    metadata={
+                        "genre_brief": genre_brief,
+                        "scaffold_key": scaffold_key,
+                        "scaffold_version": scaffold_version,
+                        "generation_mode": "deterministic_scaffold",
+                    },
+                )
+            )
 
         codegen_result = await self._codegen.generate(
             user_prompt=user_prompt,
             history=history,
-            current_html=current_html,
+            current_html=baseline_html,
             genre_hint=genre_hint,
             image_attachment=image_attachment,
         )
@@ -341,7 +362,7 @@ class AgentLoop:
 
         if codegen_result.error:
             return AgentLoopResult(
-                html=current_html,
+                html=baseline_html,
                 activities=activities,
                 final_score=0,
                 generation_source=codegen_result.generation_source,
@@ -351,6 +372,35 @@ class AgentLoop:
             )
 
         final_html = codegen_result.html
+        if scaffold is not None and not is_modification:
+            acceptance = validate_genre_acceptance(
+                archetype=str(genre_brief.get("archetype", "")),
+                html=final_html,
+            )
+            if not acceptance.ok:
+                activities.append(
+                    AgentActivity(
+                        agent="codegen",
+                        action="refine",
+                        summary=f"Rejected scaffold specialization: {', '.join(acceptance.failures[:4])}",
+                        decision_reason="scaffold_specialization_rejected",
+                        input_signal=user_prompt[:500],
+                        change_impact="reverted_to_scaffold_baseline",
+                        confidence=0.95,
+                        error_code="scaffold_specialization_rejected",
+                        metadata={
+                            "genre_brief": genre_brief,
+                            "scaffold_key": scaffold_key,
+                            "scaffold_version": scaffold_version,
+                            "generation_mode": "scaffold_reverted_to_baseline",
+                            "acceptance_report": {
+                                "failures": acceptance.failures,
+                                "warnings": acceptance.warnings,
+                            },
+                        },
+                    )
+                )
+                final_html = baseline_html
         refinement_rounds = 0
         latest_issues: list[LoopIssue] = []
 

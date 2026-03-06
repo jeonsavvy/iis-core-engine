@@ -7,6 +7,7 @@ import pytest
 
 from app.agents.agent_loop import AgentLoop
 from app.agents.codegen_agent import CodegenResult
+from app.agents.scaffolds import get_scaffold_seed
 from app.agents.playtester_agent import PlaytestResult
 from app.agents.visual_qa_agent import VisualQAResult
 
@@ -140,3 +141,26 @@ async def test_agent_loop_fails_when_fatal_runtime_remains() -> None:
 
     assert result.error.startswith("fatal_runtime_unresolved:")
     assert result.refinement_rounds == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_reverts_to_scaffold_when_specialization_breaks_genre() -> None:
+    codegen = StubCodegen(
+        results=[CodegenResult(html="<html><body>terrain demo only</body></html>", generation_source="vertex", model_name="gemini")]
+    )
+    visual = StubVisualQA(results=[VisualQAResult(ok=True, score=0, feedback="visual fine", issues=[])])
+    playtester = StubPlaytester(results=[PlaytestResult(boots_ok=True, has_errors=False, issues=[], fatal_issues=[], feedback="ok", score=0)])
+    loop = AgentLoop(
+        codegen=cast(Any, codegen),
+        visual_qa=cast(Any, visual),
+        playtester=cast(Any, playtester),
+    )
+
+    result = await loop.run(
+        user_prompt="오픈휠 레이스카로 서킷을 주행하며 랩타임을 기록하는 풀 3D 레이싱 게임 만들어줘"
+    )
+
+    seed = get_scaffold_seed("three_openwheel_circuit_seed")
+    assert seed is not None
+    assert result.html == seed.html
+    assert any(activity.error_code == "scaffold_specialization_rejected" for activity in result.activities)
