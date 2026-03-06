@@ -206,6 +206,39 @@ def _build_repair_prompt(
     return "\n".join(lines)
 
 
+def _append_acceptance_reject_activity(
+    *,
+    activities: list[AgentActivity],
+    user_prompt: str,
+    genre_brief: dict[str, Any],
+    scaffold_key: str | None,
+    scaffold_version: str | None,
+    acceptance_failures: list[str],
+    generation_mode: str,
+) -> None:
+    activities.append(
+        AgentActivity(
+            agent="codegen",
+            action="refine",
+            summary=f"Rejected scaffold specialization: {', '.join(acceptance_failures[:4])}",
+            decision_reason="scaffold_specialization_rejected",
+            input_signal=user_prompt[:500],
+            change_impact="reverted_to_scaffold_baseline",
+            confidence=0.95,
+            error_code="scaffold_specialization_rejected",
+            metadata={
+                "genre_brief": genre_brief,
+                "scaffold_key": scaffold_key,
+                "scaffold_version": scaffold_version,
+                "generation_mode": generation_mode,
+                "acceptance_report": {
+                    "failures": acceptance_failures,
+                },
+            },
+        )
+    )
+
+
 class AgentLoop:
     """Multi-agent loop orchestrator."""
 
@@ -381,27 +414,14 @@ class AgentLoop:
                 html=final_html,
             )
             if not acceptance.ok:
-                activities.append(
-                    AgentActivity(
-                        agent="codegen",
-                        action="refine",
-                        summary=f"Rejected scaffold specialization: {', '.join(acceptance.failures[:4])}",
-                        decision_reason="scaffold_specialization_rejected",
-                        input_signal=user_prompt[:500],
-                        change_impact="reverted_to_scaffold_baseline",
-                        confidence=0.95,
-                        error_code="scaffold_specialization_rejected",
-                        metadata={
-                            "genre_brief": genre_brief,
-                            "scaffold_key": scaffold_key,
-                            "scaffold_version": scaffold_version,
-                            "generation_mode": "scaffold_reverted_to_baseline",
-                            "acceptance_report": {
-                                "failures": acceptance.failures,
-                                "warnings": acceptance.warnings,
-                            },
-                        },
-                    )
+                _append_acceptance_reject_activity(
+                    activities=activities,
+                    user_prompt=user_prompt,
+                    genre_brief=genre_brief,
+                    scaffold_key=scaffold_key,
+                    scaffold_version=scaffold_version,
+                    acceptance_failures=acceptance.failures,
+                    generation_mode="scaffold_reverted_to_baseline",
                 )
                 final_html = baseline_html
                 reverted_to_baseline = True
@@ -479,9 +499,28 @@ class AgentLoop:
                         refinement_rounds=refinement_rounds,
                         error=refine_result.error,
                         reverted_to_baseline=reverted_to_baseline,
-                    )
+                )
 
                 final_html = refine_result.html
+                if scaffold is not None:
+                    refined_acceptance = validate_genre_acceptance(
+                        archetype=str(genre_brief.get("archetype", "")),
+                        html=final_html,
+                    )
+                    if not refined_acceptance.ok:
+                        _append_acceptance_reject_activity(
+                            activities=activities,
+                            user_prompt=user_prompt,
+                            genre_brief=genre_brief,
+                            scaffold_key=scaffold_key,
+                            scaffold_version=scaffold_version,
+                            acceptance_failures=refined_acceptance.failures,
+                            generation_mode="repair_from_scaffold",
+                        )
+                        final_html = baseline_html
+                        reverted_to_baseline = True
+                        latest_issues = []
+                        break
                 refinement_rounds += 1
                 activities.append(
                     AgentActivity(

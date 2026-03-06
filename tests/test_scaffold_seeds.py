@@ -34,6 +34,9 @@ def test_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "yaw" in html
     assert "throttle" in html
     assert "reticle" in html
+    assert "target locked" in html or "lockstrength" in html
+    assert "enemylasers" in html or "fireenemylaser" in html
+    assert "boostcharge" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
 
@@ -48,5 +51,7 @@ def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     assert "wave" in html
     assert "aim" in html
     assert "fire" in html
+    assert "enemybullets" in html or "fireenemybullet" in html
+    assert "coverblocks" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html

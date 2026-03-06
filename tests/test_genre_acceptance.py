@@ -31,3 +31,19 @@ def test_racing_terrain_demo_fails_acceptance() -> None:
     report = validate_racing_acceptance("<html><body>mountain grass sky requestAnimationFrame throttle brake</body></html>")
     assert report.ok is False
     assert "terrain_demo_regression" in report.failures
+
+
+def test_flight_corridor_demo_fails_acceptance() -> None:
+    report = validate_flight_acceptance(
+        "<html><body>pitch roll yaw throttle requestAnimationFrame corridor shooter autoscroll reticle</body></html>"
+    )
+    assert report.ok is False
+    assert "corridor_regression" in report.failures
+
+
+def test_topdown_flat_shooter_fails_acceptance() -> None:
+    report = validate_topdown_acceptance(
+        "<html><body>phaser dash firebullet requestAnimationFrame crosshair 8-way shooter</body></html>"
+    )
+    assert report.ok is False
+    assert "flat_shooter_regression" in report.failures

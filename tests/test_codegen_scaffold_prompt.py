@@ -26,6 +26,8 @@ def test_initial_racing_prompt_uses_hard_scaffold_html() -> None:
     assert "lap timer" in prompt.lower() or "lap-timer" in prompt.lower()
     assert "endless obstacle runner" in prompt.lower()
     assert "First frame requirement" in prompt
+    assert "extending a production baseline" in prompt.lower()
+    assert "Preserve system" in prompt
 
 
 def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
@@ -40,6 +42,7 @@ def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
     assert "three_space_dogfight_seed" in prompt
     assert "Base scaffold HTML:" in prompt
     assert "forward auto-scroll shooter" in prompt.lower()
+    assert "extending a production baseline" in prompt.lower()
 
 
 def test_initial_topdown_prompt_uses_hard_scaffold_html() -> None:
@@ -54,3 +57,4 @@ def test_initial_topdown_prompt_uses_hard_scaffold_html() -> None:
     assert "phaser_twinstick_arena_seed" in prompt
     assert "Base scaffold HTML:" in prompt
     assert "single-button clicker" in prompt.lower()
+    assert "extending a production baseline" in prompt.lower()

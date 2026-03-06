@@ -254,10 +254,17 @@ class CodegenAgent:
                 for item in genre_brief.get("first_frame_requirements", [])
                 if str(item).strip()
             ]
+            preserve_systems = [
+                str(item).strip()
+                for item in genre_brief.get("must_have_mechanics", [])
+                if str(item).strip()
+            ]
             degradation_section = "".join(f"- Degradation guard: {guard}\n" for guard in degradation_guards)
             first_frame_section = "".join(f"- First frame requirement: {requirement}\n" for requirement in first_frame_requirements)
+            preserve_section = "".join(f"- Preserve system: {item}\n" for item in preserve_systems)
             return (
                 "You are a principal web game engineer.\n"
+                "You are extending a production baseline, not inventing a new game from scratch.\n"
                 "Specialize and expand the provided hard scaffold into a polished browser game.\n\n"
                 f"{history_section}"
                 f"{image_context}"
@@ -268,12 +275,14 @@ class CodegenAgent:
                 "Generation mode: initial_from_scaffold\n\n"
                 "Rules:\n"
                 "- Start from the scaffold HTML below; do not ignore it\n"
-                "- Preserve the scaffold's core systems, controls, loop, and HUD contract\n"
+                "- Preserve the scaffold's core systems, controls, loop, HUD contract, and genre-defining structure\n"
+                "- Keep localized changes; do not replace the whole architecture\n"
                 "- Expand the fantasy, polish, track/enemy layout, and presentation to fit the user request\n"
                 "- Prefer extending the scaffold over rewriting it from scratch\n"
                 "- Keep window.__iis_game_boot_ok = true when ready\n"
                 "- Keep window.IISLeaderboard contract\n"
                 "- Never violate degradation guards from the genre brief\n"
+                f"{preserve_section}"
                 f"{degradation_section}"
                 "- The first visible frame must sell the fantasy immediately\n"
                 f"{first_frame_section}"

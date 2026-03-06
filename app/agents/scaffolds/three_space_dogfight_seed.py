@@ -42,7 +42,9 @@ FLIGHT_HTML = dedent(
           <strong id="throttle-readout">THROTTLE 0%</strong>
           <span id="attitude-readout">Pitch 0 · Roll 0 · Yaw 0</span>
           <span id="target-readout">Target locked: none</span>
+          <span id="lock-strength-readout">Lock 0%</span>
           <span id="wave-readout">Wave 1 · Enemies 3</span>
+          <span id="shield-readout">Shield 100%</span>
           <span id="status-readout">Boost ready · Cannons online</span>
         </div>
         <div id="controls">
@@ -66,7 +68,9 @@ FLIGHT_HTML = dedent(
         const throttleReadout = document.getElementById("throttle-readout");
         const attitudeReadout = document.getElementById("attitude-readout");
         const targetReadout = document.getElementById("target-readout");
+        const lockStrengthReadout = document.getElementById("lock-strength-readout");
         const waveReadout = document.getElementById("wave-readout");
+        const shieldReadout = document.getElementById("shield-readout");
         const statusReadout = document.getElementById("status-readout");
         const targetBox = document.getElementById("target-box");
 
@@ -134,7 +138,7 @@ FLIGHT_HTML = dedent(
           );
           enemy.position.set((i - 1) * 12, (i % 2 === 0 ? 3 : -3), -40 - i * 10);
           enemyGroup.add(enemy);
-          enemies.push({ mesh: enemy, hp: 4, pursuitSeed: Math.random() * Math.PI * 2 });
+          enemies.push({ mesh: enemy, hp: 4, pursuitSeed: Math.random() * Math.PI * 2, fireCooldown: 0.8 + i * 0.35 });
         }
 
         const projectileMaterial = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
@@ -151,6 +155,8 @@ FLIGHT_HTML = dedent(
           roll: 0,
           yaw: 0,
           boostCharge: 1,
+          shield: 100,
+          targetLockStrength: 0,
           fireCooldown: 0,
           wave: 1,
         };
@@ -163,10 +169,13 @@ FLIGHT_HTML = dedent(
           state.roll = 0;
           state.yaw = 0;
           state.boostCharge = 1;
+          state.shield = 100;
+          state.targetLockStrength = 0;
           state.fireCooldown = 0;
           state.wave = 1;
           enemies.forEach((enemy, index) => {
             enemy.hp = 4;
+            enemy.fireCooldown = 0.8 + index * 0.35;
             enemy.mesh.visible = true;
             enemy.mesh.position.set((index - 1) * 12, (index % 2 === 0 ? 3 : -3), -40 - index * 10);
           });
@@ -233,6 +242,8 @@ FLIGHT_HTML = dedent(
           const throttleValue = THREE.MathUtils.clamp(state.throttle * boostFactor, 0.22, 1.0);
           const rotation = new THREE.Euler(state.pitch, state.yaw, state.roll, "YXZ");
           ship.quaternion.setFromEuler(rotation);
+          engineTrail.scale.set(1, 1 + (boostFactor - 1) * 1.4, 1 + (boostFactor - 1) * 0.55);
+          engineTrail.material.opacity = boostFactor > 1.0 ? 0.68 : 0.45;
 
           const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quaternion);
           state.velocity.lerp(forward.multiplyScalar(40 * throttleValue), 0.8 * dt);
@@ -252,7 +263,8 @@ FLIGHT_HTML = dedent(
           enemyLasers.forEach((laser, index) => {
             laser.mesh.position.addScaledVector(laser.velocity, dt);
             if (laser.mesh.position.distanceTo(ship.position) < 1.4) {
-              statusReadout.textContent = "Incoming hit · break line and recover";
+              state.shield = Math.max(0, state.shield - 14);
+              statusReadout.textContent = "Incoming hit · shields absorbing fire";
               scene.remove(laser.mesh);
               enemyLasers.splice(index, 1);
               return;
@@ -274,8 +286,10 @@ FLIGHT_HTML = dedent(
             enemy.mesh.position.y += Math.cos(drift * 1.3) * dt * 2.4;
             enemy.mesh.position.z += Math.sin(drift * 0.7) * dt * 4.8;
             enemy.mesh.lookAt(ship.position);
-            if (Math.sin(drift * 2.1 + index) > 0.995) {
+            enemy.fireCooldown -= dt;
+            if (enemy.fireCooldown <= 0) {
               fireEnemyLaser(enemy.mesh.position.clone(), ship.position.clone());
+              enemy.fireCooldown = 1.25 + Math.random() * 0.8;
             }
             const distance = enemy.mesh.position.distanceTo(ship.position);
             if (distance < nearestDistance) {
@@ -301,6 +315,7 @@ FLIGHT_HTML = dedent(
             state.wave += 1;
             enemies.forEach((enemy, index) => {
               enemy.hp = 4 + state.wave;
+              enemy.fireCooldown = 0.7 + index * 0.22;
               enemy.mesh.visible = true;
               enemy.mesh.position.set((index - 1) * 16, (index - 1) * 2.5, -48 - index * 12);
             });
@@ -308,15 +323,30 @@ FLIGHT_HTML = dedent(
           }
 
           const cameraOffset = new THREE.Vector3(0, 3.2, 9.0).applyQuaternion(ship.quaternion);
-          camera.position.copy(ship.position).add(cameraOffset);
-          camera.lookAt(ship.position.clone().add(forward.clone().multiplyScalar(28)));
+          const desiredCamera = ship.position.clone().add(cameraOffset);
+          camera.position.lerp(desiredCamera, Math.min(1, dt * 4.4));
+          camera.fov = THREE.MathUtils.lerp(camera.fov, boostFactor > 1.0 ? 76 : 70, Math.min(1, dt * 3.5));
+          camera.updateProjectionMatrix();
+          camera.lookAt(ship.position.clone().add(forward.clone().multiplyScalar(28)).add(state.velocity.clone().multiplyScalar(0.08)));
 
           throttleReadout.textContent = `THROTTLE ${Math.round(throttleValue * 100)}%`;
           attitudeReadout.textContent = `Pitch ${state.pitch.toFixed(2)} · Roll ${state.roll.toFixed(2)} · Yaw ${state.yaw.toFixed(2)}`;
+          state.targetLockStrength = nearestEnemy ? Math.max(0, Math.min(1, 1 - nearestDistance / 80)) : 0;
           targetReadout.textContent = nearestEnemy ? `Target locked · ${nearestDistance.toFixed(1)}m` : "Target locked: none";
+          lockStrengthReadout.textContent = `Lock ${Math.round(state.targetLockStrength * 100)}%`;
           waveReadout.textContent = `Wave ${state.wave} · Enemies ${liveEnemies}`;
+          shieldReadout.textContent = `Shield ${Math.round(state.shield)}%`;
           if (targetBox) {
-            targetBox.style.opacity = nearestEnemy ? "1" : "0.18";
+            if (nearestEnemy) {
+              const projected = nearestEnemy.position.clone().project(camera);
+              const screenX = ((projected.x + 1) * 0.5) * window.innerWidth;
+              const screenY = ((-projected.y + 1) * 0.5) * window.innerHeight;
+              targetBox.style.left = `${screenX}px`;
+              targetBox.style.top = `${screenY}px`;
+              targetBox.style.opacity = `${Math.max(0.35, state.targetLockStrength)}`;
+            } else {
+              targetBox.style.opacity = "0.18";
+            }
           }
 
           renderer.render(scene, camera);
@@ -337,7 +367,7 @@ SEED = ScaffoldSeed(
     key="three_space_dogfight_seed",
     archetype="flight_shooter_space_dogfight_3d",
     engine_mode="3d_three",
-    version="v1",
+    version="v2",
     html=FLIGHT_HTML,
     acceptance_tags=[
         "three",
@@ -348,8 +378,12 @@ SEED = ScaffoldSeed(
         "reticle",
         "primary_fire",
         "enemy_pursuit",
+        "target_lock",
+        "enemy_attack_loop",
+        "boost_feedback",
+        "space_depth",
         "requestAnimationFrame",
         "boot_flag",
     ],
-    summary="Three.js space dogfight baseline with attitude controls, targeting HUD, projectile combat, and enemy pursuit loop.",
+    summary="Three.js space dogfight baseline with attitude controls, target lock HUD, enemy attack loop, boost feedback, and layered space depth.",
 )

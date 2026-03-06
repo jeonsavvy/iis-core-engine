@@ -164,3 +164,37 @@ async def test_agent_loop_reverts_to_scaffold_when_specialization_breaks_genre()
     assert seed is not None
     assert result.html == seed.html
     assert any(activity.error_code == "scaffold_specialization_rejected" for activity in result.activities)
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_reverts_flight_specialization_when_genre_breaks() -> None:
+    codegen = StubCodegen(
+        results=[CodegenResult(html="<html><body>autoscroll corridor shooter</body></html>", generation_source="vertex", model_name="gemini")]
+    )
+    visual = StubVisualQA(results=[VisualQAResult(ok=True, score=0, feedback="visual fine", issues=[])])
+    playtester = StubPlaytester(results=[PlaytestResult(boots_ok=True, has_errors=False, issues=[], fatal_issues=[], feedback="ok", score=0)])
+    loop = AgentLoop(codegen=cast(Any, codegen), visual_qa=cast(Any, visual), playtester=cast(Any, playtester))
+
+    result = await loop.run(user_prompt="우주 도그파이트에 초점을 맞춘 풀 3D 플라이트 슈팅 게임 만들어줘")
+
+    seed = get_scaffold_seed("three_space_dogfight_seed")
+    assert seed is not None
+    assert result.html == seed.html
+    assert result.reverted_to_baseline is True
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_reverts_topdown_specialization_when_genre_breaks() -> None:
+    codegen = StubCodegen(
+        results=[CodegenResult(html="<html><body>clicker 8-way shooter</body></html>", generation_source="vertex", model_name="gemini")]
+    )
+    visual = StubVisualQA(results=[VisualQAResult(ok=True, score=0, feedback="visual fine", issues=[])])
+    playtester = StubPlaytester(results=[PlaytestResult(boots_ok=True, has_errors=False, issues=[], fatal_issues=[], feedback="ok", score=0)])
+    loop = AgentLoop(codegen=cast(Any, codegen), visual_qa=cast(Any, visual), playtester=cast(Any, playtester))
+
+    result = await loop.run(user_prompt="트윈스틱 이동과 에임, 대시, 웨이브 전투가 있는 탑뷰 슈팅 게임 만들어줘")
+
+    seed = get_scaffold_seed("phaser_twinstick_arena_seed")
+    assert seed is not None
+    assert result.html == seed.html
+    assert result.reverted_to_baseline is True

@@ -31,6 +31,7 @@ TOPDOWN_HTML = dedent(
           <strong id="wave-readout">Wave 1</strong>
           <span id="status-readout">Dash ready · Hold the arena</span>
           <span id="combo-readout">Combo 0 · Enemies 0</span>
+          <span id="threat-readout">Threat 0 · Dash ready</span>
         </div>
         <div id="tips">
           <b>Controls</b><br />
@@ -53,6 +54,7 @@ TOPDOWN_HTML = dedent(
         const waveReadout = document.getElementById("wave-readout");
         const statusReadout = document.getElementById("status-readout");
         const comboReadout = document.getElementById("combo-readout");
+        const threatReadout = document.getElementById("threat-readout");
 
         const gameState = {
           wave: 1,
@@ -60,6 +62,7 @@ TOPDOWN_HTML = dedent(
           canDash: true,
           dashCooldown: 0,
           fireCooldown: 0,
+          threat: 0,
         };
 
         const config = {
@@ -79,7 +82,7 @@ TOPDOWN_HTML = dedent(
           }
         };
 
-        let sceneRef, player, cursors, keys, bullets, enemies, pointerAim = { x: 0, y: 0 }, dashGhosts;
+        let sceneRef, player, cursors, keys, bullets, enemyBullets, enemies, coverBlocks, pointerAim = { x: 0, y: 0 }, dashGhosts;
         const game = new Phaser.Game(config);
 
         function create() {
@@ -109,8 +112,23 @@ TOPDOWN_HTML = dedent(
           player.body.setCircle(14);
 
           bullets = this.physics.add.group();
+          enemyBullets = this.physics.add.group();
           enemies = this.physics.add.group();
+          coverBlocks = this.physics.add.staticGroup();
           dashGhosts = this.add.group();
+
+          const arenaCoverLayout = [
+            [this.scale.width * 0.28, this.scale.height * 0.32, 90, 28],
+            [this.scale.width * 0.72, this.scale.height * 0.34, 90, 28],
+            [this.scale.width * 0.48, this.scale.height * 0.58, 130, 30],
+            [this.scale.width * 0.22, this.scale.height * 0.72, 70, 22],
+            [this.scale.width * 0.78, this.scale.height * 0.72, 70, 22],
+          ];
+          arenaCoverLayout.forEach(([x, y, width, height]) => {
+            const cover = this.add.rectangle(x, y, width, height, 0x0f172a, 1).setStrokeStyle(2, 0x475569, 0.55);
+            this.physics.add.existing(cover, true);
+            coverBlocks.add(cover);
+          });
 
           cursors = this.input.keyboard.createCursorKeys();
           keys = this.input.keyboard.addKeys("W,A,S,D,SHIFT,R");
@@ -126,6 +144,11 @@ TOPDOWN_HTML = dedent(
 
           this.physics.add.overlap(bullets, enemies, onBulletHitEnemy);
           this.physics.add.overlap(player, enemies, onPlayerHitEnemy);
+          this.physics.add.overlap(player, enemyBullets, onPlayerHitByBullet);
+          this.physics.add.collider(player, coverBlocks);
+          this.physics.add.collider(enemies, coverBlocks);
+          this.physics.add.collider(enemyBullets, coverBlocks, (bullet) => bullet.destroy());
+          this.physics.add.collider(bullets, coverBlocks, (bullet) => bullet.destroy());
 
           spawnWave(gameState.wave);
           updateHud();
@@ -157,6 +180,26 @@ TOPDOWN_HTML = dedent(
               bullet.destroy();
             }
           });
+          enemyBullets.children.iterate((bullet) => {
+            if (!bullet) return;
+            if (bullet.x < -40 || bullet.y < -40 || bullet.x > sceneRef.scale.width + 40 || bullet.y > sceneRef.scale.height + 40) {
+              bullet.destroy();
+            }
+          });
+
+          let liveEnemyCount = 0;
+          enemies.children.iterate((enemy) => {
+            if (!enemy || !player) return;
+            liveEnemyCount += 1;
+            const chaseVector = new Phaser.Math.Vector2(player.x - enemy.x, player.y - enemy.y).normalize();
+            enemy.body.setVelocity(chaseVector.x * (72 + gameState.wave * 9), chaseVector.y * (72 + gameState.wave * 9));
+            enemy.fireCooldown = (enemy.fireCooldown || 0) - dt;
+            if (enemy.fireCooldown <= 0) {
+              fireEnemyBullet(enemy);
+              enemy.fireCooldown = 0.8 + Math.random() * 0.7;
+            }
+          });
+          gameState.threat = liveEnemyCount;
 
           gameState.fireCooldown = Math.max(0, gameState.fireCooldown - dt);
           gameState.dashCooldown = Math.max(0, gameState.dashCooldown - dt);
@@ -185,6 +228,15 @@ TOPDOWN_HTML = dedent(
           gameState.fireCooldown = 0.12;
         }
 
+        function fireEnemyBullet(enemy) {
+          if (!enemy || !player) return;
+          const bullet = enemyBullets.create(enemy.x, enemy.y, "bullet-core");
+          bullet.setTint(0xfb7185);
+          bullet.setScale(0.68);
+          const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+          sceneRef.physics.velocityFromRotation(angle, 260 + gameState.wave * 18, bullet.body.velocity);
+        }
+
         function dash() {
           gameState.canDash = false;
           gameState.dashCooldown = 1.4;
@@ -210,6 +262,7 @@ TOPDOWN_HTML = dedent(
             const spawnY = side === 2 ? 40 : side === 3 ? sceneRef.scale.height - 40 : Phaser.Math.Between(60, sceneRef.scale.height - 60);
             const enemy = enemies.create(spawnX, spawnY, "enemy-core");
             enemy.hp = 2 + Math.floor(wave / 2);
+            enemy.fireCooldown = 0.6 + i * 0.12;
             enemy.body.setCircle(12);
           }
           comboReadout.textContent = `Combo ${gameState.combo} · Enemies ${enemies.countActive(true)}`;
@@ -245,6 +298,14 @@ TOPDOWN_HTML = dedent(
           updateHud();
         }
 
+        function onPlayerHitByBullet(playerObj, bullet) {
+          bullet.destroy();
+          gameState.combo = 0;
+          statusReadout.textContent = "Enemy fire landed · move, dash, and re-angle";
+          sceneRef.add.circle(playerObj.x, playerObj.y, 22, 0xfb7185, 0.24).setBlendMode(Phaser.BlendModes.ADD);
+          updateHud();
+        }
+
         function resetArena() {
           enemies.clear(true, true);
           bullets.clear(true, true);
@@ -254,6 +315,7 @@ TOPDOWN_HTML = dedent(
           gameState.combo = 0;
           gameState.canDash = true;
           gameState.dashCooldown = 0;
+          gameState.threat = 0;
           statusReadout.textContent = "Arena reset · build rhythm again";
           spawnWave(gameState.wave);
           updateHud();
@@ -262,6 +324,7 @@ TOPDOWN_HTML = dedent(
         function updateHud() {
           waveReadout.textContent = `Wave ${gameState.wave}`;
           comboReadout.textContent = `Combo ${gameState.combo} · Enemies ${enemies ? enemies.countActive(true) : 0}`;
+          threatReadout.textContent = `Threat ${gameState.threat} · ${gameState.canDash ? "Dash ready" : "Dash cooling"}`;
         }
       </script>
     </body>
@@ -274,7 +337,7 @@ SEED = ScaffoldSeed(
     key="phaser_twinstick_arena_seed",
     archetype="topdown_shooter_twinstick_2d",
     engine_mode="2d_phaser",
-    version="v1",
+    version="v2",
     html=TOPDOWN_HTML,
     acceptance_tags=[
         "phaser",
@@ -282,10 +345,14 @@ SEED = ScaffoldSeed(
         "dash",
         "wave_spawn",
         "arena_bounds",
+        "arena_landmark",
         "fire",
         "aim",
+        "enemy_bullet_loop",
+        "combat_feedback",
+        "dash_trace",
         "requestAnimationFrame",
         "boot_flag",
     ],
-    summary="Phaser twin-stick arena baseline with dash, wave loop, readable HUD, and combat feedback hooks.",
+    summary="Phaser twin-stick arena baseline with dash, cover landmarks, enemy bullet pressure, and stronger combat feedback.",
 )

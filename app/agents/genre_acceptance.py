@@ -12,6 +12,23 @@ class AcceptanceReport:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _report(*, genre: str, failures: list[str], warnings: list[str] | None = None, heuristics: dict[str, Any] | None = None) -> AcceptanceReport:
+    warnings = warnings or []
+    heuristics = heuristics or {}
+    return AcceptanceReport(
+        ok=not failures,
+        failures=failures,
+        warnings=warnings,
+        metadata={
+            "genre": genre,
+            "failed_checks": failures,
+            "warnings": warnings,
+            "heuristics": heuristics,
+            "revert_recommended": bool(failures),
+        },
+    )
+
+
 def validate_racing_acceptance(html: str) -> AcceptanceReport:
     lowered = html.casefold()
     failures: list[str] = []
@@ -29,12 +46,18 @@ def validate_racing_acceptance(html: str) -> AcceptanceReport:
         failures.append("wrong_way_detection_missing")
     if "nearesttracksample" not in lowered:
         failures.append("track_confinement_missing")
+    if "guard rail" not in lowered and "railmaterial" not in lowered:
+        failures.append("circuit_barrier_missing")
     if any(token in lowered for token in ("mountain", "terrainheight", "grass", "tree")) and "trackcurve" not in lowered:
         failures.append("terrain_demo_regression")
-    return AcceptanceReport(
-        ok=not failures,
+    return _report(
+        genre="racing",
         failures=failures,
-        metadata={"genre": "racing"},
+        heuristics={
+            "has_track_curve": "trackcurve" in lowered,
+            "has_off_track_penalty": "offtracktimer" in lowered or "off track" in lowered,
+            "has_wrong_way": "wrongwaytimer" in lowered or "wrong way" in lowered,
+        },
     )
 
 
@@ -46,6 +69,8 @@ def validate_flight_acceptance(html: str) -> AcceptanceReport:
             failures.append(f"{token}_missing")
     if "reticle" not in lowered and "target-box" not in lowered:
         failures.append("targeting_feedback_missing")
+    if "target locked" not in lowered and "lockstrength" not in lowered:
+        failures.append("target_lock_feedback_missing")
     if "enemy wave" not in lowered and "enemies.forEach" not in lowered and "fireenemylaser" not in lowered:
         failures.append("combat_loop_missing")
     if "enemylasers" not in lowered and "fireenemylaser" not in lowered:
@@ -54,7 +79,21 @@ def validate_flight_acceptance(html: str) -> AcceptanceReport:
         failures.append("boost_feedback_missing")
     if "cockpit-bars" not in lowered and "target-box" not in lowered:
         failures.append("hud_depth_missing")
-    return AcceptanceReport(ok=not failures, failures=failures, metadata={"genre": "flight"})
+    if "enginetrail" not in lowered:
+        failures.append("engine_trail_missing")
+    if "requestanimationframe" not in lowered:
+        failures.append("animation_loop_missing")
+    if any(token in lowered for token in ("autoscroll", "corridor shooter", "lane shooter", "side-scroll")):
+        failures.append("corridor_regression")
+    return _report(
+        genre="flight",
+        failures=failures,
+        heuristics={
+            "has_target_box": "target-box" in lowered,
+            "has_enemy_lasers": "enemylasers" in lowered or "fireenemylaser" in lowered,
+            "has_space_depth": "nebula" in lowered and "stars" in lowered,
+        },
+    )
 
 
 def validate_topdown_acceptance(html: str) -> AcceptanceReport:
@@ -74,7 +113,23 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
         failures.append("crosshair_missing")
     if "comboreadout" not in lowered:
         failures.append("arena_hud_missing")
-    return AcceptanceReport(ok=not failures, failures=failures, metadata={"genre": "topdown"})
+    if "enemybullets" not in lowered and "fireenemybullet" not in lowered:
+        failures.append("enemy_pressure_missing")
+    if "coverblocks" not in lowered and "arena cover" not in lowered:
+        failures.append("arena_landmark_missing")
+    if "requestanimationframe" not in lowered:
+        failures.append("animation_loop_missing")
+    if any(token in lowered for token in ("clicker", "auto click", "8-way shooter")):
+        failures.append("flat_shooter_regression")
+    return _report(
+        genre="topdown",
+        failures=failures,
+        heuristics={
+            "has_crosshair": "crosshair" in lowered,
+            "has_enemy_bullets": "enemybullets" in lowered or "fireenemybullet" in lowered,
+            "has_cover": "coverblocks" in lowered or "arena cover" in lowered,
+        },
+    )
 
 
 def validate_genre_acceptance(*, archetype: str, html: str) -> AcceptanceReport:
