@@ -235,9 +235,21 @@ class SupabaseSessionStore:
             "created_at": self._now_iso(),
             "started_at": None,
             "finished_at": None,
+            "attempt_count": 0,
+            "retry_after_seconds": None,
+            "model_name": None,
+            "model_location": None,
+            "fallback_used": False,
+            "capacity_error": None,
             "updated_at": self._now_iso(),
         }
-        self._client.table("session_runs").insert(row).execute()
+        try:
+            self._client.table("session_runs").insert(row).execute()
+        except Exception:
+            legacy_row = dict(row)
+            for key in ("attempt_count", "retry_after_seconds", "model_name", "model_location", "fallback_used", "capacity_error"):
+                legacy_row.pop(key, None)
+            self._client.table("session_runs").insert(legacy_row).execute()
         return row
 
     def get_session_run(self, session_id: str, run_id: str) -> dict[str, Any] | None:
@@ -260,7 +272,15 @@ class SupabaseSessionStore:
         if "activities" in safe_fields:
             safe_fields["activities"] = redact_sensitive_data(safe_fields["activities"])
         safe_fields["updated_at"] = self._now_iso()
-        self._client.table("session_runs").update(safe_fields).eq("session_id", session_id).eq("id", run_id).execute()
+        try:
+            self._client.table("session_runs").update(safe_fields).eq("session_id", session_id).eq("id", run_id).execute()
+        except Exception:
+            legacy_fields = dict(safe_fields)
+            if legacy_fields.get("status") == "retrying":
+                legacy_fields["status"] = "queued"
+            for key in ("attempt_count", "retry_after_seconds", "model_name", "model_location", "fallback_used", "capacity_error"):
+                legacy_fields.pop(key, None)
+            self._client.table("session_runs").update(legacy_fields).eq("session_id", session_id).eq("id", run_id).execute()
 
     def create_session_issue(
         self,

@@ -384,6 +384,9 @@ class AgentLoop:
                 error_code=codegen_result.error or None,
                 metadata={
                     "model": codegen_result.model_name,
+                    "model_location": codegen_result.model_location,
+                    "fallback_used": codegen_result.fallback_used,
+                    "fallback_rank": codegen_result.fallback_rank,
                     "source": codegen_result.generation_source,
                     "edit_mode": "surgical" if is_modification else "blank_slate",
                     "genre_brief": genre_brief,

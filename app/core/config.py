@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     supabase_storage_bucket: str = "games"
 
     vertex_project_id: str | None = None
-    vertex_location: str = "us-central1"
+    vertex_location: str = "global"
     google_application_credentials: str | None = None
+    gemini_preview_model: str = "gemini-3-pro-preview"
     gemini_pro_model: str = "gemini-2.5-pro"
     gemini_flash_model: str = "gemini-2.5-flash"
 
@@ -101,6 +102,9 @@ class Settings(BaseSettings):
     publish_approval_required: bool = True
     engine_audit_enabled: bool = True
     prompt_run_timeout_seconds: float = Field(default=150.0, ge=10.0, le=900.0)
+    prompt_worker_concurrency: int = Field(default=1, ge=1, le=8)
+    prompt_retry_max_attempts: int = Field(default=5, ge=1, le=12)
+    prompt_retry_backoff_seconds: str = "10,30,60,120,240"
 
     def telegram_allowed_chat_id_set(self) -> set[str]:
         return {chat_id.strip() for chat_id in self.telegram_allowed_chat_ids.split(",") if chat_id.strip()}

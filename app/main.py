@@ -1,5 +1,6 @@
 from typing import cast
 import logging
+import asyncio
 
 from fastapi import FastAPI
 
@@ -47,6 +48,7 @@ async def _init_agents() -> None:
     app.state.agent_loop = None
     app.state.publisher_service = None
     app.state.session_run_tasks = {}
+    app.state.prompt_run_semaphore = asyncio.Semaphore(max(1, int(settings.prompt_worker_concurrency)))
 
     try:
         vertex = VertexService(settings)

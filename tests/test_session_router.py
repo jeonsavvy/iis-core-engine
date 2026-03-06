@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.agents.agent_loop import AgentActivity, AgentLoopResult
 from app.agents.codegen_agent import CodegenResult
 from app.api.v1.session_router import router as session_router
+from app.services.vertex_service import BuilderRoute, VertexCapacityExhausted
 
 
 class FakeSessionStore:
@@ -173,6 +174,12 @@ class FakeSessionStore:
             "created_at": "2026-03-05T00:00:00Z",
             "started_at": None,
             "finished_at": None,
+            "attempt_count": 0,
+            "retry_after_seconds": None,
+            "model_name": None,
+            "model_location": None,
+            "fallback_used": False,
+            "capacity_error": None,
             "updated_at": "2026-03-05T00:00:00Z",
         }
         self.runs[run_id] = row
@@ -299,10 +306,13 @@ class FakeSessionStore:
 class FakeLoop:
     result: AgentLoopResult
     delay_seconds: float = 0.0
+    error: Exception | None = None
 
     async def run(self, **_: Any) -> AgentLoopResult:
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
+        if self.error is not None:
+            raise self.error
         return self.result
 
 
@@ -408,6 +418,7 @@ def make_client(
     app.state.playtester_agent = playtester or FakePlaytester()
     app.state.publisher_service = FakePublisher()
     app.state.session_run_tasks = {}
+    app.state.prompt_run_semaphore = asyncio.Semaphore(1)
     return TestClient(app), store
 
 
@@ -595,6 +606,35 @@ def test_prompt_accepts_image_attachment_metadata() -> None:
     assert queued.status_code == 202
     user_rows = [row for row in store.histories[session_id] if row["role"] == "user"]
     assert user_rows[-1]["metadata"]["attachment"]["mime_type"] == "image/webp"
+
+
+def test_prompt_run_schedules_retry_on_capacity_exhaustion() -> None:
+    client, store = make_client()
+    client.app.state.agent_loop = FakeLoop(
+        result=AgentLoopResult(html="", activities=[]),
+        error=VertexCapacityExhausted(
+            retry_after_seconds=10,
+            attempted_routes=[
+                BuilderRoute(model_name="gemini-3-pro-preview", location="global", tier="preview", fallback_rank=0),
+                BuilderRoute(model_name="gemini-2.5-pro", location="global", tier="stable-pro", fallback_rank=1),
+            ],
+            last_error="429 RESOURCE_EXHAUSTED",
+        ),
+    )
+    session_id = create_session(client)
+
+    queued = client.post(f"/api/v1/sessions/{session_id}/prompt", json={"prompt": "build flight game"})
+    assert queued.status_code == 202
+    run_id = queued.json()["run_id"]
+
+    response = client.get(f"/api/v1/sessions/{session_id}/runs/{run_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"retrying", "queued"}
+    assert payload["error_code"] == "resource_exhausted_retrying"
+
+    event_types = [row["event_type"] for row in store.events[session_id]]
+    assert "prompt_run_retry_scheduled" in event_types
 
 
 def test_session_snapshot_conversation_and_latest_issue_endpoints() -> None:

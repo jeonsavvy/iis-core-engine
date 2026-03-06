@@ -17,6 +17,7 @@ from typing import Any, AsyncIterator
 
 from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
 from app.agents.scaffolds import get_scaffold_seed
+from app.services.vertex_service import VertexCapacityExhausted
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class CodegenResult:
     html: str
     generation_source: str = "vertex"
     model_name: str = ""
+    model_location: str = ""
+    fallback_used: bool = False
+    fallback_rank: int = 0
     tokens_used: int = 0
     error: str = ""
 
@@ -94,26 +98,36 @@ class CodegenAgent:
             )
 
         try:
-            model_name = self._vertex._builder_model_name()
             max_tokens = getattr(
                 self._vertex.settings, "builder_codegen_max_output_tokens", 48_000
             )
-            if image_attachment and self._vertex._use_genai_sdk():
-                raw_text, usage = self._vertex._genai_text_with_image(
-                    model_name=model_name,
+            if self._vertex._use_genai_sdk():
+                route_result = self._vertex.generate_builder_text_with_fallback(
                     prompt=prompt,
-                    image_bytes=_decode_data_url_image(str(image_attachment.get("data_url", ""))),
-                    mime_type=str(image_attachment.get("mime_type", "image/png")),
                     temperature=0.7,
                     max_output_tokens=max_tokens,
+                    image_bytes=_decode_data_url_image(str(image_attachment.get("data_url", "")))
+                    if image_attachment
+                    else None,
+                    mime_type=str(image_attachment.get("mime_type", "image/png")) if image_attachment else None,
                 )
+                raw_text = str(route_result.get("text", ""))
+                usage = route_result.get("usage", {}) if isinstance(route_result.get("usage"), dict) else {}
+                model_name = str(route_result.get("model_name", ""))
+                model_location = str(route_result.get("location", ""))
+                fallback_used = bool(route_result.get("fallback_used", False))
+                fallback_rank = int(route_result.get("fallback_rank", 0) or 0)
             else:
+                model_name = self._vertex._builder_model_name()
                 raw_text, usage = self._vertex._genai_text(
                     model_name=model_name,
                     prompt=prompt,
                     temperature=0.7,
                     max_output_tokens=max_tokens,
                 )
+                model_location = str(self._vertex.settings.vertex_location or "")
+                fallback_used = False
+                fallback_rank = 0
             html = self._extract_html(str(raw_text).strip())
             total_tokens = 0
             if isinstance(usage, dict):
@@ -124,8 +138,13 @@ class CodegenAgent:
                 html=html,
                 generation_source="vertex",
                 model_name=model_name,
+                model_location=model_location,
+                fallback_used=fallback_used,
+                fallback_rank=fallback_rank,
                 tokens_used=total_tokens,
             )
+        except VertexCapacityExhausted:
+            raise
         except Exception as exc:
             logger.exception("Codegen generation failed: %s", exc)
             return CodegenResult(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -66,6 +67,42 @@ def _is_retryable_vertex_exception(exc: BaseException) -> bool:
     return not any(token in text for token in _NON_RETRYABLE_VERTEX_TOKENS)
 
 
+def _is_capacity_error(exc: BaseException) -> bool:
+    text = str(exc or "").casefold()
+    return any(token in text for token in _NON_RETRYABLE_VERTEX_TOKENS)
+
+
+def _is_route_fallback_error(exc: BaseException) -> bool:
+    text = str(exc or "").casefold()
+    return _is_capacity_error(exc) or any(
+        token in text
+        for token in (
+            "not found",
+            "404",
+            "unsupported",
+            "not supported",
+            "invalid argument",
+            "unknown model",
+        )
+    )
+
+
+@dataclass(frozen=True)
+class BuilderRoute:
+    model_name: str
+    location: str
+    tier: str
+    fallback_rank: int
+
+
+class VertexCapacityExhausted(RuntimeError):
+    def __init__(self, *, retry_after_seconds: int, attempted_routes: list[BuilderRoute], last_error: str) -> None:
+        super().__init__(last_error or "resource_exhausted")
+        self.retry_after_seconds = retry_after_seconds
+        self.attempted_routes = attempted_routes
+        self.last_error = last_error
+
+
 class VertexService:
     """Vertex wrapper with safe fallbacks for GDD/design/code generation.
 
@@ -81,6 +118,7 @@ class VertexService:
         self._flash_llm = None
         self._builder_llm = None
         self._genai_client = None
+        self._genai_clients: dict[str, Any] = {}
 
     def _credentials_path(self) -> str:
         configured = str(self.settings.google_application_credentials or "").strip()
@@ -199,6 +237,51 @@ class VertexService:
             self._flash_llm = self._build_model(self.settings.gemini_flash_model, temperature=0.3)
         return self._flash_llm
 
+    def _preview_model_name(self) -> str:
+        configured = str(getattr(self.settings, "gemini_preview_model", "") or "").strip()
+        return configured
+
+    def _prompt_retry_backoff_schedule(self) -> list[int]:
+        raw = str(getattr(self.settings, "prompt_retry_backoff_seconds", "") or "").strip()
+        values: list[int] = []
+        for token in raw.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                parsed = int(token)
+            except ValueError:
+                continue
+            if parsed > 0:
+                values.append(parsed)
+        return values or [10, 30, 60, 120, 240]
+
+    def build_capacity_route_chain(self) -> list[BuilderRoute]:
+        location = str(self.settings.vertex_location or "global").strip() or "global"
+        candidates = [
+            (self._preview_model_name(), "preview"),
+            (str(self.settings.gemini_pro_model or "").strip(), "stable-pro"),
+            (str(self.settings.gemini_flash_model or "").strip(), "stable-flash"),
+        ]
+        routes: list[BuilderRoute] = []
+        seen: set[tuple[str, str]] = set()
+        for index, (model_name, tier) in enumerate(candidates):
+            if not model_name:
+                continue
+            key = (location, model_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            routes.append(
+                BuilderRoute(
+                    model_name=model_name,
+                    location=location,
+                    tier=tier,
+                    fallback_rank=index,
+                )
+            )
+        return routes
+
     def _builder_model_name(self) -> str:
         configured = str(self.settings.gemini_pro_model or "").strip()
         fallback = "gemini-2.5-pro"
@@ -226,15 +309,21 @@ class VertexService:
         )
 
     def _client(self):
-        if self._genai_client is None:
+        return self._client_for_location(str(self.settings.vertex_location or "global").strip() or "global")
+
+    def _client_for_location(self, location: str):
+        resolved_location = location.strip() or "global"
+        client = self._genai_clients.get(resolved_location)
+        if client is None:
             if google_genai is None:  # pragma: no cover - import guard
                 raise RuntimeError("google_genai is not available")
-            self._genai_client = google_genai.Client(
+            client = google_genai.Client(
                 vertexai=True,
                 project=self.settings.vertex_project_id,
-                location=self.settings.vertex_location,
+                location=resolved_location,
             )
-        return self._genai_client
+            self._genai_clients[resolved_location] = client
+        return client
 
     def _genai_json(self, *, model_name: str, prompt: str, schema: type[BaseModel], temperature: float) -> tuple[dict[str, Any], dict[str, int]]:
         if genai_types is None:  # pragma: no cover - import guard
@@ -267,6 +356,7 @@ class VertexService:
         self,
         *,
         model_name: str,
+        location: str | None = None,
         prompt: str,
         temperature: float,
         max_output_tokens: int | None = None,
@@ -281,6 +371,7 @@ class VertexService:
             config_kwargs["max_output_tokens"] = max_output_tokens
         response = self._genai_generate_with_retry(
             model_name=model_name,
+            location=location,
             prompt=prompt,
             config=genai_types.GenerateContentConfig(**config_kwargs),
         )
@@ -297,6 +388,7 @@ class VertexService:
         self,
         *,
         model_name: str,
+        location: str | None = None,
         prompt: str,
         image_bytes: bytes,
         mime_type: str,
@@ -317,6 +409,7 @@ class VertexService:
         ]
         response = self._genai_generate_parts_with_retry(
             model_name=model_name,
+            location=location,
             parts=parts,
             config=genai_types.GenerateContentConfig(**config_kwargs),
         )
@@ -350,6 +443,65 @@ class VertexService:
             return "\n".join(parts).strip()
         return str(response)
 
+    def generate_builder_text_with_fallback(
+        self,
+        *,
+        prompt: str,
+        temperature: float,
+        max_output_tokens: int | None = None,
+        image_bytes: bytes | None = None,
+        mime_type: str | None = None,
+    ) -> dict[str, Any]:
+        routes = self.build_capacity_route_chain()
+        attempted: list[BuilderRoute] = []
+        last_error = "resource_exhausted"
+        for route in routes:
+            attempted.append(route)
+            try:
+                if image_bytes is not None and mime_type:
+                    text, usage = self._genai_text_with_image(
+                        model_name=route.model_name,
+                        location=route.location,
+                        prompt=prompt,
+                        image_bytes=image_bytes,
+                        mime_type=mime_type,
+                        temperature=temperature,
+                        max_output_tokens=max_output_tokens,
+                    )
+                else:
+                    text, usage = self._genai_text(
+                        model_name=route.model_name,
+                        location=route.location,
+                        prompt=prompt,
+                        temperature=temperature,
+                        max_output_tokens=max_output_tokens,
+                    )
+                return {
+                    "text": text,
+                    "usage": usage,
+                    "model_name": route.model_name,
+                    "location": route.location,
+                    "fallback_used": route.fallback_rank > 0,
+                    "fallback_rank": route.fallback_rank,
+                    "tier": route.tier,
+                }
+            except Exception as exc:
+                if _is_route_fallback_error(exc):
+                    last_error = str(exc)[:400] or "resource_exhausted"
+                    logger.warning(
+                        "Vertex builder route exhausted: location=%s model=%s tier=%s",
+                        route.location,
+                        route.model_name,
+                        route.tier,
+                    )
+                    continue
+                raise
+        raise VertexCapacityExhausted(
+            retry_after_seconds=self._prompt_retry_backoff_schedule()[0],
+            attempted_routes=attempted,
+            last_error=last_error,
+        )
+
     @retry(
         reraise=True,
         retry=retry_if_exception(_is_retryable_vertex_exception),
@@ -365,8 +517,8 @@ class VertexService:
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.5, max=3),
     )
-    def _genai_generate_with_retry(self, *, model_name: str, prompt: str, config: Any):
-        client = self._client()
+    def _genai_generate_with_retry(self, *, model_name: str, location: str | None = None, prompt: str, config: Any):
+        client = self._client_for_location(location or str(self.settings.vertex_location or "global"))
         return client.models.generate_content(
             model=model_name,
             contents=prompt,
@@ -379,8 +531,8 @@ class VertexService:
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.5, max=3),
     )
-    def _genai_generate_parts_with_retry(self, *, model_name: str, parts: list[Any], config: Any):
-        client = self._client()
+    def _genai_generate_parts_with_retry(self, *, model_name: str, location: str | None = None, parts: list[Any], config: Any):
+        client = self._client_for_location(location or str(self.settings.vertex_location or "global"))
         return client.models.generate_content(
             model=model_name,
             contents=parts,

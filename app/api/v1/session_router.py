@@ -16,6 +16,7 @@ from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
 from app.agents.scaffolds import get_scaffold_seed
 from app.api.security import verify_internal_api_token
 from app.core.config import Settings, get_settings
+from app.services.vertex_service import VertexCapacityExhausted
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -117,6 +118,11 @@ class SessionRunResponse(BaseModel):
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
+    attempt_count: int = 0
+    retry_after_seconds: int | None = None
+    model_name: str | None = None
+    model_location: str | None = None
+    fallback_used: bool = False
     activities: list[ActivityResponse] = Field(default_factory=list)
     current_html: str = ""
 
@@ -448,6 +454,22 @@ def _normalize_error_code(raw: str) -> str:
     return code.replace(" ", "_")[:80]
 
 
+def _prompt_retry_schedule(settings_obj: Settings) -> list[int]:
+    raw = str(getattr(settings_obj, "prompt_retry_backoff_seconds", "") or "").strip()
+    values: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            parsed = int(token)
+        except ValueError:
+            continue
+        if parsed > 0:
+            values.append(parsed)
+    return values or [10, 30, 60, 120, 240]
+
+
 def _summarize_publish_issues(issues: list[str], *, limit: int = 3) -> str:
     return "; ".join(issue.strip() for issue in issues[:limit] if issue.strip())
 
@@ -586,6 +608,8 @@ def _latest_run_snapshot(store: SessionStoreProtocol, session_id: str) -> tuple[
             continue
         if event_type == "prompt_run_started":
             return run_id, "running"
+        if event_type == "prompt_run_retry_scheduled":
+            return run_id, "retrying"
         if event_type == "prompt_run_queued":
             return run_id, "queued"
         if event_type == "prompt_run_succeeded":
@@ -674,6 +698,11 @@ def _build_run_response(store: SessionStoreProtocol, session_id: str, run: dict[
         created_at=str(run.get("created_at", "")),
         started_at=str(run["started_at"]) if run.get("started_at") else None,
         finished_at=str(run["finished_at"]) if run.get("finished_at") else None,
+        attempt_count=int(run.get("attempt_count", 0) or 0),
+        retry_after_seconds=int(run["retry_after_seconds"]) if isinstance(run.get("retry_after_seconds"), int) else None,
+        model_name=str(run["model_name"]) if run.get("model_name") else None,
+        model_location=str(run["model_location"]) if run.get("model_location") else None,
+        fallback_used=bool(run.get("fallback_used", False)),
         activities=activities,
         current_html=str(session.get("current_html", "")),
     )
@@ -685,6 +714,14 @@ def _get_run_tasks(app: Any) -> dict[str, asyncio.Task[Any]]:
         tasks = {}
         app.state.session_run_tasks = tasks
     return cast(dict[str, asyncio.Task[Any]], tasks)
+
+
+def _get_prompt_run_semaphore(app: Any) -> asyncio.Semaphore:
+    semaphore = getattr(app.state, "prompt_run_semaphore", None)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(max(1, int(settings.prompt_worker_concurrency)))
+        app.state.prompt_run_semaphore = semaphore
+    return cast(asyncio.Semaphore, semaphore)
 
 
 async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, list[str]]:
@@ -699,6 +736,38 @@ async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, 
     return False, "publish_runtime_blocked", issues
 
 
+def _schedule_prompt_run(
+    *,
+    app: Any,
+    store: SessionStoreProtocol,
+    run_id: str,
+    session_id: str,
+    prompt: str,
+    auto_qa: bool,
+    image_attachment: ImageAttachmentRequest | None,
+    timeout_seconds: float,
+    settings_obj: Settings,
+    delay_seconds: int = 0,
+) -> None:
+    async def _runner() -> None:
+        if delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
+        await _execute_prompt_run(
+            app=app,
+            store=store,
+            run_id=run_id,
+            session_id=session_id,
+            prompt=prompt,
+            auto_qa=auto_qa,
+            image_attachment=image_attachment,
+            timeout_seconds=timeout_seconds,
+            settings_obj=settings_obj,
+        )
+
+    task = asyncio.create_task(_runner())
+    _get_run_tasks(app)[run_id] = task
+
+
 async def _execute_prompt_run(
     *,
     app: Any,
@@ -711,71 +780,84 @@ async def _execute_prompt_run(
     timeout_seconds: float,
     settings_obj: Settings,
 ) -> None:
+    current_task = asyncio.current_task()
     try:
-        store.update_session_run(session_id, run_id, status="running", started_at=_now_iso())
-        store.add_session_event(
-            session_id=session_id,
-            event_type="prompt_run_started",
-            action="run",
-            summary=f"Run started: {run_id[:8]}",
-            decision_reason="queued_run_started",
-            input_signal=prompt[:500],
-            change_impact="agent_loop_running",
-            confidence=1.0,
-            metadata={"run_id": run_id},
-        )
-
-        session = store.get_session(session_id) or {}
-        history_rows = store.get_conversation_history(session_id, limit=100)
-        history = [
-            ConversationMessage(role=str(msg.get("role", "user")), content=str(msg.get("content", "")))
-            for msg in history_rows
-        ]
-        genre_brief = build_genre_brief(user_prompt=prompt, genre_hint=str(session.get("genre", "")))
-        scaffold_seed = scaffold_seed_for_brief(genre_brief)
-        scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
-        if scaffold is not None and not str(session.get("current_html", "")).strip():
-            store.update_session_html(session_id, scaffold.html, score=0)
+        semaphore = _get_prompt_run_semaphore(app)
+        async with semaphore:
+            run = store.get_session_run(session_id, run_id) or {}
+            attempt_count = int(run.get("attempt_count", 0) or 0) + 1
+            store.update_session_run(
+                session_id,
+                run_id,
+                status="running",
+                started_at=_now_iso(),
+                attempt_count=attempt_count,
+                retry_after_seconds=None,
+                capacity_error=None,
+            )
             store.add_session_event(
                 session_id=session_id,
-                event_type="scaffold_materialized",
-                agent="codegen",
-                action="generate",
-                summary=f"Materialized scaffold {scaffold.key}",
-                decision_reason="deterministic_scaffold_baseline",
+                event_type="prompt_run_started",
+                action="run",
+                summary=f"Run started: {run_id[:8]}",
+                decision_reason="queued_run_started",
                 input_signal=prompt[:500],
-                change_impact="baseline_draft_created",
+                change_impact="agent_loop_running",
                 confidence=1.0,
-                metadata={
-                    "run_id": run_id,
-                    "genre_brief": genre_brief,
-                    "scaffold_key": scaffold.key,
-                    "scaffold_version": scaffold.version,
-                    "generation_mode": "deterministic_scaffold",
-                },
+                metadata={"run_id": run_id, "attempt_count": attempt_count},
             )
 
-        agent_loop = getattr(app.state, "agent_loop", None)
-        if agent_loop is None:
-            raise RuntimeError("agent_loop_not_initialized")
+            session = store.get_session(session_id) or {}
+            history_rows = store.get_conversation_history(session_id, limit=100)
+            history = [
+                ConversationMessage(role=str(msg.get("role", "user")), content=str(msg.get("content", "")))
+                for msg in history_rows
+            ]
+            genre_brief = build_genre_brief(user_prompt=prompt, genre_hint=str(session.get("genre", "")))
+            scaffold_seed = scaffold_seed_for_brief(genre_brief)
+            scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
+            if scaffold is not None and not str(session.get("current_html", "")).strip():
+                store.update_session_html(session_id, scaffold.html, score=0)
+                store.add_session_event(
+                    session_id=session_id,
+                    event_type="scaffold_materialized",
+                    agent="codegen",
+                    action="generate",
+                    summary=f"Materialized scaffold {scaffold.key}",
+                    decision_reason="deterministic_scaffold_baseline",
+                    input_signal=prompt[:500],
+                    change_impact="baseline_draft_created",
+                    confidence=1.0,
+                    metadata={
+                        "run_id": run_id,
+                        "genre_brief": genre_brief,
+                        "scaffold_key": scaffold.key,
+                        "scaffold_version": scaffold.version,
+                        "generation_mode": "deterministic_scaffold",
+                    },
+                )
 
-        result = await asyncio.wait_for(
-            agent_loop.run(
-                user_prompt=prompt,
-                history=history,
-                current_html=str(session.get("current_html", "")),
-                genre_hint=str(session.get("genre", "")),
-                auto_qa=auto_qa,
-                image_attachment={
-                    "mime_type": image_attachment.mime_type,
-                    "data_url": image_attachment.data_url,
-                    "name": image_attachment.name,
-                }
-                if image_attachment
-                else None,
-            ),
-            timeout=timeout_seconds,
-        )
+            agent_loop = getattr(app.state, "agent_loop", None)
+            if agent_loop is None:
+                raise RuntimeError("agent_loop_not_initialized")
+
+            result = await asyncio.wait_for(
+                agent_loop.run(
+                    user_prompt=prompt,
+                    history=history,
+                    current_html=str(session.get("current_html", "")),
+                    genre_hint=str(session.get("genre", "")),
+                    auto_qa=auto_qa,
+                    image_attachment={
+                        "mime_type": image_attachment.mime_type,
+                        "data_url": image_attachment.data_url,
+                        "name": image_attachment.name,
+                    }
+                    if image_attachment
+                    else None,
+                ),
+                timeout=timeout_seconds,
+            )
 
         if result.error:
             error_code = _normalize_error_code(result.error)
@@ -817,9 +899,19 @@ async def _execute_prompt_run(
         )
 
         activity_payloads: list[dict[str, Any]] = []
+        selected_model: str | None = None
+        selected_location: str | None = None
+        fallback_used = False
+        fallback_rank = 0
         for activity in result.activities:
             payload = _serialize_activity(activity)
             activity_payloads.append(payload)
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            if payload.get("agent") == "codegen" and isinstance(metadata, dict) and not selected_model:
+                selected_model = str(metadata.get("model")) if metadata.get("model") else None
+                selected_location = str(metadata.get("model_location")) if metadata.get("model_location") else None
+                fallback_used = bool(metadata.get("fallback_used", False))
+                fallback_rank = int(metadata.get("fallback_rank", 0) or 0)
             store.add_session_event(
                 session_id=session_id,
                 event_type="agent_activity",
@@ -836,6 +928,44 @@ async def _execute_prompt_run(
                 error_code=str(payload.get("error_code")) if payload.get("error_code") else None,
                 metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
             )
+
+        if selected_model:
+            store.add_session_event(
+                session_id=session_id,
+                event_type="prompt_run_model_selected",
+                agent="codegen",
+                action="run",
+                summary=f"model={selected_model} @ {selected_location or 'global'}",
+                decision_reason="capacity_router_selected_model",
+                input_signal=prompt[:500],
+                change_impact="model_selected",
+                confidence=1.0,
+                metadata={
+                    "run_id": run_id,
+                    "selected_model": selected_model,
+                    "selected_location": selected_location or "global",
+                    "fallback_used": fallback_used,
+                    "fallback_rank": fallback_rank,
+                },
+            )
+            if fallback_used:
+                store.add_session_event(
+                    session_id=session_id,
+                    event_type="prompt_run_capacity_fallback",
+                    agent="codegen",
+                    action="run",
+                    summary=f"Fallback route selected: {selected_model}",
+                    decision_reason="capacity_router_fallback",
+                    input_signal=prompt[:500],
+                    change_impact="fallback_route_used",
+                    confidence=1.0,
+                    metadata={
+                        "run_id": run_id,
+                        "selected_model": selected_model,
+                        "selected_location": selected_location or "global",
+                        "fallback_rank": fallback_rank,
+                    },
+                )
 
         if settings_obj.engine_audit_enabled:
             requested_mode = _detect_requested_mode(prompt, str(session.get("genre", "")))
@@ -867,6 +997,12 @@ async def _execute_prompt_run(
             error_code=None,
             error_detail="",
             final_score=0,
+            retry_after_seconds=None,
+            attempt_count=attempt_count,
+            model_name=selected_model,
+            model_location=selected_location or "global" if selected_model else None,
+            fallback_used=fallback_used,
+            capacity_error=None,
             activities=activity_payloads,
         )
         store.add_session_event(
@@ -941,6 +1077,98 @@ async def _execute_prompt_run(
             error_code="core_engine_timeout",
             metadata={"run_id": run_id},
         )
+    except VertexCapacityExhausted as exc:
+        run = store.get_session_run(session_id, run_id) or {}
+        current_attempt = int(run.get("attempt_count", 1) or 1)
+        retry_schedule = _prompt_retry_schedule(settings_obj)
+        retry_after = retry_schedule[min(max(current_attempt - 1, 0), len(retry_schedule) - 1)]
+        can_retry = current_attempt < int(settings_obj.prompt_retry_max_attempts)
+        attempted_routes = [
+            {"model": route.model_name, "location": route.location, "tier": route.tier, "fallback_rank": route.fallback_rank}
+            for route in exc.attempted_routes
+        ]
+        if can_retry:
+            store.update_session_run(
+                session_id,
+                run_id,
+                status="retrying",
+                error_code="resource_exhausted_retrying",
+                error_detail=exc.last_error,
+                retry_after_seconds=retry_after,
+                attempt_count=current_attempt,
+                fallback_used=True,
+                capacity_error=exc.last_error,
+            )
+            store.add_session_event(
+                session_id=session_id,
+                event_type="prompt_run_capacity_exhausted",
+                agent="codegen",
+                action="run",
+                summary="Capacity exhausted on all configured routes",
+                decision_reason="capacity_router_all_routes_exhausted",
+                input_signal=prompt[:500],
+                change_impact="retry_scheduling_considered",
+                confidence=0.0,
+                error_code="resource_exhausted",
+                metadata={"run_id": run_id, "attempted_routes": attempted_routes, "capacity_error": exc.last_error},
+            )
+            store.add_session_event(
+                session_id=session_id,
+                event_type="prompt_run_retry_scheduled",
+                agent="codegen",
+                action="run",
+                summary=f"Capacity retry scheduled in {retry_after}s",
+                decision_reason="capacity_router_backoff",
+                input_signal=prompt[:500],
+                change_impact="retrying",
+                confidence=1.0,
+                error_code="resource_exhausted",
+                metadata={
+                    "run_id": run_id,
+                    "retry_after_seconds": retry_after,
+                    "attempt_count": current_attempt,
+                    "attempted_routes": attempted_routes,
+                    "capacity_error": exc.last_error,
+                },
+            )
+            _schedule_prompt_run(
+                app=app,
+                store=store,
+                run_id=run_id,
+                session_id=session_id,
+                prompt=prompt,
+                auto_qa=auto_qa,
+                image_attachment=image_attachment,
+                timeout_seconds=timeout_seconds,
+                settings_obj=settings_obj,
+                delay_seconds=retry_after,
+            )
+        else:
+            store.update_session_run(
+                session_id,
+                run_id,
+                status="failed",
+                finished_at=_now_iso(),
+                error_code="resource_exhausted",
+                error_detail=exc.last_error,
+                retry_after_seconds=retry_after,
+                attempt_count=current_attempt,
+                fallback_used=True,
+                capacity_error=exc.last_error,
+            )
+            store.add_session_event(
+                session_id=session_id,
+                event_type="prompt_run_failed",
+                agent="codegen",
+                action="run",
+                summary="Vertex capacity exhausted after fallback attempts",
+                decision_reason="capacity_router_exhausted",
+                input_signal=prompt[:500],
+                change_impact="no_html_update",
+                confidence=0.0,
+                error_code="resource_exhausted",
+                metadata={"run_id": run_id, "attempt_count": current_attempt, "attempted_routes": attempted_routes},
+            )
     except Exception as exc:  # pragma: no cover - safety net
         logger.exception("Prompt run failed: session=%s run=%s", session_id, run_id)
         error_detail = str(exc)[:200] or "agent_loop_exception"
@@ -966,7 +1194,9 @@ async def _execute_prompt_run(
             metadata={"run_id": run_id},
         )
     finally:
-        _get_run_tasks(app).pop(run_id, None)
+        tasks = _get_run_tasks(app)
+        if tasks.get(run_id) is current_task:
+            tasks.pop(run_id, None)
 
 
 def _build_plan_draft(prompt: str, genre_hint: str) -> PlanDraftResponse:
@@ -1259,20 +1489,17 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
     )
 
     if settings.prompt_async_enabled:
-        task = asyncio.create_task(
-            _execute_prompt_run(
-                app=request.app,
-                store=store,
-                run_id=run_id,
-                session_id=session_id,
-                prompt=body.prompt,
-                auto_qa=body.auto_qa,
-                image_attachment=body.image_attachment,
-                timeout_seconds=settings.prompt_run_timeout_seconds,
-                settings_obj=settings,
-            )
+        _schedule_prompt_run(
+            app=request.app,
+            store=store,
+            run_id=run_id,
+            session_id=session_id,
+            prompt=body.prompt,
+            auto_qa=body.auto_qa,
+            image_attachment=body.image_attachment,
+            timeout_seconds=settings.prompt_run_timeout_seconds,
+            settings_obj=settings,
         )
-        _get_run_tasks(request.app)[run_id] = task
     else:
         await _execute_prompt_run(
             app=request.app,
