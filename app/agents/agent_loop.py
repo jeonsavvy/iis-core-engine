@@ -2,13 +2,13 @@
 
 The loop coordinates three agents:
   1. Codegen Agent: generates/modifies game code
-  2. Visual QA Agent: evaluates visual quality (optional, async)
-  3. Playtester Agent: tests playability (optional, async)
+  2. Visual QA Agent: finds polish / readability issues
+  3. Playtester Agent: finds runtime / gameplay blockers
 
 Flow:
-  User prompt → Codegen → (auto) Visual QA + Playtester
-  → if needs improvement → Codegen refine (max 2 rounds)
-  → return result to user
+  User prompt → Codegen → Visual QA + Playtester
+  → if fatal/runtime issues exist → Codegen auto-repair (max 2 rounds)
+  → return draft or fail if fatal issues remain
 """
 
 from __future__ import annotations
@@ -18,13 +18,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.codegen_agent import CodegenAgent, ConversationMessage
-from app.agents.playtester_agent import PlaytesterAgent
-from app.agents.visual_qa_agent import VisualQAAgent
+from app.agents.playtester_agent import PlaytesterAgent, PlaytestResult
+from app.agents.visual_qa_agent import VisualQAAgent, VisualQAResult
 
 logger = logging.getLogger(__name__)
 
 _MAX_AUTO_REFINE_ROUNDS = 2
-_AUTO_REFINE_SCORE_THRESHOLD = 50
+_AUTO_REPAIR_CATEGORIES = {"fatal_runtime", "runtime_bug", "gameplay_bug"}
 
 
 @dataclass
@@ -58,6 +58,137 @@ class AgentLoopResult:
     error: str = ""
 
 
+@dataclass
+class LoopIssue:
+    category: str
+    severity: str
+    message: str
+    source: str
+    auto_repair: bool
+    error_code: str | None = None
+
+
+def _truncate_issue_lines(messages: list[str], *, limit: int = 4) -> str:
+    return "; ".join(message.strip() for message in messages[:limit] if message.strip())
+
+
+def _issue_messages(issues: list[LoopIssue], *, categories: set[str] | None = None) -> list[str]:
+    return [
+        issue.message
+        for issue in issues
+        if categories is None or issue.category in categories
+    ]
+
+
+def _has_category(issues: list[LoopIssue], category: str) -> bool:
+    return any(issue.category == category for issue in issues)
+
+
+def _categorize_visual_issue(issue: str) -> str:
+    lowered = issue.casefold()
+    if any(token in lowered for token in ("mostly_black", "no_edges", "blank", "empty")):
+        return "runtime_bug"
+    return "visual_polish"
+
+
+def _collect_visual_issues(result: VisualQAResult) -> list[LoopIssue]:
+    issues: list[LoopIssue] = []
+    for raw_issue in result.issues:
+        category = _categorize_visual_issue(raw_issue)
+        issues.append(
+            LoopIssue(
+                category=category,
+                severity="warn" if category == "visual_polish" else "error",
+                message=raw_issue,
+                source="visual_qa",
+                auto_repair=category in _AUTO_REPAIR_CATEGORIES,
+            )
+        )
+    return issues
+
+
+def _collect_playtest_issues(result: PlaytestResult) -> list[LoopIssue]:
+    issues: list[LoopIssue] = []
+
+    for raw_issue in result.fatal_issues:
+        issues.append(
+            LoopIssue(
+                category="fatal_runtime",
+                severity="fatal",
+                message=raw_issue,
+                source="playtester",
+                auto_repair=True,
+                error_code="runtime_boot_failed",
+            )
+        )
+
+    for raw_issue in result.issues:
+        if raw_issue in result.fatal_issues:
+            continue
+        lowered = raw_issue.casefold()
+        if "restart" in lowered or "game-over" in lowered or "gameover" in lowered:
+            category = "gameplay_bug"
+        elif "input" in lowered or "keyboard" in lowered:
+            category = "gameplay_bug"
+        else:
+            category = "runtime_bug"
+        issues.append(
+            LoopIssue(
+                category=category,
+                severity="error",
+                message=raw_issue,
+                source="playtester",
+                auto_repair=True,
+                error_code="runtime_bug_detected",
+            )
+        )
+
+    return issues
+
+
+def _build_repair_prompt(*, issues: list[LoopIssue], user_prompt: str, genre_hint: str, round_number: int) -> str:
+    fatal_or_runtime = _issue_messages(issues, categories=_AUTO_REPAIR_CATEGORIES)
+    visual_polish = _issue_messages(issues, categories={"visual_polish"})
+    lines = [
+        "You are refining an existing browser game draft.",
+        "Apply the SMALLEST viable change set that fixes the reported problems.",
+        "Preserve all currently working mechanics, layout, and successful systems.",
+        "Do not rewrite unrelated parts of the game.",
+        "Return the COMPLETE HTML document only.",
+        "",
+        f"Original user request: {user_prompt}",
+    ]
+    if genre_hint.strip():
+        lines.append(f"Genre hint: {genre_hint}")
+    lines.extend(
+        [
+            f"Repair round: {round_number}",
+            "",
+            "Must fix before this draft can be accepted:",
+            *[f"- {message}" for message in fatal_or_runtime],
+        ]
+    )
+    if visual_polish:
+        lines.extend(
+            [
+                "",
+                "Improve if the fix is local and low-risk:",
+                *[f"- {message}" for message in visual_polish],
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Rules:",
+            "- Keep window.__iis_game_boot_ok = true when the game is actually ready.",
+            "- Keep requestAnimationFrame-based animation/game loop intact.",
+            "- Keep controls, restart flow, and scoreboard working unless fixing them is the goal.",
+            "- Prefer surgical patches over wholesale rewrites.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 class AgentLoop:
     """Multi-agent loop orchestrator."""
 
@@ -71,6 +202,76 @@ class AgentLoop:
         self._codegen = codegen
         self._visual_qa = visual_qa
         self._playtester = playtester
+
+    async def _run_visual_qa(
+        self,
+        *,
+        html: str,
+        genre_hint: str,
+        activities: list[AgentActivity],
+    ) -> list[LoopIssue]:
+        if self._visual_qa is None:
+            return []
+
+        visual_result = await self._visual_qa.evaluate(
+            html_content=html,
+            genre=genre_hint,
+        )
+        issues = _collect_visual_issues(visual_result)
+        auto_repair = _issue_messages(issues, categories=_AUTO_REPAIR_CATEGORIES)
+        activities.append(
+            AgentActivity(
+                agent="visual_qa",
+                action="evaluate",
+                summary=visual_result.feedback[:300],
+                decision_reason="visual_polish_review",
+                input_signal=f"genre={genre_hint or 'n/a'}, html_size={len(html)}",
+                change_impact="auto_repair_requested" if auto_repair else ("polish_feedback_available" if issues else "visual_pass"),
+                confidence=0.72,
+                metadata={
+                    "issues": visual_result.issues[:8],
+                    "issue_categories": sorted({issue.category for issue in issues}),
+                    "auto_repair": bool(auto_repair),
+                },
+            )
+        )
+        return issues
+
+    async def _run_playtester(
+        self,
+        *,
+        html: str,
+        activities: list[AgentActivity],
+    ) -> list[LoopIssue]:
+        if self._playtester is None:
+            return []
+
+        play_result = await self._playtester.test(html_content=html)
+        issues = _collect_playtest_issues(play_result)
+        fatal_messages = _issue_messages(issues, categories={"fatal_runtime"})
+        runtime_messages = _issue_messages(issues, categories={"runtime_bug", "gameplay_bug"})
+        activities.append(
+            AgentActivity(
+                agent="playtester",
+                action="test",
+                summary=play_result.feedback[:300],
+                decision_reason="runtime_boot_and_interaction_validation",
+                input_signal=f"html_size={len(html)}",
+                change_impact=(
+                    "fatal_runtime_detected"
+                    if fatal_messages
+                    else ("runtime_followup_needed" if runtime_messages else "runtime_pass")
+                ),
+                confidence=0.76,
+                error_code="runtime_boot_failed" if fatal_messages else None,
+                metadata={
+                    "issues": play_result.issues[:8],
+                    "fatal_issues": play_result.fatal_issues[:8],
+                    "issue_categories": sorted({issue.category for issue in issues}),
+                },
+            )
+        )
+        return issues
 
     async def run(
         self,
@@ -98,15 +299,15 @@ class AgentLoop:
                 agent="codegen",
                 action=action,
                 summary=f"Generated {len(codegen_result.html)} chars via {codegen_result.generation_source}",
-                score=0,
                 decision_reason="initial_user_prompt" if not is_modification else "user_requested_modification",
                 input_signal=user_prompt[:500],
-                change_impact="initial_generation" if not is_modification else "updated_existing_game",
+                change_impact="initial_generation" if not is_modification else "targeted_revision_requested",
                 confidence=0.9 if codegen_result.generation_source == "vertex" else 0.25,
                 error_code=codegen_result.error or None,
                 metadata={
                     "model": codegen_result.model_name,
                     "source": codegen_result.generation_source,
+                    "edit_mode": "surgical" if is_modification else "blank_slate",
                 },
             )
         )
@@ -123,78 +324,41 @@ class AgentLoop:
             )
 
         final_html = codegen_result.html
-        combined_score = 0
         refinement_rounds = 0
+        latest_issues: list[LoopIssue] = []
 
         if auto_qa and (self._visual_qa is not None or self._playtester is not None):
             for round_idx in range(_MAX_AUTO_REFINE_ROUNDS + 1):
-                qa_feedback_parts: list[str] = []
-
-                if self._visual_qa is not None:
-                    before = combined_score
-                    visual_result = await self._visual_qa.evaluate(
-                        html_content=final_html,
-                        genre=genre_hint,
+                latest_issues = []
+                latest_issues.extend(
+                    await self._run_visual_qa(
+                        html=final_html,
+                        genre_hint=genre_hint,
+                        activities=activities,
                     )
-                    combined_score = max(combined_score, visual_result.score)
-                    activities.append(
-                        AgentActivity(
-                            agent="visual_qa",
-                            action="evaluate",
-                            summary=visual_result.feedback[:300],
-                            score=visual_result.score,
-                            decision_reason="visual_metrics_assessment",
-                            input_signal=f"genre={genre_hint or 'n/a'}, html_size={len(final_html)}",
-                            change_impact=("quality_below_threshold" if not visual_result.ok else "quality_pass"),
-                            confidence=0.72,
-                            before_score=before,
-                            after_score=combined_score,
-                            metadata={"issues": visual_result.issues[:8]},
-                        )
+                )
+                latest_issues.extend(
+                    await self._run_playtester(
+                        html=final_html,
+                        activities=activities,
                     )
-                    if not visual_result.ok:
-                        qa_feedback_parts.append(
-                            f"Visual QA (score {visual_result.score}/100): {visual_result.feedback}"
-                        )
+                )
 
-                if self._playtester is not None:
-                    before = combined_score
-                    play_result = await self._playtester.test(html_content=final_html)
-                    combined_score = play_result.score if combined_score == 0 else (combined_score + play_result.score) // 2
-                    activities.append(
-                        AgentActivity(
-                            agent="playtester",
-                            action="test",
-                            summary=play_result.feedback[:300],
-                            score=play_result.score,
-                            decision_reason="runtime_boot_and_console_validation",
-                            input_signal=f"html_size={len(final_html)}",
-                            change_impact=("runtime_issue_detected" if (not play_result.boots_ok or play_result.has_errors) else "runtime_pass"),
-                            confidence=0.76,
-                            before_score=before,
-                            after_score=combined_score,
-                            error_code="runtime_boot_failed" if not play_result.boots_ok else None,
-                            metadata={"console_errors": play_result.console_errors[:8]},
-                        )
-                    )
-                    if not play_result.boots_ok or play_result.has_errors:
-                        qa_feedback_parts.append(
-                            f"Playtester (score {play_result.score}/100): {play_result.feedback}"
-                        )
-
-                if not qa_feedback_parts or round_idx >= _MAX_AUTO_REFINE_ROUNDS:
+                auto_repair_issues = [issue for issue in latest_issues if issue.auto_repair]
+                if not auto_repair_issues:
                     break
 
-                if combined_score >= _AUTO_REFINE_SCORE_THRESHOLD:
+                if round_idx >= _MAX_AUTO_REFINE_ROUNDS:
                     break
 
-                refinement_prompt = (
-                    "The following quality issues were detected. "
-                    "Please fix them while preserving all working features:\n\n"
-                    + "\n\n".join(qa_feedback_parts)
+                repair_prompt = _build_repair_prompt(
+                    issues=auto_repair_issues,
+                    user_prompt=user_prompt,
+                    genre_hint=genre_hint,
+                    round_number=refinement_rounds + 1,
                 )
                 refine_result = await self._codegen.generate(
-                    user_prompt=refinement_prompt,
+                    user_prompt=repair_prompt,
                     history=history,
                     current_html=final_html,
                     genre_hint=genre_hint,
@@ -205,20 +369,22 @@ class AgentLoop:
                         AgentActivity(
                             agent="codegen",
                             action="refine",
-                            summary="Auto-refine failed",
-                            score=combined_score,
-                            decision_reason="qa_feedback_refinement",
-                            input_signal=refinement_prompt[:500],
-                            change_impact="no_change_due_to_error",
+                            summary="Auto-repair failed",
+                            decision_reason="qa_generated_repair_brief",
+                            input_signal=repair_prompt[:500],
+                            change_impact="repair_attempt_failed",
                             confidence=0.2,
                             error_code=refine_result.error,
-                            metadata={"round": refinement_rounds + 1},
+                            metadata={
+                                "round": refinement_rounds + 1,
+                                "issue_categories": sorted({issue.category for issue in auto_repair_issues}),
+                            },
                         )
                     )
                     return AgentLoopResult(
                         html=final_html,
                         activities=activities,
-                        final_score=combined_score,
+                        final_score=0,
                         generation_source=codegen_result.generation_source,
                         auto_refined=refinement_rounds > 0,
                         refinement_rounds=refinement_rounds,
@@ -231,20 +397,34 @@ class AgentLoop:
                     AgentActivity(
                         agent="codegen",
                         action="refine",
-                        summary=f"Auto-refinement round {refinement_rounds}",
-                        score=combined_score,
-                        decision_reason="qa_feedback_refinement",
-                        input_signal=refinement_prompt[:500],
-                        change_impact="qa_issues_addressed",
+                        summary=f"Auto-repair round {refinement_rounds}",
+                        decision_reason="qa_generated_repair_brief",
+                        input_signal=_truncate_issue_lines(_issue_messages(auto_repair_issues), limit=4)[:500],
+                        change_impact="targeted_repair_applied",
                         confidence=0.64,
-                        metadata={"round": refinement_rounds},
+                        metadata={
+                            "round": refinement_rounds,
+                            "issue_categories": sorted({issue.category for issue in auto_repair_issues}),
+                        },
                     )
                 )
+
+        fatal_messages = _issue_messages(latest_issues, categories={"fatal_runtime"})
+        if fatal_messages:
+            return AgentLoopResult(
+                html=final_html,
+                activities=activities,
+                final_score=0,
+                generation_source=codegen_result.generation_source,
+                auto_refined=refinement_rounds > 0,
+                refinement_rounds=refinement_rounds,
+                error=f"fatal_runtime_unresolved: {_truncate_issue_lines(fatal_messages)}",
+            )
 
         return AgentLoopResult(
             html=final_html,
             activities=activities,
-            final_score=combined_score,
+            final_score=0,
             generation_source=codegen_result.generation_source,
             auto_refined=refinement_rounds > 0,
             refinement_rounds=refinement_rounds,

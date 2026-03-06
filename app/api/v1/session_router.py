@@ -215,6 +215,21 @@ class CancelSessionResponse(BaseModel):
 
 _SLUG_PATTERN = re.compile(r"[^a-z0-9-]+")
 _EVENT_SUMMARY_MAX_LEN = 200
+_ISSUE_CATEGORY_ALIASES = {
+    "runtime": "fatal_runtime",
+    "runtime_bug": "fatal_runtime",
+    "bug": "fatal_runtime",
+    "crash": "fatal_runtime",
+    "visual": "visual_polish",
+    "readability": "visual_polish",
+    "ui": "visual_polish",
+    "gameplay": "gameplay_bug",
+    "physics": "gameplay_bug",
+    "ux": "ux_copy",
+    "copy": "ux_copy",
+    "publish": "publish_blocker",
+}
+_PUBLISH_BLOCKING_ISSUES = {"fatal_runtime", "publish_blocker"}
 
 
 class SessionStoreProtocol(Protocol):
@@ -389,7 +404,13 @@ def _normalize_error_code(raw: str) -> str:
         return "agent_loop_exception"
     if "timeout" in code:
         return "core_engine_timeout"
+    if code.startswith("fatal_runtime_unresolved"):
+        return "fatal_runtime_unresolved"
     return code.replace(" ", "_")[:80]
+
+
+def _summarize_publish_issues(issues: list[str], *, limit: int = 3) -> str:
+    return "; ".join(issue.strip() for issue in issues[:limit] if issue.strip())
 
 
 def _detect_requested_mode(prompt: str, genre_hint: str) -> str:
@@ -423,12 +444,50 @@ def _is_engine_compliant(requested_mode: str, detected_engine: str) -> bool:
 
 
 def _route_issue_agents(category: str) -> list[str]:
-    normalized = category.casefold()
-    if normalized in {"runtime", "bug", "crash"}:
+    normalized = _normalize_issue_category(category)
+    if normalized in {"fatal_runtime", "publish_blocker"}:
         return ["playtester", "codegen"]
-    if normalized in {"visual", "readability", "ui"}:
+    if normalized == "visual_polish":
         return ["visual_qa", "codegen"]
+    if normalized == "gameplay_bug":
+        return ["playtester", "codegen"]
     return ["codegen"]
+
+
+def _normalize_issue_category(category: str) -> str:
+    normalized = category.strip().casefold().replace(" ", "_").replace("-", "_")
+    return _ISSUE_CATEGORY_ALIASES.get(normalized, normalized or "gameplay_bug")
+
+
+def _build_issue_fix_prompt(issue: dict[str, Any], instruction: str) -> str:
+    category = _normalize_issue_category(str(issue.get("category", "")))
+    lines = [
+        "사용자가 현재 게임 결과에 대해 구체적인 수정 요청을 보냈습니다.",
+        "완전한 HTML을 반환하되, DIFF 감성으로 필요한 부분만 최소 수정하세요.",
+        "이미 잘 작동하는 시스템은 유지하세요.",
+        f"- issue title: {issue.get('title', '')}",
+        f"- issue details: {issue.get('details', '')}",
+        f"- category: {category}",
+    ]
+    if instruction.strip():
+        lines.append(f"- extra instruction: {instruction.strip()}")
+
+    lines.extend(
+        [
+            "",
+            "카테고리별 우선순위:",
+            "- fatal_runtime / publish_blocker: 실행 불가 원인 제거가 최우선",
+            "- gameplay_bug: 조작감/밸런스/흐름 문제를 국소 수정",
+            "- visual_polish: 가독성/연출을 저위험 범위에서 개선",
+            "- ux_copy: 설명/문구/피드백 표현만 정리",
+            "",
+            "규칙:",
+            "- 전체 재작성보다 국소 수정 우선",
+            "- requestAnimationFrame 기반 게임 루프를 유지/복원",
+            "- window.__iis_game_boot_ok 와 IISLeaderboard 계약은 유지",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _serialize_activity(activity: Any) -> dict[str, Any]:
@@ -497,6 +556,18 @@ def _get_run_tasks(app: Any) -> dict[str, asyncio.Task[Any]]:
         tasks = {}
         app.state.session_run_tasks = tasks
     return cast(dict[str, asyncio.Task[Any]], tasks)
+
+
+async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, list[str]]:
+    playtester = getattr(app.state, "playtester_agent", None)
+    if playtester is None:
+        return False, "playtester_unavailable", ["Playtester agent is unavailable"]
+
+    result = await playtester.test(html_content=html)
+    issues = result.fatal_issues or result.issues
+    if result.boots_ok:
+        return True, "", issues
+    return False, "publish_runtime_blocked", issues
 
 
 async def _execute_prompt_run(
@@ -568,17 +639,16 @@ async def _execute_prompt_run(
                 change_impact="no_html_update",
                 confidence=0.0,
                 error_code=error_code,
-                metadata={"run_id": run_id},
+                metadata={"run_id": run_id, "fatal_runtime": "fatal_runtime_unresolved" in result.error},
             )
             return
 
-        store.update_session_html(session_id, result.html, score=result.final_score)
+        store.update_session_html(session_id, result.html, score=0)
         store.add_conversation_message(
             session_id=session_id,
             role="assistant",
-            content=f"[Generated game: {len(result.html)} chars, score: {result.final_score}]",
+            content=f"[Generated game: {len(result.html)} chars]",
             metadata={
-                "final_score": result.final_score,
                 "generation_source": result.generation_source,
                 "auto_refined": result.auto_refined,
                 "run_id": run_id,
@@ -635,7 +705,7 @@ async def _execute_prompt_run(
             finished_at=_now_iso(),
             error_code=None,
             error_detail="",
-            final_score=result.final_score,
+            final_score=0,
             activities=activity_payloads,
         )
         store.add_session_event(
@@ -643,12 +713,11 @@ async def _execute_prompt_run(
             event_type="prompt_run_succeeded",
             action="run",
             summary=f"Run succeeded: {run_id[:8]}",
-            score=result.final_score,
             decision_reason="agent_loop_completed",
             input_signal=prompt[:500],
             change_impact="session_html_updated",
             confidence=1.0,
-            metadata={"run_id": run_id, "final_score": result.final_score},
+            metadata={"run_id": run_id, "auto_refined": result.auto_refined, "refinement_rounds": result.refinement_rounds},
         )
     except asyncio.CancelledError:
         store.update_session_run(
@@ -1025,13 +1094,14 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
     store = _get_session_store(request)
     _load_session_or_404(store, session_id)
 
+    normalized_category = _normalize_issue_category(body.category)
     issue = store.create_session_issue(
         session_id=session_id,
         title=body.title,
         details=body.details,
-        category=body.category,
+        category=normalized_category,
     )
-    routed_agents = _route_issue_agents(body.category)
+    routed_agents = _route_issue_agents(normalized_category)
     store.add_session_event(
         session_id=session_id,
         event_type="issue_reported",
@@ -1041,7 +1111,7 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
         decision_reason="human_feedback_received",
         change_impact="issue_queue_updated",
         confidence=1.0,
-        metadata={"issue_id": issue.get("id"), "category": body.category, "routed_agents": routed_agents},
+        metadata={"issue_id": issue.get("id"), "category": normalized_category, "routed_agents": routed_agents},
     )
 
     return SessionIssueResponse(
@@ -1049,7 +1119,7 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
         session_id=session_id,
         title=str(issue.get("title", "")),
         details=str(issue.get("details", "")),
-        category=str(issue.get("category", body.category)),
+        category=str(issue.get("category", normalized_category)),
         status=str(issue.get("status", "open")),
         created_at=str(issue.get("created_at", _now_iso())),
         updated_at=str(issue.get("updated_at")) if issue.get("updated_at") else None,
@@ -1094,14 +1164,7 @@ async def propose_issue_fix(
         )
 
     instruction = body.instruction.strip()
-    proposal_prompt = (
-        "사용자가 현재 게임 결과에 대해 수정 요청을 보냈습니다.\n"
-        f"- issue title: {issue.get('title', '')}\n"
-        f"- issue details: {issue.get('details', '')}\n"
-        f"- category: {issue.get('category', '')}\n"
-        f"- extra instruction: {instruction}\n\n"
-        "요청 사항만 정확히 수정하고 기존에 잘 작동하는 기능은 유지한 완전한 HTML을 반환하세요."
-    )
+    proposal_prompt = _build_issue_fix_prompt(issue, instruction)
     history_rows = store.get_conversation_history(session_id, limit=100)
     history = [
         ConversationMessage(role=str(msg.get("role", "user")), content=str(msg.get("content", "")))
@@ -1137,7 +1200,7 @@ async def propose_issue_fix(
     proposal = store.create_issue_proposal(
         session_id=session_id,
         issue_id=issue_id,
-        summary=f"Issue fix proposal ({len(result.html)} chars)",
+        summary=f"{issue.get('category', 'gameplay_bug')} fix proposal ({len(result.html)} chars)",
         proposal_prompt=proposal_prompt,
         preview_html=result.html,
         proposed_by="codegen",
@@ -1175,7 +1238,7 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
             detail={"error": "issue_loop_disabled", "code": "human_agent_issue_loop_disabled"},
         )
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    _load_session_or_404(store, session_id)
     _load_issue_or_404(store, session_id, issue_id)
 
     proposal: dict[str, Any] | None
@@ -1195,9 +1258,10 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
             detail={"error": "proposal_preview_missing", "code": "fix_preview_missing"},
         )
 
-    store.update_session_html(session_id, preview_html, score=int(session.get("score", 0) or 0))
+    store.update_session_html(session_id, preview_html, score=0)
     store.update_issue_proposal(session_id, issue_id, proposal_id, status="applied")
     store.update_session_issue(session_id, issue_id, status="resolved")
+    store.clear_publish_approvals(session_id)
     store.add_conversation_message(
         session_id=session_id,
         role="assistant",
@@ -1212,7 +1276,7 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
         summary=f"Proposal applied: {proposal_id[:8]}",
         decision_reason="human_approved_fix_proposal",
         input_signal=str(proposal.get("summary", ""))[:500],
-        change_impact="session_html_updated",
+        change_impact="session_html_updated_publish_requires_reapproval",
         confidence=1.0,
         metadata={"issue_id": issue_id, "proposal_id": proposal_id},
     )
@@ -1290,6 +1354,27 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     fallback_slug = _normalize_slug(str(session.get("title", "")))[:32]
     slug = preferred_slug or fallback_slug or session_id[:8]
     game_name = body.game_name or str(session.get("title", f"Game {slug}"))
+
+    publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
+    if not publishable:
+        summary = _summarize_publish_issues(publish_issues, limit=3) or "Runtime fatal issue detected"
+        store.add_session_event(
+            session_id=session_id,
+            event_type="publish_blocked_runtime",
+            agent="playtester",
+            action="publish",
+            summary=summary[:_EVENT_SUMMARY_MAX_LEN],
+            decision_reason="runtime_fatal_must_be_zero",
+            input_signal=game_name,
+            change_impact="publish_blocked",
+            confidence=1.0,
+            error_code=publish_error_code,
+            metadata={"issues": publish_issues[:8], "category": "publish_blocker"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "publish_blocked_runtime", "code": publish_error_code, "issues": publish_issues[:8]},
+        )
 
     try:
         publish_result = await publisher.publish(

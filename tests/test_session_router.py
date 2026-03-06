@@ -311,6 +311,27 @@ class FakeCodegen:
         return CodegenResult(html="<html>patched</html>", generation_source="vertex")
 
 
+class FakePlaytester:
+    def __init__(self, *, boots_ok: bool = True, issues: list[str] | None = None) -> None:
+        self.boots_ok = boots_ok
+        self.issues = issues or []
+
+    async def test(self, *, html_content: str) -> Any:
+        return type(
+            "FakePlaytestResult",
+            (),
+            {
+                "boots_ok": self.boots_ok,
+                "has_errors": bool(self.issues),
+                "console_errors": list(self.issues),
+                "issues": list(self.issues),
+                "fatal_issues": list(self.issues if not self.boots_ok else []),
+                "feedback": "\n".join(self.issues) if self.issues else "ok",
+                "score": 0,
+            },
+        )()
+
+
 class FakePublisher:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -326,7 +347,12 @@ class FakePublisher:
         }
 
 
-def make_client(*, loop_result: AgentLoopResult | None = None, delay_seconds: float = 0.0) -> tuple[TestClient, FakeSessionStore]:
+def make_client(
+    *,
+    loop_result: AgentLoopResult | None = None,
+    delay_seconds: float = 0.0,
+    playtester: FakePlaytester | None = None,
+) -> tuple[TestClient, FakeSessionStore]:
     app = FastAPI()
     app.include_router(session_router, prefix="/api/v1")
 
@@ -356,6 +382,7 @@ def make_client(*, loop_result: AgentLoopResult | None = None, delay_seconds: fl
         delay_seconds=delay_seconds,
     )
     app.state.codegen_agent = FakeCodegen()
+    app.state.playtester_agent = playtester or FakePlaytester()
     app.state.publisher_service = FakePublisher()
     app.state.session_run_tasks = {}
     return TestClient(app), store
@@ -393,7 +420,7 @@ def test_prompt_is_async_and_run_succeeds() -> None:
 
     run = wait_run_terminal(client, session_id, run_id)
     assert run["status"] == "succeeded"
-    assert run["final_score"] == 88
+    assert run["final_score"] == 0
     assert run["current_html"] == "<html>ok</html>"
 
     session = store.get_session(session_id)
@@ -456,6 +483,19 @@ def test_publish_requires_approval() -> None:
     assert published.json()["game_url"] == "/play/road-rush"
 
 
+def test_publish_blocks_when_runtime_fatal_exists() -> None:
+    client, store = make_client(playtester=FakePlaytester(boots_ok=False, issues=["Missing animation loop (requestAnimationFrame)"]))
+    session_id = create_session(client)
+    store.update_session_html(session_id, "<html>draft</html>", score=0)
+
+    approved = client.post(f"/api/v1/sessions/{session_id}/approve-publish", json={"note": "looks good"})
+    assert approved.status_code == 200
+
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert published.status_code == 409
+    assert published.json()["detail"]["code"] == "publish_runtime_blocked"
+
+
 def test_issue_propose_apply_flow() -> None:
     client, store = make_client()
     session_id = create_session(client)
@@ -463,10 +503,11 @@ def test_issue_propose_apply_flow() -> None:
 
     issue_res = client.post(
         f"/api/v1/sessions/{session_id}/issues",
-        json={"title": "코너링 감각 이상", "details": "드리프트가 너무 급함", "category": "gameplay"},
+        json={"title": "코너링 감각 이상", "details": "드리프트가 너무 급함", "category": "physics"},
     )
     assert issue_res.status_code == 200
     issue_id = issue_res.json()["issue_id"]
+    assert issue_res.json()["category"] == "gameplay_bug"
 
     propose = client.post(
         f"/api/v1/sessions/{session_id}/issues/{issue_id}/propose-fix",

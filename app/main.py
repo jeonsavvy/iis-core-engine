@@ -42,6 +42,8 @@ async def _init_agents() -> None:
 
     app.state.vertex_service = None
     app.state.codegen_agent = None
+    app.state.visual_qa_agent = None
+    app.state.playtester_agent = None
     app.state.agent_loop = None
     app.state.publisher_service = None
     app.state.session_run_tasks = {}
@@ -55,6 +57,8 @@ async def _init_agents() -> None:
 
         app.state.vertex_service = vertex
         app.state.codegen_agent = codegen
+        app.state.visual_qa_agent = visual_qa
+        app.state.playtester_agent = playtester
         app.state.agent_loop = loop
         logger.info("Agent loop initialized.")
     except Exception:

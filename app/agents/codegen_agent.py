@@ -182,12 +182,15 @@ class CodegenAgent:
         if is_modification:
             return (
                 "You are a principal web game engineer.\n"
-                "Modify the existing game based on the user's request.\n\n"
+                "Modify the existing game based on the user's request.\n"
+                "Work in a DIFF mindset: keep the current game structure unless the request requires a local replacement.\n\n"
                 f"{history_section}"
                 f"User request: {user_prompt}\n\n"
                 "Rules:\n"
                 "- Return the COMPLETE modified HTML (not a diff)\n"
                 "- Preserve working game mechanics unless asked to change them\n"
+                "- Prefer surgical edits over wholesale rewrites\n"
+                "- Keep unchanged systems intact if they already work\n"
                 "- Keep window.__iis_game_boot_ok = true\n"
                 "- Keep window.IISLeaderboard contract\n"
                 "- Return only HTML, no markdown fences\n\n"

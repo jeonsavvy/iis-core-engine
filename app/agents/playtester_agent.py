@@ -21,6 +21,8 @@ class PlaytestResult:
     boots_ok: bool
     has_errors: bool = False
     console_errors: list[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    fatal_issues: list[str] = field(default_factory=list)
     feedback: str = ""
     score: int = 0  # 0-100
 
@@ -77,6 +79,8 @@ class PlaytesterAgent:
                 boots_ok=smoke.ok,
                 has_errors=bool(errors),
                 console_errors=errors,
+                issues=[*errors, *warnings],
+                fatal_issues=list(errors) if not smoke.ok else [],
                 feedback="\n".join(feedback_parts),
                 score=min(100, score),
             )
@@ -89,6 +93,7 @@ class PlaytesterAgent:
         """Fallback heuristic when Playwright is unavailable."""
         lower = html_content.lower()
         issues: list[str] = []
+        fatal_issues: list[str] = []
 
         has_boot_flag = "__iis_game_boot_ok" in lower
         has_raf = "requestanimationframe" in lower
@@ -99,11 +104,15 @@ class PlaytesterAgent:
         if has_boot_flag:
             score += 15
         else:
-            issues.append("Missing boot flag (window.__iis_game_boot_ok)")
+            issue = "Missing boot flag (window.__iis_game_boot_ok)"
+            issues.append(issue)
+            fatal_issues.append(issue)
         if has_raf:
             score += 15
         else:
-            issues.append("Missing animation loop (requestAnimationFrame)")
+            issue = "Missing animation loop (requestAnimationFrame)"
+            issues.append(issue)
+            fatal_issues.append(issue)
         if has_input:
             score += 15
         else:
@@ -117,6 +126,8 @@ class PlaytesterAgent:
             boots_ok=has_boot_flag and has_raf,
             has_errors=bool(issues),
             console_errors=issues,
+            issues=issues,
+            fatal_issues=fatal_issues,
             feedback="\n".join(f"- {i}" for i in issues) if issues else "Heuristic check passed.",
             score=min(100, score),
         )
