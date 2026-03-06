@@ -122,6 +122,24 @@ class PlaytesterAgent:
         else:
             issues.append("Missing restart/game-over flow")
 
+        is_racing = "open-wheel circuit racing" in lower or "lap-state" in lower
+        if is_racing:
+            if "respawntocheckpoint" not in lower:
+                issues.append("Missing checkpoint respawn safety")
+            if "offtracktimer" not in lower and "off track" not in lower:
+                issues.append("Missing off-track penalty flow")
+            if "countdown" not in lower:
+                issues.append("Missing race countdown flow")
+
+        is_dogfight = "space dogfight" in lower or "target-readout" in lower
+        if is_dogfight:
+            if "enemylasers" not in lower and "fireenemylaser" not in lower:
+                issues.append("Missing enemy attack loop")
+            if "shield" not in lower:
+                issues.append("Missing shield feedback")
+            if "boostcharge" not in lower:
+                issues.append("Missing boost feedback")
+
         is_island_flight = "low-poly island flight" in lower or "ring-readout" in lower
         if is_island_flight:
             if "yaw" not in lower:
@@ -130,6 +148,10 @@ class PlaytesterAgent:
                 issues.append("Missing stabilize / auto-level control")
             if "ring" not in lower:
                 issues.append("Missing traversal ring loop")
+            if "terrainheightat" not in lower:
+                issues.append("Missing terrain clearance guard")
+            if "lastsafepoint" not in lower:
+                issues.append("Missing safe respawn tracking")
 
         is_topdown = "lowpoly tactical arena" in lower or "title-screen" in lower
         if is_topdown:
@@ -137,6 +159,10 @@ class PlaytesterAgent:
                 issues.append("Missing enemy pressure loop")
             if "title-screen" not in lower:
                 issues.append("Missing title/menu state flow")
+            if "coverblocks" not in lower:
+                issues.append("Missing arena cover landmarks")
+            if "shake(" not in lower:
+                issues.append("Missing impact screen shake")
 
         return PlaytestResult(
             boots_ok=has_boot_flag and has_raf,

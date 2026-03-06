@@ -39,6 +39,27 @@ class SessionPublisher:
         except Exception:
             logger.warning("GitHub archive service not available, skipping.")
 
+    @staticmethod
+    def _fallback_preview_asset(*, genre_brief: dict[str, Any] | None = None, genre: str = "") -> str | None:
+        asset_pack_key = str((genre_brief or {}).get("asset_pack_key", "") or "").strip()
+        if asset_pack_key == "racing_synthwave_pack_v1":
+            return "/assets/preview/neon-drift.svg"
+        if asset_pack_key == "island_flight_pack_v1":
+            return "/assets/preview/aether-courier.svg"
+        if asset_pack_key == "space_dogfight_pack_v1":
+            return "/assets/preview/skyline-jet.svg"
+        if asset_pack_key == "topdown_lowpoly_pack_v1":
+            return "/assets/preview/timebreakers.svg"
+
+        lowered = genre.casefold()
+        if "race" in lowered or "racing" in lowered or "레이싱" in lowered:
+            return "/assets/preview/neon-drift.svg"
+        if "flight" in lowered or "비행" in lowered:
+            return "/assets/preview/aether-courier.svg"
+        if "shoot" in lowered or "슈팅" in lowered:
+            return "/assets/preview/timebreakers.svg"
+        return None
+
     async def publish(
         self,
         *,
@@ -75,6 +96,8 @@ class SessionPublisher:
                     screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=smoke.screenshot_bytes)
             except Exception as exc:
                 logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
+        if not screenshot_url:
+            screenshot_url = self._fallback_preview_asset(genre_brief=genre_brief, genre=genre)
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],
