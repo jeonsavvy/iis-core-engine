@@ -33,6 +33,7 @@ def test_island_flight_brief_selects_lowpoly_island_archetype() -> None:
     assert brief["archetype"] == "flight_lowpoly_island_3d"
     assert brief["scaffold_key"] == "three_lowpoly_island_flight_seed"
     assert brief["asset_pack_key"] == "island_flight_pack_v1"
+    assert "yaw" in brief["must_have_mechanics"]
 
 
 def test_topdown_brief_selects_twinstick_archetype() -> None:
@@ -42,4 +43,5 @@ def test_topdown_brief_selects_twinstick_archetype() -> None:
     )
     assert brief["archetype"] == "topdown_shooter_twinstick_2d"
     assert brief["scaffold_key"] == "phaser_twinstick_arena_seed"
+    assert brief["asset_pack_key"] == "topdown_lowpoly_pack_v1"
     assert brief["first_frame_requirements"]

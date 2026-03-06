@@ -101,23 +101,29 @@ def validate_flight_acceptance(html: str) -> AcceptanceReport:
 def validate_island_flight_acceptance(html: str) -> AcceptanceReport:
     lowered = html.casefold()
     failures: list[str] = []
-    for token in ("pitch", "bank", "throttle"):
+    for token in ("pitch", "yaw", "bank", "throttle"):
         if token not in lowered:
             failures.append(f"{token}_missing")
     if "propeller" not in lowered:
         failures.append("propeller_missing")
+    if "stabilize" not in lowered:
+        failures.append("stabilize_missing")
     if "ring" not in lowered:
         failures.append("ring_collect_missing")
     if "fog" not in lowered:
         failures.append("fog_missing")
     if "directionallight" not in lowered:
         failures.append("warm_light_missing")
+    if "lastsafepoint" not in lowered and "respawn(" not in lowered:
+        failures.append("altitude_guard_missing")
     if "island" not in lowered and "sea" not in lowered:
         failures.append("island_landmark_missing")
     if "requestanimationframe" not in lowered:
         failures.append("animation_loop_missing")
     if any(token in lowered for token in ("dogfight", "enemylaser", "target locked")):
         failures.append("dogfight_regression")
+    if "yawvelocity" not in lowered and "yawinput" not in lowered:
+        failures.append("yaw_authority_missing")
     return _report(
         genre="island_flight",
         failures=failures,
@@ -125,6 +131,7 @@ def validate_island_flight_acceptance(html: str) -> AcceptanceReport:
             "has_propeller": "propeller" in lowered,
             "has_ring_loop": "ring" in lowered,
             "has_island_depth": "island" in lowered and "fog" in lowered,
+            "has_respawn": "lastsafepoint" in lowered or "respawn(" in lowered,
         },
     )
 
@@ -147,7 +154,7 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
     if "comboreadout" not in lowered:
         failures.append("arena_hud_missing")
     if "title-screen" not in lowered and "start run" not in lowered:
-        failures.append("title_menu_missing")
+        failures.append("state_flow_missing")
     if "enemybullets" not in lowered and "fireenemybullet" not in lowered:
         failures.append("enemy_pressure_missing")
     if "coverblocks" not in lowered and "arena cover" not in lowered:

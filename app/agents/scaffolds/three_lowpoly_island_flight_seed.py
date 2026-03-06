@@ -35,8 +35,8 @@ ISLAND_FLIGHT_HTML = dedent(
         </div>
         <div id="controls">
           <b>Controls</b><br />
-          Pitch: W / S<br />
-          Bank: A / D<br />
+          Pitch Up / Down: W / S<br />
+          Yaw / Bank: A / D<br />
           Throttle: Shift<br />
           Stabilize: Space<br />
           Reset: R
@@ -169,27 +169,49 @@ ISLAND_FLIGHT_HTML = dedent(
           scene.add(mesh);
         });
 
-        const input = { pitchUp: false, pitchDown: false, bankLeft: false, bankRight: false, boost: false };
+        const input = { pitchUp: false, pitchDown: false, yawLeft: false, yawRight: false, boost: false, stabilize: false };
         const state = {
-          position: new THREE.Vector3(0, 10, 16),
-          velocity: new THREE.Vector3(0, 0, -12),
+          position: new THREE.Vector3(0, 11, 16),
+          velocity: new THREE.Vector3(0, 0, -18),
           pitch: 0,
           roll: 0,
+          yaw: 0,
+          yawVelocity: 0,
+          climbVelocity: 0,
           speed: 22,
           rings: 0,
           countdown: 3,
           started: false,
+          lastSafePoint: new THREE.Vector3(0, 11, 16),
+          lastSafeYaw: 0,
         };
 
-        function resetFlight() {
-          state.position.set(0, 10, 16);
-          state.velocity.set(0, 0, -12);
+        function respawn(reason) {
+          state.position.copy(state.lastSafePoint);
+          state.velocity.set(0, 0, -18);
           state.pitch = 0;
           state.roll = 0;
+          state.yawVelocity = 0;
+          state.climbVelocity = 0;
+          state.speed = 18;
+          state.yaw = state.lastSafeYaw;
+          statusReadout.textContent = reason;
+        }
+
+        function resetFlight() {
+          state.position.set(0, 11, 16);
+          state.velocity.set(0, 0, -18);
+          state.pitch = 0;
+          state.roll = 0;
+          state.yaw = 0;
+          state.yawVelocity = 0;
+          state.climbVelocity = 0;
           state.speed = 22;
           state.rings = 0;
           state.countdown = 3;
           state.started = false;
+          state.lastSafePoint.set(0, 11, 16);
+          state.lastSafeYaw = 0;
           ringMeshes.forEach((ring) => {
             ring.collected = false;
             ring.mesh.visible = true;
@@ -200,15 +222,12 @@ ISLAND_FLIGHT_HTML = dedent(
         }
 
         function onKey(event, pressed) {
-          if (event.code === "KeyW") input.pitchDown = pressed;
-          if (event.code === "KeyS") input.pitchUp = pressed;
-          if (event.code === "KeyA") input.bankLeft = pressed;
-          if (event.code === "KeyD") input.bankRight = pressed;
+          if (event.code === "KeyW") input.pitchUp = pressed;
+          if (event.code === "KeyS") input.pitchDown = pressed;
+          if (event.code === "KeyA") input.yawLeft = pressed;
+          if (event.code === "KeyD") input.yawRight = pressed;
           if (event.code === "ShiftLeft" || event.code === "ShiftRight") input.boost = pressed;
-          if (pressed && event.code === "Space") {
-            state.roll *= 0.5;
-            state.pitch *= 0.5;
-          }
+          if (event.code === "Space") input.stabilize = pressed;
           if (pressed && event.code === "KeyR") resetFlight();
         }
         window.addEventListener("keydown", (event) => onKey(event, true));
@@ -248,23 +267,41 @@ ISLAND_FLIGHT_HTML = dedent(
               state.started = true;
               setTimeout(() => { countdownEl.style.opacity = "0"; }, 240);
             }
+            renderer.render(scene, camera);
+            window.requestAnimationFrame(animate);
+            return;
           }
 
-          state.pitch += ((input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0)) * dt * 0.82;
-          state.roll += ((input.bankRight ? 1 : 0) - (input.bankLeft ? 1 : 0)) * dt * 1.05;
-          state.pitch *= 0.94;
-          state.roll *= 0.92;
+          const pitchInput = (input.pitchUp ? 1 : 0) - (input.pitchDown ? 1 : 0);
+          const yawInput = (input.yawRight ? 1 : 0) - (input.yawLeft ? 1 : 0);
+          state.pitch = THREE.MathUtils.clamp(
+            THREE.MathUtils.lerp(state.pitch, pitchInput * 0.34, dt * (input.stabilize ? 5.2 : 2.8)),
+            -0.55,
+            0.55,
+          );
+          state.yawVelocity = THREE.MathUtils.lerp(state.yawVelocity, yawInput * 1.15, dt * 4.2);
+          state.yaw += state.yawVelocity * dt * (0.9 + state.speed * 0.016);
+          const targetRoll = -yawInput * 0.55;
+          state.roll = THREE.MathUtils.lerp(state.roll, input.stabilize ? 0 : targetRoll, dt * (input.stabilize ? 6.5 : 3.4));
           const throttle = input.boost ? 1.55 : 1.0;
-          state.speed = THREE.MathUtils.lerp(state.speed, 24 * throttle, dt * 2.4);
+          state.speed = THREE.MathUtils.lerp(state.speed, 24 * throttle, dt * 2.6);
+          if (input.stabilize) {
+            state.pitch = THREE.MathUtils.lerp(state.pitch, 0, dt * 4.5);
+            state.yawVelocity = THREE.MathUtils.lerp(state.yawVelocity, 0, dt * 4.1);
+          }
 
-          const rotation = new THREE.Euler(state.pitch, state.roll * 0.28, state.roll, "YXZ");
+          const rotation = new THREE.Euler(-state.pitch, state.yaw, state.roll, "YXZ");
           plane.quaternion.setFromEuler(rotation);
           propeller.rotation.z += dt * (24 + state.speed * 0.65);
 
           const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
           state.velocity.lerp(forward.multiplyScalar(state.speed), dt * 1.8);
           state.position.addScaledVector(state.velocity, dt);
-          state.position.y = THREE.MathUtils.clamp(state.position.y - state.pitch * dt * 10, 5.5, 28);
+          state.climbVelocity = THREE.MathUtils.lerp(state.climbVelocity, state.pitch * 14, dt * 2.4);
+          state.position.y = THREE.MathUtils.clamp(state.position.y + state.climbVelocity * dt, 5.5, 28);
+          if (state.position.y <= 5.6 || state.position.z < -150 || Math.abs(state.position.x) > 90 || !Number.isFinite(state.position.x) || !Number.isFinite(state.position.y) || !Number.isFinite(state.position.z)) {
+            respawn("Low altitude recovery · returning to safe route");
+          }
           plane.position.copy(state.position);
 
           ringMeshes.forEach((ring) => {
@@ -273,15 +310,17 @@ ISLAND_FLIGHT_HTML = dedent(
               ring.collected = true;
               ring.mesh.visible = false;
               state.rings += 1;
+              state.lastSafePoint.copy(ring.mesh.position).add(new THREE.Vector3(0, 2.5, 10));
+              state.lastSafeYaw = state.yaw;
               statusReadout.textContent = `Ring burst! ${state.rings} / ${ringMeshes.length}`;
               window.IISLeaderboard.postScore(200 + state.rings * 50);
               playRingTone();
             }
           });
 
-          const desiredCamera = plane.position.clone().add(new THREE.Vector3(0, 4.5, 10.5).applyQuaternion(plane.quaternion));
-          camera.position.lerp(desiredCamera, 0.1);
-          camera.lookAt(plane.position.clone().add(forward.clone().multiplyScalar(25)));
+          const desiredCamera = plane.position.clone().add(new THREE.Vector3(0, 4.8, 12.5).applyQuaternion(plane.quaternion));
+          camera.position.lerp(desiredCamera, 0.12);
+          camera.lookAt(plane.position.clone().add(forward.clone().multiplyScalar(26)).add(new THREE.Vector3(0, 1.8, 0)));
           camera.fov = THREE.MathUtils.lerp(camera.fov, input.boost ? 78 : 68, dt * 3.8);
           camera.updateProjectionMatrix();
 
@@ -310,7 +349,7 @@ SEED = ScaffoldSeed(
     key="three_lowpoly_island_flight_seed",
     archetype="flight_lowpoly_island_3d",
     engine_mode="3d_three",
-    version="v1",
+    version="v2",
     html=ISLAND_FLIGHT_HTML,
     acceptance_tags=[
         "three",
@@ -318,10 +357,13 @@ SEED = ScaffoldSeed(
         "propeller",
         "island",
         "ring_collect",
+        "yaw_control",
+        "auto_level",
+        "altitude_guard",
         "fog",
         "directional_light",
         "requestAnimationFrame",
         "boot_flag",
     ],
-    summary="Low-poly island flight baseline with propeller plane, warm directional light, fog, ring collect loop, and gentle exploration.",
+    summary="Low-poly island flight baseline with stable yaw control, propeller plane, warm light, fog, ring collect loop, and recovery assists.",
 )

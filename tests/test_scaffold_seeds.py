@@ -54,6 +54,9 @@ def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "ring" in html
     assert "island" in html
     assert "fog" in html
+    assert "yaw" in html
+    assert "stabilize" in html
+    assert "lastsafepoint" in html or "respawn(" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
 

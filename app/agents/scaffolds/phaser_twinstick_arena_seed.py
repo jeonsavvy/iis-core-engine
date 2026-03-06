@@ -12,7 +12,7 @@ TOPDOWN_HTML = dedent(
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>IIS Twin-Stick Arena Seed</title>
+      <title>IIS Lowpoly Tactical Arena Seed</title>
       <style>
         html, body { margin: 0; height: 100%; overflow: hidden; background: #050816; font-family: Inter, system-ui, sans-serif; color: #f8fafc; }
         #game-root { width: 100%; height: 100%; position: relative; }
@@ -32,14 +32,14 @@ TOPDOWN_HTML = dedent(
       <div id="game-root">
         <div id="title-screen">
           <div id="title-card">
-            <h1>NEON BARRAGE</h1>
-            <p>형광 탄막을 뚫고 아레나를 정복하세요. 대시로 각을 만들고, 적 탄막을 지워가며 웨이브를 버티는 스타일리시 탑뷰 슈팅 베이스라인입니다.</p>
+            <h1>LOWPOLY SIEGE</h1>
+            <p>로우폴리 전장에서 커버를 돌며 적 압박을 끊어내세요. 대시로 각을 만들고 웨이브를 버티는 택티컬 탑뷰 슈팅 베이스라인입니다.</p>
             <button id="start-button" type="button">START RUN</button>
           </div>
         </div>
         <div id="crosshair"></div>
         <div id="hud">
-          <span>TWIN-STICK ARENA</span>
+          <span>LOWPOLY TACTICAL ARENA</span>
           <strong id="wave-readout">Wave 1</strong>
           <span id="status-readout">Dash ready · Hold the arena</span>
           <span id="combo-readout">Combo 0 · Enemies 0</span>
@@ -394,5 +394,5 @@ SEED = ScaffoldSeed(
         "requestAnimationFrame",
         "boot_flag",
     ],
-    summary="Phaser neon twin-stick baseline with title menu, enemy bullet pressure, screen shake, cover landmarks, and strong combat feedback.",
+    summary="Phaser lowpoly tactical twin-stick baseline with title menu, enemy bullet pressure, cover landmarks, and strong combat feedback.",
 )

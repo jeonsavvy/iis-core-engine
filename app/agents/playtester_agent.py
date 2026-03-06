@@ -122,6 +122,22 @@ class PlaytesterAgent:
         else:
             issues.append("Missing restart/game-over flow")
 
+        is_island_flight = "low-poly island flight" in lower or "ring-readout" in lower
+        if is_island_flight:
+            if "yaw" not in lower:
+                issues.append("Missing yaw authority for island flight")
+            if "stabilize" not in lower:
+                issues.append("Missing stabilize / auto-level control")
+            if "ring" not in lower:
+                issues.append("Missing traversal ring loop")
+
+        is_topdown = "lowpoly tactical arena" in lower or "title-screen" in lower
+        if is_topdown:
+            if "enemybullets" not in lower and "fireenemybullet" not in lower:
+                issues.append("Missing enemy pressure loop")
+            if "title-screen" not in lower:
+                issues.append("Missing title/menu state flow")
+
         return PlaytestResult(
             boots_ok=has_boot_flag and has_raf,
             has_errors=bool(issues),
