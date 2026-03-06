@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from app.agents.codegen_agent import ConversationMessage
-from app.agents.genre_briefs import build_genre_brief
+from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
+from app.agents.scaffolds import get_scaffold_seed
 from app.api.security import verify_internal_api_token
 from app.core.config import Settings, get_settings
 
@@ -1095,6 +1096,10 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
     if str(session.get("status", "active")) != "active":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not active")
 
+    genre_brief = build_genre_brief(user_prompt=body.prompt, genre_hint=str(session.get("genre", "")))
+    scaffold_seed = scaffold_seed_for_brief(genre_brief)
+    scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
+
     store.add_conversation_message(
         session_id=session_id,
         role="user",
@@ -1133,7 +1138,14 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
         decision_reason="async_prompt_queue",
         change_impact="queued",
         confidence=1.0,
-        metadata={"run_id": run_id, "auto_qa": body.auto_qa},
+        metadata={
+            "run_id": run_id,
+            "auto_qa": body.auto_qa,
+            "genre_brief": genre_brief,
+            "scaffold_key": scaffold.key if scaffold else None,
+            "scaffold_version": scaffold.version if scaffold else None,
+            "generation_mode": "scaffold_seeded" if scaffold else "blank",
+        },
     )
 
     if settings.prompt_async_enabled:

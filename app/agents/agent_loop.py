@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.codegen_agent import CodegenAgent, ConversationMessage
+from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
+from app.agents.scaffolds import get_scaffold_seed
 from app.agents.playtester_agent import PlaytesterAgent, PlaytestResult
 from app.agents.visual_qa_agent import VisualQAAgent, VisualQAResult
 
@@ -146,7 +148,16 @@ def _collect_playtest_issues(result: PlaytestResult) -> list[LoopIssue]:
     return issues
 
 
-def _build_repair_prompt(*, issues: list[LoopIssue], user_prompt: str, genre_hint: str, round_number: int) -> str:
+def _build_repair_prompt(
+    *,
+    issues: list[LoopIssue],
+    user_prompt: str,
+    genre_hint: str,
+    round_number: int,
+    genre_brief: dict[str, Any],
+    scaffold_key: str | None,
+    scaffold_version: str | None,
+) -> str:
     fatal_or_runtime = _issue_messages(issues, categories=_AUTO_REPAIR_CATEGORIES)
     visual_polish = _issue_messages(issues, categories={"visual_polish"})
     lines = [
@@ -160,6 +171,9 @@ def _build_repair_prompt(*, issues: list[LoopIssue], user_prompt: str, genre_hin
     ]
     if genre_hint.strip():
         lines.append(f"Genre hint: {genre_hint}")
+    lines.append(f"Genre brief JSON: {genre_brief}")
+    if scaffold_key:
+        lines.append(f"Active scaffold: {scaffold_key}@{scaffold_version or 'unknown'}")
     lines.extend(
         [
             f"Repair round: {round_number}",
@@ -184,6 +198,7 @@ def _build_repair_prompt(*, issues: list[LoopIssue], user_prompt: str, genre_hin
             "- Keep requestAnimationFrame-based animation/game loop intact.",
             "- Keep controls, restart flow, and scoreboard working unless fixing them is the goal.",
             "- Prefer surgical patches over wholesale rewrites.",
+            "- Do not collapse the scaffold into a simpler genre or lower-fidelity template.",
         ]
     )
     return "\n".join(lines)
@@ -286,6 +301,12 @@ class AgentLoop:
 
         is_modification = bool(current_html.strip())
         action = "modify" if is_modification else "generate"
+        genre_brief = build_genre_brief(user_prompt=user_prompt, genre_hint=genre_hint)
+        scaffold_seed = scaffold_seed_for_brief(genre_brief)
+        scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
+        scaffold_key = scaffold.key if scaffold else None
+        scaffold_version = scaffold.version if scaffold else None
+        generation_mode = "repair_from_scaffold" if is_modification and scaffold else ("scaffold_seeded" if scaffold else "blank")
 
         codegen_result = await self._codegen.generate(
             user_prompt=user_prompt,
@@ -308,6 +329,10 @@ class AgentLoop:
                     "model": codegen_result.model_name,
                     "source": codegen_result.generation_source,
                     "edit_mode": "surgical" if is_modification else "blank_slate",
+                    "genre_brief": genre_brief,
+                    "scaffold_key": scaffold_key,
+                    "scaffold_version": scaffold_version,
+                    "generation_mode": generation_mode,
                 },
             )
         )
@@ -356,6 +381,9 @@ class AgentLoop:
                     user_prompt=user_prompt,
                     genre_hint=genre_hint,
                     round_number=refinement_rounds + 1,
+                    genre_brief=genre_brief,
+                    scaffold_key=scaffold_key,
+                    scaffold_version=scaffold_version,
                 )
                 refine_result = await self._codegen.generate(
                     user_prompt=repair_prompt,
@@ -378,6 +406,10 @@ class AgentLoop:
                             metadata={
                                 "round": refinement_rounds + 1,
                                 "issue_categories": sorted({issue.category for issue in auto_repair_issues}),
+                                "genre_brief": genre_brief,
+                                "scaffold_key": scaffold_key,
+                                "scaffold_version": scaffold_version,
+                                "generation_mode": "repair_from_scaffold" if scaffold else "repair_generic",
                             },
                         )
                     )
@@ -405,6 +437,10 @@ class AgentLoop:
                         metadata={
                             "round": refinement_rounds,
                             "issue_categories": sorted({issue.category for issue in auto_repair_issues}),
+                            "genre_brief": genre_brief,
+                            "scaffold_key": scaffold_key,
+                            "scaffold_version": scaffold_version,
+                            "generation_mode": "repair_from_scaffold" if scaffold else "repair_generic",
                         },
                     )
                 )

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
+from app.agents.scaffolds import get_scaffold_seed
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ class CodegenAgent:
         is_modification = bool(current_html.strip())
         genre_brief = build_genre_brief(user_prompt=user_prompt, genre_hint=genre_hint)
         scaffold_seed = scaffold_seed_for_brief(genre_brief)
+        scaffold = get_scaffold_seed(str(genre_brief.get("scaffold_key", "")).strip()) if scaffold_seed else None
 
         history_section = ""
         if history:
@@ -191,6 +193,8 @@ class CodegenAgent:
                 "Work in a DIFF mindset: keep the current game structure unless the request requires a local replacement.\n\n"
                 f"{history_section}"
                 f"User request: {user_prompt}\n\n"
+                f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"
+                f"{'Active scaffold JSON: ' + json.dumps(scaffold_seed, ensure_ascii=False) + chr(10) if scaffold_seed else ''}\n"
                 "Rules:\n"
                 "- Return the COMPLETE modified HTML (not a diff)\n"
                 "- Preserve working game mechanics unless asked to change them\n"
@@ -198,8 +202,38 @@ class CodegenAgent:
                 "- Keep unchanged systems intact if they already work\n"
                 "- Keep window.__iis_game_boot_ok = true\n"
                 "- Keep window.IISLeaderboard contract\n"
+                "- Keep the scaffold's genre fantasy intact; do not simplify it into a lower-fidelity genre\n"
                 "- Return only HTML, no markdown fences\n\n"
                 f"Current game HTML:\n{current_html}"
+            )
+
+        if scaffold is not None:
+            degradation_guards = [
+                str(item).strip()
+                for item in genre_brief.get("degradation_guard", [])
+                if str(item).strip()
+            ]
+            degradation_section = "".join(f"- Degradation guard: {guard}\n" for guard in degradation_guards)
+            return (
+                "You are a principal web game engineer.\n"
+                "Specialize and expand the provided hard scaffold into a polished browser game.\n\n"
+                f"{history_section}"
+                f"User request: {user_prompt}\n"
+                f"{'Genre hint: ' + genre_hint if genre_hint else ''}\n\n"
+                f"Genre brief JSON: {json.dumps(genre_brief, ensure_ascii=False)}\n"
+                f"Scaffold seed JSON: {json.dumps(scaffold_seed, ensure_ascii=False)}\n"
+                "Generation mode: initial_from_scaffold\n\n"
+                "Rules:\n"
+                "- Start from the scaffold HTML below; do not ignore it\n"
+                "- Preserve the scaffold's core systems, controls, loop, and HUD contract\n"
+                "- Expand the fantasy, polish, track/enemy layout, and presentation to fit the user request\n"
+                "- Prefer extending the scaffold over rewriting it from scratch\n"
+                "- Keep window.__iis_game_boot_ok = true when ready\n"
+                "- Keep window.IISLeaderboard contract\n"
+                "- Never violate degradation guards from the genre brief\n"
+                f"{degradation_section}"
+                "- Return only the final HTML document, no markdown fences\n\n"
+                f"Base scaffold HTML:\n{scaffold.html}"
             )
 
         return (

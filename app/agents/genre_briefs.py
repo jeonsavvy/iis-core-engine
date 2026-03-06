@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents.scaffolds import get_scaffold_seed
+
 
 def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, Any]:
     text = f"{user_prompt} {genre_hint}".casefold()
 
     if any(token in text for token in ("f1", "formula", "open-wheel", "open wheel", "서킷", "lap", "랩타임", "circuit")):
+        scaffold_key = "three_openwheel_circuit_seed"
         return {
             "engine_mode": "3d_three",
             "archetype": "racing_openwheel_circuit_3d",
@@ -15,9 +18,14 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "progression": ["lap timer", "checkpoints", "time attack"],
             "must_have_mechanics": ["steer", "throttle", "brake", "lap timing", "restart"],
             "must_not_degrade_into": ["endless obstacle runner", "single-lane dodge game"],
+            "scaffold_key": scaffold_key,
+            "quality_target": "web_high_fidelity_racing",
+            "benchmark_reference": "openwheel_circuit_baseline_v1",
+            "degradation_guard": ["endless obstacle runner", "single-lane dodge game"],
         }
 
     if any(token in text for token in ("flight", "dogfight", "pilot", "space shooter", "우주", "도그파이트", "비행")):
+        scaffold_key = "three_space_dogfight_seed"
         return {
             "engine_mode": "3d_three",
             "archetype": "flight_shooter_space_dogfight_3d",
@@ -26,9 +34,14 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "progression": ["enemy waves", "target pursuit", "survival pressure"],
             "must_have_mechanics": ["pitch", "roll", "yaw", "throttle", "primary fire", "boost"],
             "must_not_degrade_into": ["forward auto-scroll shooter", "flat lane shooter"],
+            "scaffold_key": scaffold_key,
+            "quality_target": "quality_idea_plus",
+            "benchmark_reference": "/root/workspace/create/coding/iis/quality_idea.md",
+            "degradation_guard": ["forward auto-scroll shooter", "flat lane shooter"],
         }
 
     if any(token in text for token in ("top-down", "topdown", "탑뷰", "twin-stick", "twinstick", "아레나 슈터")):
+        scaffold_key = "phaser_twinstick_arena_seed"
         return {
             "engine_mode": "2d_phaser",
             "archetype": "topdown_shooter_twinstick_2d",
@@ -37,6 +50,10 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
             "progression": ["waves", "mobility mastery", "weapon rhythm"],
             "must_have_mechanics": ["move", "aim", "fire", "dash", "restart"],
             "must_not_degrade_into": ["single-button clicker", "basic 8-way shooter without dash"],
+            "scaffold_key": scaffold_key,
+            "quality_target": "web_high_fidelity_twinstick",
+            "benchmark_reference": "twinstick_arena_baseline_v1",
+            "degradation_guard": ["single-button clicker", "basic 8-way shooter without dash"],
         }
 
     return {
@@ -47,45 +64,25 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
         "progression": [],
         "must_have_mechanics": [],
         "must_not_degrade_into": [],
+        "scaffold_key": None,
+        "quality_target": "generic_playable",
+        "benchmark_reference": None,
+        "degradation_guard": [],
     }
 
 
 def scaffold_seed_for_brief(brief: dict[str, Any]) -> dict[str, Any] | None:
-    archetype = str(brief.get("archetype", ""))
-    if archetype == "racing_openwheel_circuit_3d":
-        return {
-            "seed_name": "three_openwheel_circuit_seed",
-            "engine_mode": "3d_three",
-            "seed_outline": [
-                "loop track / circuit road mesh",
-                "open-wheel race car silhouette and chase camera",
-                "lap timer + checkpoint progression",
-                "steer/throttle/brake separation",
-                "requestAnimationFrame loop + restart flow",
-            ],
-        }
-    if archetype == "flight_shooter_space_dogfight_3d":
-        return {
-            "seed_name": "three_space_dogfight_seed",
-            "engine_mode": "3d_three",
-            "seed_outline": [
-                "starfield / space arena depth",
-                "ship orientation controls (pitch/roll/yaw)",
-                "throttle + boost + primary fire",
-                "targeting HUD / reticle shell",
-                "enemy wave and pursuit loop",
-            ],
-        }
-    if archetype == "topdown_shooter_twinstick_2d":
-        return {
-            "seed_name": "phaser_twinstick_arena_seed",
-            "engine_mode": "2d_phaser",
-            "seed_outline": [
-                "arena bounds and wave spawn loop",
-                "move/aim/fire separation",
-                "dash / mobility skill",
-                "readable HUD and hit feedback",
-                "restart flow and progression loop",
-            ],
-        }
-    return None
+    scaffold_key = brief.get("scaffold_key")
+    if not isinstance(scaffold_key, str) or not scaffold_key.strip():
+        return None
+    seed = get_scaffold_seed(scaffold_key)
+    if seed is None:
+        return None
+    return {
+        "seed_name": seed.key,
+        "engine_mode": seed.engine_mode,
+        "version": seed.version,
+        "summary": seed.summary,
+        "acceptance_tags": seed.acceptance_tags,
+        "seed_outline": seed.summary,
+    }

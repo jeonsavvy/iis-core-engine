@@ -7,6 +7,8 @@ def test_racing_brief_selects_openwheel_circuit_archetype() -> None:
         genre_hint="racing",
     )
     assert brief["archetype"] == "racing_openwheel_circuit_3d"
+    assert brief["scaffold_key"] == "three_openwheel_circuit_seed"
+    assert brief["quality_target"] == "web_high_fidelity_racing"
     scaffold = scaffold_seed_for_brief(brief)
     assert scaffold is not None
     assert scaffold["seed_name"] == "three_openwheel_circuit_seed"
@@ -18,6 +20,7 @@ def test_flight_brief_selects_space_dogfight_archetype() -> None:
         genre_hint="flight",
     )
     assert brief["archetype"] == "flight_shooter_space_dogfight_3d"
+    assert brief["scaffold_key"] == "three_space_dogfight_seed"
 
 
 def test_topdown_brief_selects_twinstick_archetype() -> None:
@@ -26,3 +29,4 @@ def test_topdown_brief_selects_twinstick_archetype() -> None:
         genre_hint="topdown shooter",
     )
     assert brief["archetype"] == "topdown_shooter_twinstick_2d"
+    assert brief["scaffold_key"] == "phaser_twinstick_arena_seed"
