@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import Settings
 from app.services.quality_service import QualityService
@@ -60,6 +61,27 @@ class SessionPublisher:
             return "/assets/preview/timebreakers.svg"
         return None
 
+    @staticmethod
+    def _resolve_telegram_media_url(*, thumbnail_url: str | None = None, screenshot_url: str | None = None) -> str | None:
+        for candidate in (thumbnail_url, screenshot_url):
+            normalized = str(candidate or "").strip()
+            if not normalized:
+                continue
+            parsed = urlparse(normalized)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                continue
+            if parsed.path.casefold().endswith(".svg"):
+                continue
+            return normalized
+        return None
+
+    def _resolve_play_url(self, *, slug: str) -> str:
+        base_url = str(self.settings.public_portal_base_url or "").strip().rstrip("/")
+        if base_url:
+            return f"{base_url}/play/{slug}"
+        return f"/play/{slug}"
+
+
     async def publish(
         self,
         *,
@@ -87,8 +109,9 @@ class SessionPublisher:
 
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
-        play_url = f"/play/{slug}"
+        play_url = self._resolve_play_url(slug=slug)
         screenshot_url: str | None = None
+        thumbnail_url: str | None = None
         if result.get("status") == "published":
             try:
                 smoke = self._quality.run_smoke_check(html_content)
@@ -98,6 +121,7 @@ class SessionPublisher:
                 logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
         if not screenshot_url:
             screenshot_url = self._fallback_preview_asset(genre_brief=genre_brief, genre=genre)
+        thumbnail_url = screenshot_url
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],
@@ -119,12 +143,14 @@ class SessionPublisher:
             except Exception as exc:
                 logger.warning("Publish copy generation failed (fallback in use): %s", exc)
 
+        marketing_summary = str(publish_copy.get("marketing_summary", "")).strip()
+
         self._publisher.update_game_marketing(
             slug=slug,
             ai_review="\n".join(str(item) for item in publish_copy.get("play_overview", [])[:3]).strip() or None,
             screenshot_url=screenshot_url,
-            thumbnail_url=screenshot_url,
-            marketing_summary=str(publish_copy.get("marketing_summary", "")).strip() or None,
+            thumbnail_url=thumbnail_url,
+            marketing_summary=marketing_summary or None,
             play_overview=[str(item) for item in publish_copy.get("play_overview", [])] if isinstance(publish_copy.get("play_overview"), list) else None,
             controls_guide=[str(item) for item in publish_copy.get("controls_guide", [])] if isinstance(publish_copy.get("controls_guide"), list) else None,
             publish_copy_version="v1",
@@ -145,14 +171,15 @@ class SessionPublisher:
                 logger.warning("Archive commit failed (non-fatal): %s", exc)
 
         try:
-            message = (
-                "✅ Publish success\n"
-                f"- slug: {slug}\n"
-                f"- game: {game_name}\n"
-                f"- play: {play_url}\n"
-                f"- public: {public_url or 'n/a'}"
+            self._telegram.broadcast_launch_announcement(
+                title=game_name,
+                marketing_line=marketing_summary,
+                play_url=play_url,
+                public_url=public_url or None,
+                photo_url=self._resolve_telegram_media_url(thumbnail_url=thumbnail_url, screenshot_url=screenshot_url),
+                genre=genre,
+                slug=slug,
             )
-            self._telegram.broadcast_message(message)
         except Exception as exc:
             logger.warning("Telegram publish notification failed (non-fatal): %s", exc)
 
@@ -163,7 +190,7 @@ class SessionPublisher:
             "game_slug": slug,
             "play_url": play_url,
             "screenshot_url": screenshot_url,
-            "marketing_summary": str(publish_copy.get("marketing_summary", "")),
+            "marketing_summary": marketing_summary,
             "play_overview": publish_copy.get("play_overview", []),
             "controls_guide": publish_copy.get("controls_guide", []),
         }

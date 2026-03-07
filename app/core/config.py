@@ -27,13 +27,6 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str | None = None
     telegram_allowed_chat_ids: str = ""
-    telegram_allowed_user_ids: str = ""
-    telegram_webhook_secret: str | None = None
-    telegram_control_enabled: bool = False
-    telegram_failure_report_broadcast: bool = True
-    telegram_allow_dangerous_commands: bool = False
-    telegram_confirm_ttl_seconds: int = Field(default=120, ge=30, le=600)
-    telegram_confirm_secret: str | None = None
 
     x_api_base_url: str = "https://api.x.com"
     x_bearer_token: str | None = None
@@ -108,9 +101,6 @@ class Settings(BaseSettings):
 
     def telegram_allowed_chat_id_set(self) -> set[str]:
         return {chat_id.strip() for chat_id in self.telegram_allowed_chat_ids.split(",") if chat_id.strip()}
-
-    def telegram_allowed_user_id_set(self) -> set[str]:
-        return {user_id.strip() for user_id in self.telegram_allowed_user_ids.split(",") if user_id.strip()}
 
     def trigger_forbidden_keyword_set(self) -> set[str]:
         return {

@@ -19,7 +19,7 @@ Session 기반 대화형 게임 생성 백엔드입니다.
 - Session Store 미연결 시 세션 API는 **503**
 - AI 미연결/실패 시 **Fail-Fast** (stub 반환 금지)
 - 이벤트/대화/저장 payload는 **Always Redacted**
-- 텔레그램은 **publish success 알림만** 전송
+- 텔레그램은 **명령 없는 게임 런치/마케팅 알림 봇**으로 동작하며, 대표 이미지 + 한줄 카피 + 플레이 링크를 우선 전송
 
 ## 로컬 실행
 ```bash
