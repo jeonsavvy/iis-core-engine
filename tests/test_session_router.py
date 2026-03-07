@@ -359,6 +359,7 @@ class FakePublisher:
         recent_history: list[dict[str, Any]] | None = None,
         recent_events: list[dict[str, Any]] | None = None,
         genre_brief: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -369,6 +370,7 @@ class FakePublisher:
                 "recent_history": recent_history or [],
                 "recent_events": recent_events or [],
                 "genre_brief": genre_brief or {},
+                "created_by": created_by,
             }
         )
         return {
@@ -490,6 +492,42 @@ def test_generic_session_title_is_replaced_for_publish_name() -> None:
     assert published.status_code == 200
     publisher_calls = client.app.state.publisher_service.calls
     assert publisher_calls[-1]["game_name"] == "Golden Isles Flight"
+
+
+def test_create_session_tracks_actor_id_from_headers() -> None:
+    client, store = make_client()
+
+    created = client.post(
+        "/api/v1/sessions",
+        json={"title": "Creator Session", "genre_hint": "arcade"},
+        headers={"X-IIS-Actor-Id": "creator-1", "X-IIS-Actor-Role": "creator"},
+    )
+
+    assert created.status_code == 200
+    session_id = created.json()["session_id"]
+    assert store.sessions[session_id]["user_id"] == "creator-1"
+
+
+def test_issue_and_approval_store_actor_id_from_headers() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+
+    issue_response = client.post(
+        f"/api/v1/sessions/{session_id}/issues",
+        json={"title": "버그", "details": "충돌 판정 이상"},
+        headers={"X-IIS-Actor-Id": "creator-1", "X-IIS-Actor-Role": "creator"},
+    )
+    assert issue_response.status_code == 200
+    issue_id = issue_response.json()["issue_id"]
+    assert store.issues[issue_id]["created_by"] == "creator-1"
+
+    approve_response = client.post(
+        f"/api/v1/sessions/{session_id}/approve-publish",
+        json={"note": "ship it"},
+        headers={"X-IIS-Actor-Id": "admin-1", "X-IIS-Actor-Role": "master_admin"},
+    )
+    assert approve_response.status_code == 200
+    assert store.publish_approvals[session_id][-1]["approved_by"] == "admin-1"
 
 
 def test_prompt_run_failure_exposes_error_code() -> None:

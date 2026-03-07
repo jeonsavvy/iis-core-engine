@@ -69,12 +69,12 @@ to service_role
 using (true)
 with check (true);
 
-drop policy if exists builder_contract_reports_select_reviewer_or_admin on public.builder_contract_reports;
-create policy builder_contract_reports_select_reviewer_or_admin
+drop policy if exists builder_contract_reports_select_creator_or_admin on public.builder_contract_reports;
+create policy builder_contract_reports_select_creator_or_admin
 on public.builder_contract_reports
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists builder_contract_reports_service_role_all on public.builder_contract_reports;
 create policy builder_contract_reports_service_role_all
@@ -84,12 +84,12 @@ to service_role
 using (true)
 with check (true);
 
-drop policy if exists capability_profiles_select_reviewer_or_admin on public.capability_profiles;
-create policy capability_profiles_select_reviewer_or_admin
+drop policy if exists capability_profiles_select_creator_or_admin on public.capability_profiles;
+create policy capability_profiles_select_creator_or_admin
 on public.capability_profiles
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists capability_profiles_service_role_all on public.capability_profiles;
 create policy capability_profiles_service_role_all

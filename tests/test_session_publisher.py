@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.core.config import Settings
 from app.services.session_publisher import SessionPublisher
 
@@ -51,3 +53,73 @@ def test_resolve_play_url_uses_public_portal_base_url_when_configured() -> None:
     )
 
     assert publisher._resolve_play_url(slug="neon-drift") == "https://arcade.example.com/play/neon-drift"
+
+
+def test_build_public_game_metadata_derives_catalog_fields() -> None:
+    metadata = SessionPublisher._build_public_game_metadata(
+        slug="golden-isles-flight",
+        game_name="Golden Isles Flight",
+        genre="flight",
+        genre_brief={
+            "archetype": "flight_lowpoly_island_3d",
+            "asset_pack_key": "island_flight_pack_v1",
+            "must_have_mechanics": ["pitch", "ring collect", "reset"],
+        },
+        screenshot_url="https://cdn.example.com/golden-isles-flight.png",
+        marketing_summary="따뜻한 섬과 바다 위를 비행하며 링을 통과하는 3D 비행 게임",
+        play_overview=[
+            "섬 지형과 바다 위를 선회하며 링을 통과하세요.",
+            "기체가 흔들릴 때는 짧게 자세를 보정하는 것이 중요합니다.",
+        ],
+        controls_guide=["피치/요: W/S · A/D", "가속: Shift"],
+    )
+
+    assert metadata["short_description"] == "따뜻한 섬과 바다 위를 비행하며 링을 통과하는 3D 비행 게임"
+    assert "Golden Isles Flight" in metadata["description"]
+    assert metadata["genre_primary"] == "flight"
+    assert metadata["hero_image_url"] == "https://cdn.example.com/golden-isles-flight.png"
+    assert metadata["visibility"] == "public"
+    assert metadata["play_count_cached"] == 0
+    assert "flight" in metadata["genre_tags"]
+    assert "3d" in metadata["genre_tags"]
+    assert "ring-collect" in metadata["genre_tags"]
+    datetime.fromisoformat(metadata["released_at"])
+
+
+def test_publish_uses_session_user_id_for_created_by(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+        )
+    )
+
+    recorded: dict[str, object] = {}
+
+    def fake_publish_game(**kwargs):  # type: ignore[no-untyped-def]
+        recorded.update(kwargs)
+        return {
+            "status": "published",
+            "public_url": "https://cdn.example.com/games/neon-drift/index.html",
+            "game_id": "game-1",
+        }
+
+    monkeypatch.setattr(publisher._publisher, "publish_game", fake_publish_game)
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **_: True)
+    monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
+    publisher._archiver = None
+
+    result = __import__("asyncio").run(
+        publisher.publish(
+            slug="neon-drift",
+            game_name="Neon Drift",
+            genre="racing",
+            html_content="<html>ok</html>",
+            genre_brief={"archetype": "racing_openwheel_circuit_3d"},
+            created_by="user-1",
+        )
+    )
+
+    assert result["success"] is True
+    assert recorded["created_by"] == "user-1"

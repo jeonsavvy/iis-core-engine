@@ -9,7 +9,7 @@ create extension if not exists pgcrypto;
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'app_role') then
-    create type public.app_role as enum ('master_admin', 'reviewer');
+    create type public.app_role as enum ('master_admin', 'creator');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'pipeline_stage') then
@@ -49,7 +49,7 @@ $$;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
-  role public.app_role not null default 'reviewer',
+  role public.app_role not null default 'creator',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -67,7 +67,7 @@ set search_path = public
 as $$
 begin
   insert into public.profiles (id, email, role)
-  values (new.id, coalesce(new.email, ''), 'reviewer')
+  values (new.id, coalesce(new.email, ''), 'creator')
   on conflict (id) do update
     set email = excluded.email,
         updated_at = now();
@@ -112,7 +112,7 @@ as $$
   select coalesce(public.current_user_role() = 'master_admin'::public.app_role, false);
 $$;
 
-create or replace function public.is_reviewer_or_admin()
+create or replace function public.is_creator_or_admin()
 returns boolean
 language sql
 stable
@@ -120,7 +120,7 @@ security definer
 set search_path = public
 as $$
   -- Single-operator mode:
-  -- reviewer role is deprecated for this MVP rollout.
+  -- creator role is used for approved workspace access.
   select coalesce(public.current_user_role() = 'master_admin'::public.app_role, false);
 $$;
 
@@ -322,20 +322,20 @@ to authenticated
 using (id = auth.uid() or public.is_master_admin())
 with check (id = auth.uid() or public.is_master_admin());
 
-drop policy if exists admin_config_select_reviewer_or_admin on public.admin_config;
-create policy admin_config_select_reviewer_or_admin
+drop policy if exists admin_config_select_creator_or_admin on public.admin_config;
+create policy admin_config_select_creator_or_admin
 on public.admin_config
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
-drop policy if exists admin_config_insert_reviewer_or_admin on public.admin_config;
-create policy admin_config_insert_reviewer_or_admin
+drop policy if exists admin_config_insert_creator_or_admin on public.admin_config;
+create policy admin_config_insert_creator_or_admin
 on public.admin_config
 for insert
 to authenticated
 with check (
-  public.is_reviewer_or_admin()
+  public.is_creator_or_admin()
   and (requested_by is null or requested_by = auth.uid())
 );
 
@@ -362,12 +362,12 @@ to service_role
 using (true)
 with check (true);
 
-drop policy if exists pipeline_logs_select_reviewer_or_admin on public.pipeline_logs;
-create policy pipeline_logs_select_reviewer_or_admin
+drop policy if exists pipeline_logs_select_creator_or_admin on public.pipeline_logs;
+create policy pipeline_logs_select_creator_or_admin
 on public.pipeline_logs
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists pipeline_logs_insert_service_role on public.pipeline_logs;
 create policy pipeline_logs_insert_service_role
@@ -384,12 +384,12 @@ to service_role
 using (true)
 with check (true);
 
-drop policy if exists asset_registry_select_reviewer_or_admin on public.asset_registry;
-create policy asset_registry_select_reviewer_or_admin
+drop policy if exists asset_registry_select_creator_or_admin on public.asset_registry;
+create policy asset_registry_select_creator_or_admin
 on public.asset_registry
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists asset_registry_service_role_all on public.asset_registry;
 create policy asset_registry_service_role_all
@@ -399,12 +399,12 @@ to service_role
 using (true)
 with check (true);
 
-drop policy if exists qa_improvement_queue_select_reviewer_or_admin on public.qa_improvement_queue;
-create policy qa_improvement_queue_select_reviewer_or_admin
+drop policy if exists qa_improvement_queue_select_creator_or_admin on public.qa_improvement_queue;
+create policy qa_improvement_queue_select_creator_or_admin
 on public.qa_improvement_queue
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists qa_improvement_queue_service_role_all on public.qa_improvement_queue;
 create policy qa_improvement_queue_service_role_all
@@ -443,7 +443,7 @@ create policy games_metadata_select_active_or_staff
 on public.games_metadata
 for select
 to anon, authenticated
-using (status = 'active'::public.game_status or public.is_reviewer_or_admin());
+using (status = 'active'::public.game_status or public.is_creator_or_admin());
 
 drop policy if exists games_metadata_insert_master_admin on public.games_metadata;
 create policy games_metadata_insert_master_admin

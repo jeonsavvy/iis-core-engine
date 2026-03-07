@@ -7,8 +7,10 @@ interactive session workflow.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse
+from datetime import datetime, timezone
 
 from app.core.config import Settings
 from app.services.quality_service import QualityService
@@ -81,6 +83,71 @@ class SessionPublisher:
             return f"{base_url}/play/{slug}"
         return f"/play/{slug}"
 
+    @staticmethod
+    def _normalize_catalog_tag(value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().casefold()).strip("-")
+        return normalized[:32]
+
+    @classmethod
+    def _build_public_game_metadata(
+        cls,
+        *,
+        slug: str,
+        game_name: str,
+        genre: str,
+        genre_brief: dict[str, Any] | None,
+        screenshot_url: str | None,
+        marketing_summary: str,
+        play_overview: list[str],
+        controls_guide: list[str],
+    ) -> dict[str, Any]:
+        resolved_genre = str(genre or "").strip().casefold() or "arcade"
+        resolved_brief = genre_brief or {}
+        archetype = str(resolved_brief.get("archetype", "") or "").strip().casefold()
+        engine_mode = str(resolved_brief.get("engine_mode", "") or "").strip().casefold()
+        mechanics = [
+            cls._normalize_catalog_tag(str(item))
+            for item in resolved_brief.get("must_have_mechanics", [])
+            if cls._normalize_catalog_tag(str(item))
+        ]
+
+        tags: list[str] = []
+        for candidate in [
+            resolved_genre,
+            "3d" if archetype.endswith("_3d") or engine_mode == "3d_three" else "",
+            "2d" if archetype.endswith("_2d") or engine_mode == "2d_phaser" else "",
+            *mechanics[:4],
+        ]:
+            normalized = cls._normalize_catalog_tag(candidate)
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+
+        summary = marketing_summary.strip()
+        overview = [str(item).strip() for item in play_overview if str(item).strip()]
+        controls = [str(item).strip() for item in controls_guide if str(item).strip()]
+
+        description_lines = [game_name]
+        if summary:
+            description_lines.append(summary)
+        if overview:
+            description_lines.append("핵심 포인트")
+            description_lines.extend(f"- {line}" for line in overview[:3])
+        if controls:
+            description_lines.append("조작")
+            description_lines.extend(f"- {line}" for line in controls[:3])
+
+        return {
+            "slug": slug,
+            "short_description": summary or f"{game_name}을 바로 플레이해보세요.",
+            "description": "\n".join(description_lines),
+            "genre_primary": resolved_genre,
+            "genre_tags": tags,
+            "hero_image_url": screenshot_url,
+            "released_at": datetime.now(timezone.utc).isoformat(),
+            "visibility": "public",
+            "play_count_cached": 0,
+        }
+
 
     async def publish(
         self,
@@ -92,6 +159,7 @@ class SessionPublisher:
         recent_history: list[dict[str, Any]] | None = None,
         recent_events: list[dict[str, Any]] | None = None,
         genre_brief: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> dict[str, Any]:
         """Publish game HTML to Supabase storage + games_metadata.
 
@@ -105,6 +173,7 @@ class SessionPublisher:
             html_content=html_content,
             artifact_files=None,
             entrypoint_path=None,
+            created_by=created_by,
         )
 
         public_url = result.get("public_url", "")
@@ -144,16 +213,36 @@ class SessionPublisher:
                 logger.warning("Publish copy generation failed (fallback in use): %s", exc)
 
         marketing_summary = str(publish_copy.get("marketing_summary", "")).strip()
+        play_overview = [str(item) for item in publish_copy.get("play_overview", [])] if isinstance(publish_copy.get("play_overview"), list) else []
+        controls_guide = [str(item) for item in publish_copy.get("controls_guide", [])] if isinstance(publish_copy.get("controls_guide"), list) else []
+        public_game_metadata = self._build_public_game_metadata(
+            slug=slug,
+            game_name=game_name,
+            genre=genre,
+            genre_brief=genre_brief,
+            screenshot_url=screenshot_url,
+            marketing_summary=marketing_summary,
+            play_overview=play_overview,
+            controls_guide=controls_guide,
+        )
 
         self._publisher.update_game_marketing(
             slug=slug,
-            ai_review="\n".join(str(item) for item in publish_copy.get("play_overview", [])[:3]).strip() or None,
+            ai_review="\n".join(play_overview[:3]).strip() or None,
             screenshot_url=screenshot_url,
             thumbnail_url=thumbnail_url,
             marketing_summary=marketing_summary or None,
-            play_overview=[str(item) for item in publish_copy.get("play_overview", [])] if isinstance(publish_copy.get("play_overview"), list) else None,
-            controls_guide=[str(item) for item in publish_copy.get("controls_guide", [])] if isinstance(publish_copy.get("controls_guide"), list) else None,
+            play_overview=play_overview or None,
+            controls_guide=controls_guide or None,
             publish_copy_version="v1",
+            short_description=str(public_game_metadata.get("short_description", "")).strip() or None,
+            description=str(public_game_metadata.get("description", "")).strip() or None,
+            genre_primary=str(public_game_metadata.get("genre_primary", "")).strip() or None,
+            genre_tags=public_game_metadata.get("genre_tags") if isinstance(public_game_metadata.get("genre_tags"), list) else None,
+            hero_image_url=str(public_game_metadata.get("hero_image_url", "")).strip() or None,
+            released_at=str(public_game_metadata.get("released_at", "")).strip() or None,
+            visibility=str(public_game_metadata.get("visibility", "")).strip() or None,
+            play_count_cached=int(public_game_metadata.get("play_count_cached", 0) or 0),
         )
 
         # Archive to GitHub repo (best-effort, non-blocking)
@@ -191,6 +280,6 @@ class SessionPublisher:
             "play_url": play_url,
             "screenshot_url": screenshot_url,
             "marketing_summary": marketing_summary,
-            "play_overview": publish_copy.get("play_overview", []),
-            "controls_guide": publish_copy.get("controls_guide", []),
+            "play_overview": play_overview,
+            "controls_guide": controls_guide,
         }

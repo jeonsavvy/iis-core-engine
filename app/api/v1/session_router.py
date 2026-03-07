@@ -418,6 +418,14 @@ def _get_session_store(request: Request) -> SessionStoreProtocol:
     return cast(SessionStoreProtocol, store)
 
 
+def _resolve_actor(request: Request) -> tuple[str | None, str | None]:
+    actor_id = request.headers.get("X-IIS-Actor-Id")
+    actor_role = request.headers.get("X-IIS-Actor-Role")
+    resolved_actor_id = actor_id.strip() if isinstance(actor_id, str) and actor_id.strip() else None
+    resolved_actor_role = actor_role.strip() if isinstance(actor_role, str) and actor_role.strip() else None
+    return resolved_actor_id, resolved_actor_role
+
+
 def _load_session_or_404(store: SessionStoreProtocol, session_id: str) -> dict[str, Any]:
     session = store.get_session(session_id)
     if not session:
@@ -1261,7 +1269,8 @@ def _build_plan_draft(prompt: str, genre_hint: str) -> PlanDraftResponse:
 async def create_session(body: CreateSessionRequest, request: Request) -> CreateSessionResponse:
     """Create a new interactive game editing session."""
     store = _get_session_store(request)
-    created = store.create_session(title=body.title, genre=body.genre_hint)
+    actor_id, actor_role = _resolve_actor(request)
+    created = store.create_session(user_id=actor_id, title=body.title, genre=body.genre_hint)
     session_id = str(created.get("id", ""))
     if not session_id:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Session ID missing")
@@ -1275,6 +1284,7 @@ async def create_session(body: CreateSessionRequest, request: Request) -> Create
         decision_reason="user_requested_new_session",
         change_impact="session_initialized",
         confidence=1.0,
+        metadata={"actor_id": actor_id, "actor_role": actor_role} if actor_id or actor_role else {},
     )
     logger.info("Session created: %s", session_id)
     return CreateSessionResponse(
@@ -1602,6 +1612,7 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
     _load_session_or_404(store, session_id)
 
     attachment_meta = _attachment_metadata(body.image_attachment)
+    actor_id, actor_role = _resolve_actor(request)
     normalized_category = (
         _infer_issue_category(title=body.title, details=body.details, has_attachment=bool(attachment_meta))
         if body.category.strip().casefold() in {"", "auto"}
@@ -1612,6 +1623,7 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
         title=body.title,
         details=body.details,
         category=normalized_category,
+        created_by=actor_id or actor_role or "creator",
     )
     store.add_conversation_message(
         session_id=session_id,
@@ -1636,6 +1648,8 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
             "category": normalized_category,
             "routed_agents": routed_agents,
             "has_image_attachment": bool(attachment_meta),
+            "actor_id": actor_id,
+            "actor_role": actor_role,
         },
     )
 
@@ -1832,7 +1846,8 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
 async def approve_publish(session_id: str, body: ApprovePublishRequest, request: Request) -> ApprovePublishResponse:
     store = _get_session_store(request)
     _load_session_or_404(store, session_id)
-    approval = store.create_publish_approval(session_id=session_id, note=body.note)
+    actor_id, actor_role = _resolve_actor(request)
+    approval = store.create_publish_approval(session_id=session_id, approved_by=actor_id or actor_role or "master_admin", note=body.note)
     store.add_session_event(
         session_id=session_id,
         event_type="publish_approved",
@@ -1842,7 +1857,7 @@ async def approve_publish(session_id: str, body: ApprovePublishRequest, request:
         input_signal=body.note[:500],
         change_impact="publish_unlocked",
         confidence=1.0,
-        metadata={"approval_id": approval.get("id")},
+        metadata={"approval_id": approval.get("id"), "actor_id": actor_id, "actor_role": actor_role},
     )
     return ApprovePublishResponse(
         session_id=session_id,
@@ -1928,6 +1943,7 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
         )
 
     try:
+        actor_id, _ = _resolve_actor(request)
         publish_result = await publisher.publish(
             slug=slug,
             game_name=game_name,
@@ -1936,6 +1952,7 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             recent_history=recent_history,
             recent_events=recent_events,
             genre_brief=genre_brief,
+            created_by=str(session.get("user_id") or actor_id or "").strip() or None,
         )
         store.update_session_status(session_id, "published")
         game_slug = str(publish_result.get("game_slug", slug))

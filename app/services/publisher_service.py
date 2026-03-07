@@ -25,6 +25,7 @@ class PublisherService:
         html_content: str,
         artifact_files: list[dict[str, str]] | None = None,
         entrypoint_path: str | None = None,
+        created_by: str | None = None,
     ) -> dict[str, Any]:
         try:
             fallback_entry = self._normalize_storage_path(entrypoint_path or f"games/{slug}/index.html", slug)
@@ -106,6 +107,8 @@ class PublisherService:
             "status": "active",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if created_by:
+            metadata_row["created_by"] = created_by
 
         try:
             result = self.client.table("games_metadata").upsert(metadata_row, on_conflict="slug").execute()
@@ -163,6 +166,15 @@ class PublisherService:
         play_overview: list[str] | None = None,
         controls_guide: list[str] | None = None,
         publish_copy_version: str | None = None,
+        short_description: str | None = None,
+        description: str | None = None,
+        genre_primary: str | None = None,
+        genre_tags: list[str] | None = None,
+        hero_image_url: str | None = None,
+        featured_rank: int | None = None,
+        released_at: str | None = None,
+        visibility: str | None = None,
+        play_count_cached: int | None = None,
     ) -> bool:
         if not self.client:
             return False
@@ -182,6 +194,24 @@ class PublisherService:
             update_dist["controls_guide"] = controls_guide
         if publish_copy_version is not None:
             update_dist["publish_copy_version"] = publish_copy_version
+        if short_description is not None:
+            update_dist["short_description"] = short_description
+        if description is not None:
+            update_dist["description"] = description
+        if genre_primary is not None:
+            update_dist["genre_primary"] = genre_primary
+        if genre_tags is not None:
+            update_dist["genre_tags"] = genre_tags
+        if hero_image_url is not None:
+            update_dist["hero_image_url"] = hero_image_url
+        if featured_rank is not None:
+            update_dist["featured_rank"] = featured_rank
+        if released_at is not None:
+            update_dist["released_at"] = released_at
+        if visibility is not None:
+            update_dist["visibility"] = visibility
+        if play_count_cached is not None:
+            update_dist["play_count_cached"] = play_count_cached
 
         if not update_dist:
             return True

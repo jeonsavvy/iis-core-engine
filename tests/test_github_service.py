@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.core.config import Settings
-from app.services.github_service import GitHubArchiveService
+from app.services.github_service import CommandRunner, GitHubArchiveService
 
 
 def _prepare_archive_repo(root: Path) -> Path:
@@ -254,6 +254,35 @@ def test_commit_archive_game_runs_archive_guard_when_script_exists(tmp_path, mon
     )
     add_index = next(idx for idx, cmd in enumerate(calls) if cmd[:3] == ["git", "add", "--all"])
     assert add_index < guard_index
+
+
+def test_archive_service_supports_injected_command_runner(tmp_path) -> None:
+    repo_path = _prepare_archive_repo(tmp_path)
+    (repo_path / "manifest" / "games.json").write_text(json.dumps({"schema_version": 1, "games": []}), encoding="utf-8")
+
+    calls: list[list[str]] = []
+
+    class StubRunner(CommandRunner):
+        def run(self, cmd, **kwargs):  # type: ignore[override]
+            normalized = [str(item) for item in cmd]
+            calls.append(normalized)
+            if normalized[:3] == ["git", "status", "--porcelain"]:
+                return SimpleNamespace(stdout=" M manifest/games.json\n", returncode=0)
+            return SimpleNamespace(stdout="", returncode=0)
+
+    service = GitHubArchiveService(Settings(), runner=StubRunner())
+    service.repo_path = str(repo_path)
+
+    result = service.commit_archive_game(
+        game_slug="runner-game",
+        game_name="Runner Game",
+        genre="arcade",
+        html_content="<html></html>",
+        public_url="https://example.com/games/runner-game/index.html",
+    )
+
+    assert result["status"] == "committed"
+    assert ["git", "push"] in calls
 
 
 def test_commit_archive_game_aborts_when_archive_guard_fails(tmp_path, monkeypatch) -> None:

@@ -192,12 +192,12 @@ alter table public.qa_improvement_queue enable row level security;
 grant select on public.qa_improvement_queue to authenticated;
 grant all privileges on public.qa_improvement_queue to service_role;
 
-drop policy if exists qa_improvement_queue_select_reviewer_or_admin on public.qa_improvement_queue;
-create policy qa_improvement_queue_select_reviewer_or_admin
+drop policy if exists qa_improvement_queue_select_creator_or_admin on public.qa_improvement_queue;
+create policy qa_improvement_queue_select_creator_or_admin
 on public.qa_improvement_queue
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists qa_improvement_queue_service_role_all on public.qa_improvement_queue;
 create policy qa_improvement_queue_service_role_all

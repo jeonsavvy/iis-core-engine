@@ -35,11 +35,17 @@ ARCHIVE_MAX_FILE_BYTES = 5 * 1024 * 1024
 ARCHIVE_GIT_TIMEOUT_SECONDS = 20
 
 
+class CommandRunner:
+    def run(self, cmd: list[str], **kwargs: Any) -> Any:
+        return subprocess.run(cmd, **kwargs)
+
+
 class GitHubArchiveService:
     """Repo3 archive commit integration via local subprocess GitOps."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, runner: CommandRunner | None = None) -> None:
         self.settings = settings
+        self.runner = runner or CommandRunner()
         # iis-core-engine/app/services/github_service.py
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         self.repo_path = os.path.join(base_dir, "iis-games-archive")
@@ -135,12 +141,12 @@ class GitHubArchiveService:
         try:
             commit_msg = f"feat: archive {game_slug}"
 
-            st = subprocess.run(
+            st = self.runner.run(
                 ["git", "status", "--porcelain"], cwd=self.repo_path, capture_output=True, text=True
             )
             if st.stdout.strip():
-                subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
-                subprocess.run(["git", "push"], cwd=self.repo_path, check=True)
+                self.runner.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
+                self.runner.run(["git", "push"], cwd=self.repo_path, check=True)
                 return {"status": "committed", "slug": game_slug, "message": commit_msg}
             else:
                 return {"status": "skipped", "reason": "no changes to commit"}
@@ -188,12 +194,12 @@ class GitHubArchiveService:
         try:
             commit_msg = f"chore: delete archive {game_slug}"
 
-            st = subprocess.run(
+            st = self.runner.run(
                 ["git", "status", "--porcelain"], cwd=self.repo_path, capture_output=True, text=True
             )
             if st.stdout.strip():
-                subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
-                subprocess.run(["git", "push"], cwd=self.repo_path, check=True)
+                self.runner.run(["git", "commit", "-m", commit_msg], cwd=self.repo_path, check=True)
+                self.runner.run(["git", "push"], cwd=self.repo_path, check=True)
                 return {"status": "deleted", "slug": game_slug, "message": commit_msg}
             else:
                 return {"status": "skipped", "reason": "no changes to commit"}
@@ -203,7 +209,7 @@ class GitHubArchiveService:
 
     def _stage_archive_changes(self) -> str | None:
         try:
-            subprocess.run(
+            self.runner.run(
                 ["git", "add", "--all"],
                 cwd=self.repo_path,
                 check=True,
@@ -222,7 +228,7 @@ class GitHubArchiveService:
 
     def _sync_archive_repo(self) -> str | None:
         try:
-            subprocess.run(
+            self.runner.run(
                 ["git", "fetch", "--prune", "origin", "main"],
                 cwd=self.repo_path,
                 check=True,
@@ -230,7 +236,7 @@ class GitHubArchiveService:
                 text=True,
                 timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
             )
-            subprocess.run(
+            self.runner.run(
                 ["git", "checkout", "main"],
                 cwd=self.repo_path,
                 check=True,
@@ -238,7 +244,7 @@ class GitHubArchiveService:
                 text=True,
                 timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
             )
-            subprocess.run(
+            self.runner.run(
                 ["git", "reset", "--hard", "origin/main"],
                 cwd=self.repo_path,
                 check=True,
@@ -246,7 +252,7 @@ class GitHubArchiveService:
                 text=True,
                 timeout=ARCHIVE_GIT_TIMEOUT_SECONDS,
             )
-            subprocess.run(
+            self.runner.run(
                 ["git", "clean", "-fd"],
                 cwd=self.repo_path,
                 check=True,
@@ -269,7 +275,7 @@ class GitHubArchiveService:
             return None
 
         try:
-            proc = subprocess.run(
+            proc = self.runner.run(
                 [sys.executable, "scripts/archive_guard.py", "all"],
                 cwd=self.repo_path,
                 check=True,
@@ -289,7 +295,7 @@ class GitHubArchiveService:
 
         def _run_git(args: list[str]) -> None:
             try:
-                subprocess.run(args, cwd=self.repo_path, check=False, capture_output=True, text=True)
+                self.runner.run(args, cwd=self.repo_path, check=False, capture_output=True, text=True)
             except Exception:
                 return
 

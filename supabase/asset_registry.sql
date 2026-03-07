@@ -42,12 +42,12 @@ grant all privileges on public.asset_registry to service_role;
 
 alter table public.asset_registry enable row level security;
 
-drop policy if exists asset_registry_select_reviewer_or_admin on public.asset_registry;
-create policy asset_registry_select_reviewer_or_admin
+drop policy if exists asset_registry_select_creator_or_admin on public.asset_registry;
+create policy asset_registry_select_creator_or_admin
 on public.asset_registry
 for select
 to authenticated
-using (public.is_reviewer_or_admin());
+using (public.is_creator_or_admin());
 
 drop policy if exists asset_registry_service_role_all on public.asset_registry;
 create policy asset_registry_service_role_all
