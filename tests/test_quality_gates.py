@@ -292,6 +292,54 @@ def test_evaluate_quality_contract_rejects_when_2d_engine_contract_is_missing() 
     assert "engine_contract_2d_phaser_missing" in result.failed_checks
 
 
+def test_evaluate_gameplay_gate_tracks_topdown_pause_xp_bounds_and_variety() -> None:
+    settings = Settings(qa_min_gameplay_score=55)
+    html = """
+    <html>
+      <body class="safe-area overflow-guard">
+        <canvas id="game"></canvas>
+        <script>
+          const config = { mode: "topdown_roguelike_shooter" };
+          let bullets = [];
+          let enemyType = "flanker";
+          let alternateEnemyType = "bruiser";
+          let dashCooldown = 0;
+          function update() { requestAnimationFrame(update); }
+          function fireBullet() {}
+          function attack() {}
+          function triggerGameOver() {}
+          function resolveDashTarget() {}
+          function gainXp() {}
+          function restartGame() {}
+          function presentUpgradeChoices() { physics.world.pause(); }
+          function applyUpgrade() { physics.world.resume(); }
+          const player = { setCollideWorldBounds() {} };
+          const physics = { world: { pause() {}, resume() {} } };
+          player.setCollideWorldBounds(true);
+          physics.world.setBounds = () => {};
+          document.addEventListener("keydown", () => {});
+          document.addEventListener("pointermove", () => {});
+        </script>
+      </body>
+    </html>
+    """
+
+    result = evaluate_gameplay_gate(
+        settings,
+        html,
+        design_spec={"text_overflow_policy": "ellipsis-clamp"},
+        genre="topdown shooter",
+        genre_engine="topdown_roguelike_shooter",
+        keyword="mouse aim arena shooter",
+    )
+
+    assert result.checks["combat_mechanical_depth"] is True
+    assert result.checks["topdown_upgrade_pause"] is True
+    assert result.checks["topdown_kill_fed_xp"] is True
+    assert result.checks["topdown_arena_lock"] is True
+    assert result.checks["topdown_enemy_variety"] is True
+
+
 def test_evaluate_intent_gate_passes_when_intent_tokens_are_present() -> None:
     html = """
     <html><body>

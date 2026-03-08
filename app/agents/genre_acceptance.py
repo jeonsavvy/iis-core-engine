@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -163,18 +165,30 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
         failures.append("enemy_pressure_missing")
     if "xp" not in lowered:
         failures.append("xp_loop_missing")
+    if "gainxp(" not in lowered:
+        failures.append("kill_xp_loop_missing")
     if "level" not in lowered:
         failures.append("level_loop_missing")
     if "upgrade" not in lowered:
         failures.append("upgrade_loop_missing")
+    if "physics.world.pause()" not in lowered or "physics.world.resume()" not in lowered:
+        failures.append("upgrade_pause_missing")
     if "resolvedashtarget" not in lowered:
         failures.append("dash_targeting_missing")
+    if "setcollideworldbounds(true)" not in lowered or "world.setbounds" not in lowered:
+        failures.append("arena_lock_missing")
     if "coverblocks" not in lowered and "arena cover" not in lowered:
         failures.append("arena_landmark_missing")
+    if "triggergameover" not in lowered and "game over" not in lowered:
+        failures.append("game_over_flow_missing")
+    if "flanker" not in lowered or "bruiser" not in lowered:
+        failures.append("enemy_variety_missing")
     if "shake(" not in lowered:
         failures.append("screen_shake_missing")
     if "requestanimationframe" not in lowered:
         failures.append("animation_loop_missing")
+    if re.search(r"\breload\b", lowered) and "ammo" not in lowered:
+        failures.append("forced_reload_regression")
     if any(token in lowered for token in ("clicker", "auto click", "8-way shooter")):
         failures.append("flat_shooter_regression")
     return _report(
@@ -185,6 +199,7 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
             "has_enemy_bullets": "enemybullets" in lowered or "fireenemybullet" in lowered,
             "has_cover": "coverblocks" in lowered or "arena cover" in lowered,
             "has_upgrades": "upgrade" in lowered,
+            "has_enemy_variety": "flanker" in lowered and "bruiser" in lowered,
         },
     )
 

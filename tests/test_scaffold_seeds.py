@@ -111,3 +111,16 @@ def test_topdown_scaffold_contains_resilient_start_flow() -> None:
     assert 'startbutton?.addeventlistener("pointerdown"' in html or "startbutton?.addeventlistener('pointerdown'" in html
     assert "delayedcall(480, beginrun)" in html or "settimeout(beginrun" in html
     assert "if (!gamestate.started)" in html
+
+
+def test_topdown_scaffold_contains_pause_game_over_and_enemy_variety_guards() -> None:
+    seed = get_scaffold_seed("phaser_twinstick_arena_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "hp: 5" in html
+    assert "maxhp: 5" in html
+    assert "triggergameover" in html
+    assert "physics.world.pause()" in html
+    assert "physics.world.resume()" in html
+    assert "flanker" in html
+    assert "bruiser" in html

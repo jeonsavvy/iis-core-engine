@@ -167,6 +167,14 @@ class PlaytesterAgent:
                 issues.append("Missing arena cover landmarks")
             if "resolvedashtarget" not in lower:
                 issues.append("Missing dash collision resolver")
+            if "physics.world.pause()" not in lower or "physics.world.resume()" not in lower:
+                issues.append("Missing pause-on-upgrade flow")
+            if "triggergameover" not in lower and "game over" not in lower:
+                issues.append("Missing game-over defeat flow")
+            if "flanker" not in lower or "bruiser" not in lower:
+                issues.append("Missing enemy archetype variety")
+            if "gainxp(" not in lower:
+                issues.append("Missing kill-fed xp progression")
             if "xp" not in lower or "level" not in lower or "upgrade" not in lower:
                 issues.append("Missing progression upgrade loop")
             if "shake(" not in lower:

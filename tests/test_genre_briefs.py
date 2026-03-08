@@ -45,3 +45,15 @@ def test_topdown_brief_selects_twinstick_archetype() -> None:
     assert brief["scaffold_key"] == "phaser_twinstick_arena_seed"
     assert brief["asset_pack_key"] == "topdown_lowpoly_pack_v1"
     assert brief["first_frame_requirements"]
+
+
+def test_topdown_brief_requires_paused_upgrades_kill_xp_and_no_forced_reload() -> None:
+    brief = build_genre_brief(
+        user_prompt="마우스로 조준하고 클릭으로 발사하는 탑뷰 슈팅 게임",
+        genre_hint="topdown shooter",
+    )
+
+    joined_contracts = " ".join(brief["structural_contracts"]).lower()
+    assert "pause" in joined_contracts
+    assert "xp" in joined_contracts
+    assert "reload" not in joined_contracts

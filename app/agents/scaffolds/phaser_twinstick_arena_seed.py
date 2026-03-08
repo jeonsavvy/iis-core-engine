@@ -16,25 +16,32 @@ TOPDOWN_HTML = dedent(
       <style>
         html, body { margin: 0; height: 100%; overflow: hidden; background: #050816; font-family: Inter, system-ui, sans-serif; color: #f8fafc; }
         #game-root { width: 100%; height: 100%; position: relative; }
-        #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; min-width: 220px; padding: 12px 14px; border-radius: 14px; background: rgba(2, 6, 23, 0.55); border: 1px solid rgba(34, 211, 238, 0.24); z-index: 20; pointer-events: none; }
+        #hud { position: absolute; top: 18px; left: 18px; display: grid; gap: 6px; min-width: 240px; padding: 12px 14px; border-radius: 14px; background: rgba(2, 6, 23, 0.55); border: 1px solid rgba(34, 211, 238, 0.24); z-index: 20; pointer-events: none; }
         #hud strong { font-size: 26px; color: #f472b6; }
         #hud span { font-size: 13px; color: #dbeafe; }
         #tips { position: absolute; top: 18px; right: 18px; z-index: 20; padding: 12px 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(148, 163, 184, 0.24); font-size: 12px; line-height: 1.45; pointer-events: none; }
         #crosshair { position: absolute; width: 22px; height: 22px; border: 2px solid rgba(34, 211, 238, 0.75); border-radius: 999px; transform: translate(-50%, -50%); pointer-events: none; z-index: 15; box-shadow: 0 0 16px rgba(34, 211, 238, 0.2); }
-        #title-screen { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.4) 0%, rgba(2, 6, 23, 0.92) 72%); }
-        #title-card { width: min(420px, calc(100% - 48px)); padding: 24px 28px; border-radius: 18px; background: rgba(8, 15, 32, 0.82); border: 1px solid rgba(34, 211, 238, 0.24); box-shadow: 0 0 48px rgba(34, 211, 238, 0.12); text-align: center; }
-        #title-card h1 { margin: 0 0 12px; font-size: 34px; color: #67e8f9; letter-spacing: 0.12em; text-transform: uppercase; }
-        #title-card p { margin: 0 0 18px; color: #fbcfe8; line-height: 1.6; font-size: 14px; }
-        #title-card button { min-height: 42px; padding: 0 18px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #06b6d4, #ec4899); color: white; font-size: 14px; font-weight: 800; cursor: pointer; }
+        .overlay-screen { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.4) 0%, rgba(2, 6, 23, 0.92) 72%); }
+        .overlay-card { width: min(440px, calc(100% - 48px)); padding: 24px 28px; border-radius: 18px; background: rgba(8, 15, 32, 0.82); border: 1px solid rgba(34, 211, 238, 0.24); box-shadow: 0 0 48px rgba(34, 211, 238, 0.12); text-align: center; }
+        .overlay-card h1, .overlay-card h2 { margin: 0 0 12px; font-size: 34px; color: #67e8f9; letter-spacing: 0.12em; text-transform: uppercase; }
+        .overlay-card p { margin: 0 0 18px; color: #fbcfe8; line-height: 1.6; font-size: 14px; }
+        .overlay-card button { min-height: 42px; padding: 0 18px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #06b6d4, #ec4899); color: white; font-size: 14px; font-weight: 800; cursor: pointer; }
       </style>
     </head>
     <body>
       <div id="game-root">
-        <div id="title-screen">
-          <div id="title-card">
+        <div id="title-screen" class="overlay-screen">
+          <div class="overlay-card">
             <h1>LOWPOLY SIEGE</h1>
             <p>로우폴리 전장에서 커버를 돌며 적 압박을 끊어내세요. 대시로 각을 만들고 웨이브를 버티는 택티컬 탑뷰 슈팅 베이스라인입니다.</p>
             <button id="start-button" type="button">START RUN</button>
+          </div>
+        </div>
+        <div id="game-over-screen" class="overlay-screen" style="display:none;">
+          <div class="overlay-card">
+            <h2 id="game-over-title">RUN BROKEN</h2>
+            <p id="game-over-detail">HP를 모두 잃었습니다. 전장을 다시 읽고 재진입하세요.</p>
+            <button id="restart-button" type="button">RESTART RUN</button>
           </div>
         </div>
         <div id="crosshair"></div>
@@ -42,9 +49,9 @@ TOPDOWN_HTML = dedent(
           <span>LOWPOLY TACTICAL ARENA</span>
           <strong id="wave-readout">Wave 1</strong>
           <span id="status-readout">Dash ready · Hold the arena</span>
-          <span id="xp-readout">Level 1 · XP 0 / 120</span>
+          <span id="xp-readout">Level 1 · XP 0 / 110</span>
           <span id="combo-readout">Combo 0 · Enemies 0</span>
-          <span id="threat-readout">Threat 0 · Dash ready</span>
+          <span id="threat-readout">Threat 0 · HP 5/5 · Dash ready</span>
         </div>
         <div id="tips">
           <b>Controls</b><br />
@@ -57,7 +64,7 @@ TOPDOWN_HTML = dedent(
         <div id="upgrade-overlay" style="display:none;position:absolute;inset:0;z-index:28;align-items:center;justify-content:center;background:rgba(2,6,23,0.74);">
           <div id="upgrade-card" style="width:min(460px,calc(100% - 48px));padding:24px 28px;border-radius:18px;background:rgba(8,15,32,0.92);border:1px solid rgba(34,211,238,0.24);box-shadow:0 0 48px rgba(34,211,238,0.12);">
             <h2 style="margin:0 0 10px;font-size:28px;color:#67e8f9;letter-spacing:0.04em;">LEVEL UP</h2>
-            <p style="margin:0 0 18px;color:#cbd5e1;line-height:1.6;font-size:14px;">하나를 선택해 이번 런을 강화하세요.</p>
+            <p style="margin:0 0 18px;color:#cbd5e1;line-height:1.6;font-size:14px;">전장을 멈추고 하나를 골라 빌드 방향을 정하세요.</p>
             <div id="upgrade-choices" style="display:grid;gap:10px;"></div>
           </div>
         </div>
@@ -77,7 +84,11 @@ TOPDOWN_HTML = dedent(
         const comboReadout = document.getElementById("combo-readout");
         const threatReadout = document.getElementById("threat-readout");
         const titleScreen = document.getElementById("title-screen");
+        const gameOverScreen = document.getElementById("game-over-screen");
+        const gameOverTitle = document.getElementById("game-over-title");
+        const gameOverDetail = document.getElementById("game-over-detail");
         const startButton = document.getElementById("start-button");
+        const restartButton = document.getElementById("restart-button");
         const upgradeOverlay = document.getElementById("upgrade-overlay");
         const upgradeChoices = document.getElementById("upgrade-choices");
 
@@ -91,16 +102,22 @@ TOPDOWN_HTML = dedent(
           started: false,
           level: 1,
           xp: 0,
-          xpNext: 120,
+          xpNext: 110,
           upgradePending: false,
           fireRateMul: 1,
           pierceShots: 0,
           spreadShot: 0,
           moveSpeedMul: 1,
-          hp: 3,
-          maxHp: 3,
-          dashDistance: 170,
+          bulletSpeedMul: 1,
+          hp: 5,
+          maxHp: 5,
+          dashDistance: 210,
           dashInvuln: 0,
+          dashTweenActive: false,
+          tempoBoostMs: 0,
+          tempoBoostUntil: 0,
+          shockwaveRadius: 0,
+          impactBurst: 0,
         };
 
         const config = {
@@ -120,7 +137,7 @@ TOPDOWN_HTML = dedent(
           }
         };
 
-        let sceneRef, player, cursors, keys, bullets, enemyBullets, enemies, coverBlocks, rewardShards, pointerAim = { x: 0, y: 0 }, dashGhosts;
+        let sceneRef, player, cursors, keys, bullets, enemyBullets, enemies, coverBlocks, pointerAim = { x: 0, y: 0 }, dashGhosts;
         let coverRects = [];
         const game = new Phaser.Game(config);
 
@@ -140,11 +157,9 @@ TOPDOWN_HTML = dedent(
           g.generateTexture("enemy-core", 28, 28);
           g.clear();
 
-          this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width - 120, this.scale.height - 120, 0x081225, 1)
+          this.physics.world.setBounds(42, 42, this.scale.width - 84, this.scale.height - 84);
+          this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width - 84, this.scale.height - 84, 0x081225, 1)
             .setStrokeStyle(2, 0x1e3a8a, 0.55);
-          for (let i = 0; i < 6; i += 1) {
-            this.add.rectangle(180 + i * 150, 170 + (i % 2) * 260, 48, 16, 0x0f172a, 1).setStrokeStyle(2, 0x334155, 0.45);
-          }
 
           player = this.physics.add.image(this.scale.width / 2, this.scale.height / 2, "player-core");
           player.setCollideWorldBounds(true);
@@ -154,19 +169,21 @@ TOPDOWN_HTML = dedent(
           bullets = this.physics.add.group();
           enemyBullets = this.physics.add.group();
           enemies = this.physics.add.group();
-          rewardShards = this.physics.add.group();
           coverBlocks = this.physics.add.staticGroup();
           dashGhosts = this.add.group();
 
           const arenaCoverLayout = [
-            [this.scale.width * 0.28, this.scale.height * 0.32, 90, 28],
-            [this.scale.width * 0.72, this.scale.height * 0.34, 90, 28],
-            [this.scale.width * 0.48, this.scale.height * 0.58, 130, 30],
-            [this.scale.width * 0.22, this.scale.height * 0.72, 70, 22],
-            [this.scale.width * 0.78, this.scale.height * 0.72, 70, 22],
+            [this.scale.width * 0.24, this.scale.height * 0.26, 96, 30],
+            [this.scale.width * 0.52, this.scale.height * 0.24, 128, 26],
+            [this.scale.width * 0.78, this.scale.height * 0.3, 100, 30],
+            [this.scale.width * 0.34, this.scale.height * 0.56, 132, 32],
+            [this.scale.width * 0.66, this.scale.height * 0.58, 132, 32],
+            [this.scale.width * 0.22, this.scale.height * 0.74, 84, 24],
+            [this.scale.width * 0.78, this.scale.height * 0.74, 84, 24],
           ];
-          arenaCoverLayout.forEach(([x, y, width, height]) => {
-            const cover = this.add.rectangle(x, y, width, height, 0x0f172a, 1).setStrokeStyle(2, 0x475569, 0.55);
+          arenaCoverLayout.forEach(([x, y, width, height], index) => {
+            const color = index % 2 === 0 ? 0x0f172a : 0x172554;
+            const cover = this.add.rectangle(x, y, width, height, color, 1).setStrokeStyle(2, 0x475569, 0.55);
             this.physics.add.existing(cover, true);
             coverBlocks.add(cover);
           });
@@ -186,7 +203,16 @@ TOPDOWN_HTML = dedent(
             if (gameState.started) return;
             gameState.started = true;
             if (titleScreen) titleScreen.style.display = "none";
-            statusReadout.textContent = "Run live · dash through the barrage";
+            if (gameOverScreen) gameOverScreen.style.display = "none";
+            sceneRef.physics.world.resume();
+            player.setActive(true).setVisible(true);
+            player.body.enable = true;
+            statusReadout.textContent = "Run live · cut angles and break the siege";
+            updateHud();
+          };
+          const restartRun = () => {
+            resetArena();
+            beginRun();
           };
           this.input.on("pointerdown", () => {
             if (!gameState.started) {
@@ -201,11 +227,12 @@ TOPDOWN_HTML = dedent(
             event.stopPropagation();
             beginRun();
           });
-          startButton?.addEventListener("touchend", (event) => {
+          restartButton?.addEventListener("click", restartRun);
+          restartButton?.addEventListener("pointerdown", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            beginRun();
-          }, { passive: false });
+            restartRun();
+          });
           window.addEventListener("keydown", (event) => {
             if (!gameState.started && ["Enter", "Space", "KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
               beginRun();
@@ -216,7 +243,6 @@ TOPDOWN_HTML = dedent(
           this.physics.add.overlap(bullets, enemies, onBulletHitEnemy);
           this.physics.add.overlap(player, enemies, onPlayerHitEnemy);
           this.physics.add.overlap(player, enemyBullets, onPlayerHitByBullet);
-          this.physics.add.overlap(player, rewardShards, onPickupRewardShard);
           this.physics.add.collider(player, coverBlocks);
           this.physics.add.collider(enemies, coverBlocks);
           this.physics.add.collider(enemyBullets, coverBlocks, (bullet) => bullet.destroy());
@@ -231,20 +257,28 @@ TOPDOWN_HTML = dedent(
           const dt = delta / 1000;
           if (!player) return;
           if (!gameState.started) return;
-          if (gameState.upgradePending) return;
 
           if (Phaser.Input.Keyboard.JustDown(keys.R)) {
             resetArena();
+            return;
           }
 
+          if (gameState.upgradePending) return;
+
+          if (gameState.dashTweenActive) {
+            gameState.dashInvuln = Math.max(0, gameState.dashInvuln - dt);
+            return;
+          }
+
+          const tempoBoostActive = gameState.tempoBoostUntil > time;
           const moveX = (keys.D.isDown || cursors.right.isDown ? 1 : 0) - (keys.A.isDown || cursors.left.isDown ? 1 : 0);
           const moveY = (keys.S.isDown || cursors.down.isDown ? 1 : 0) - (keys.W.isDown || cursors.up.isDown ? 1 : 0);
-          const velocity = new Phaser.Math.Vector2(moveX, moveY).normalize().scale(280 * gameState.moveSpeedMul);
+          const speedMul = tempoBoostActive ? gameState.moveSpeedMul * 1.18 : gameState.moveSpeedMul;
+          const velocity = new Phaser.Math.Vector2(moveX, moveY).normalize().scale(296 * speedMul);
           player.setVelocity(velocity.x, velocity.y);
-
           player.rotation = Phaser.Math.Angle.Between(player.x, player.y, pointerAim.x || player.x, pointerAim.y || player.y);
 
-          if (keys.SHIFT.isDown && gameState.canDash) {
+          if (Phaser.Input.Keyboard.JustDown(keys.SHIFT) && gameState.canDash) {
             dash();
           }
           gameState.dashInvuln = Math.max(0, gameState.dashInvuln - dt);
@@ -261,35 +295,46 @@ TOPDOWN_HTML = dedent(
               bullet.destroy();
             }
           });
-          rewardShards.children.iterate((shard) => {
-            if (!shard || !player) return;
-            const distance = Phaser.Math.Distance.Between(shard.x, shard.y, player.x, player.y);
-            if (distance < 140) {
-              const angle = Phaser.Math.Angle.Between(shard.x, shard.y, player.x, player.y);
-              sceneRef.physics.velocityFromRotation(angle, 110 + (140 - distance) * 1.4, shard.body.velocity);
-            }
-          });
 
           let liveEnemyCount = 0;
           enemies.children.iterate((enemy) => {
             if (!enemy || !player) return;
             liveEnemyCount += 1;
-            const chaseVector = new Phaser.Math.Vector2(player.x - enemy.x, player.y - enemy.y).normalize();
             const enemyType = enemy.enemyType || "chaser";
+            const distanceToPlayer = Phaser.Math.Distance.Between(enemy.x, enemy.y, player.x, player.y);
+            const chaseVector = new Phaser.Math.Vector2(player.x - enemy.x, player.y - enemy.y).normalize();
+
             if (enemyType === "shooter") {
-              const distanceToPlayer = Phaser.Math.Distance.Between(enemy.x, enemy.y, player.x, player.y);
-              if (distanceToPlayer < 220) {
-                enemy.body.setVelocity(-chaseVector.x * (64 + gameState.wave * 5), -chaseVector.y * (64 + gameState.wave * 5));
+              if (distanceToPlayer < 190) {
+                enemy.body.setVelocity(-chaseVector.x * (92 + gameState.wave * 4), -chaseVector.y * (92 + gameState.wave * 4));
               } else {
-                enemy.body.setVelocity(chaseVector.x * (44 + gameState.wave * 4), chaseVector.y * (44 + gameState.wave * 4));
+                enemy.body.setVelocity(chaseVector.x * (64 + gameState.wave * 4), chaseVector.y * (64 + gameState.wave * 4));
               }
+            } else if (enemyType === "flanker") {
+              const flankAngle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y) + (enemy.orbitSign || 1) * Math.PI / 2;
+              const flankTargetX = player.x + Math.cos(flankAngle) * 132;
+              const flankTargetY = player.y + Math.sin(flankAngle) * 132;
+              const flankVector = new Phaser.Math.Vector2(flankTargetX - enemy.x, flankTargetY - enemy.y).normalize();
+              enemy.body.setVelocity(flankVector.x * (138 + gameState.wave * 6), flankVector.y * (138 + gameState.wave * 6));
+            } else if (enemyType === "bruiser") {
+              enemy.body.setVelocity(chaseVector.x * (74 + gameState.wave * 4), chaseVector.y * (74 + gameState.wave * 4));
             } else {
-              enemy.body.setVelocity(chaseVector.x * (72 + gameState.wave * 9), chaseVector.y * (72 + gameState.wave * 9));
+              enemy.body.setVelocity(chaseVector.x * (118 + gameState.wave * 8), chaseVector.y * (118 + gameState.wave * 8));
             }
+
             enemy.fireCooldown = (enemy.fireCooldown || 0) - dt;
             if (enemy.fireCooldown <= 0) {
-              fireEnemyBullet(enemy);
-              enemy.fireCooldown = enemyType === "shooter" ? 0.55 + Math.random() * 0.4 : 0.95 + Math.random() * 0.75;
+              if (enemyType !== "bruiser" || distanceToPlayer < 170) {
+                fireEnemyBullet(enemy);
+              }
+              enemy.fireCooldown =
+                enemyType === "shooter"
+                  ? 0.58 + Math.random() * 0.32
+                  : enemyType === "flanker"
+                    ? 0.9 + Math.random() * 0.28
+                    : enemyType === "bruiser"
+                      ? 1.15 + Math.random() * 0.4
+                      : 0.82 + Math.random() * 0.24;
             }
           });
           gameState.threat = liveEnemyCount;
@@ -317,45 +362,85 @@ TOPDOWN_HTML = dedent(
             const bullet = bullets.create(player.x, player.y, "bullet-core");
             const spreadOffset = spreadCount === 1 ? 0 : Phaser.Math.DegToRad((i - (spreadCount - 1) / 2) * 8);
             const angle = player.rotation + spreadOffset;
-            sceneRef.physics.velocityFromRotation(angle, 620, bullet.body.velocity);
+            sceneRef.physics.velocityFromRotation(angle, 680 * gameState.bulletSpeedMul, bullet.body.velocity);
             bullet.setScale(0.92);
             bullet.lifeSpan = 1200;
             bullet.pierceLeft = gameState.pierceShots;
+            bullet.damage = 1 + gameState.impactBurst;
           }
-          sceneRef.add.circle(player.x, player.y, 12, 0x22d3ee, 0.2).setBlendMode(Phaser.BlendModes.ADD);
+          const muzzleFlash = sceneRef.add.circle(player.x, player.y, 10, 0x22d3ee, 0.3).setBlendMode(Phaser.BlendModes.ADD);
+          sceneRef.tweens.add({
+            targets: muzzleFlash,
+            alpha: 0,
+            scale: 1.85,
+            duration: 90,
+            onComplete: () => muzzleFlash.destroy(),
+          });
           gameState.fireCooldown = 0.12 / gameState.fireRateMul;
         }
 
         function fireEnemyBullet(enemy) {
           if (!enemy || !player) return;
           const bullet = enemyBullets.create(enemy.x, enemy.y, "bullet-core");
-          bullet.setTint(0xfb7185);
-          bullet.setScale(0.9);
+          bullet.setTint(enemy.enemyType === "flanker" ? 0xfbbf24 : 0xfb7185);
+          bullet.setScale(enemy.enemyType === "bruiser" ? 1.1 : 0.9);
           const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
-          sceneRef.physics.velocityFromRotation(angle, 260 + gameState.wave * 18, bullet.body.velocity);
+          const speed =
+            enemy.enemyType === "bruiser"
+              ? 220 + gameState.wave * 10
+              : enemy.enemyType === "flanker"
+                ? 320 + gameState.wave * 16
+                : 278 + gameState.wave * 18;
+          sceneRef.physics.velocityFromRotation(angle, speed, bullet.body.velocity);
         }
 
-        function dash() {
-          gameState.canDash = false;
-          gameState.dashCooldown = Math.max(0.5, 1.4 - (gameState.level - 1) * 0.04);
-          const moveX = (keys.D.isDown || cursors.right.isDown ? 1 : 0) - (keys.A.isDown || cursors.left.isDown ? 1 : 0);
-          const moveY = (keys.S.isDown || cursors.down.isDown ? 1 : 0) - (keys.W.isDown || cursors.up.isDown ? 1 : 0);
-          const fallbackAngle = player.rotation;
-          const safePoint = resolveDashTarget(player.x, player.y, moveX, moveY, fallbackAngle, gameState.dashDistance);
-          player.setPosition(safePoint.x, safePoint.y);
-          player.setVelocity(0, 0);
-          gameState.dashInvuln = 0.16;
-          statusReadout.textContent = "Dash committed · reposition and return fire";
-          const ghost = sceneRef.add.circle(player.x, player.y, 18, 0x22d3ee, 0.18);
+        function spawnDashGhost(x, y, alpha = 0.16, scale = 1.1) {
+          const ghost = sceneRef.add.circle(x, y, 16, 0x22d3ee, alpha).setBlendMode(Phaser.BlendModes.ADD);
           dashGhosts.add(ghost);
           sceneRef.tweens.add({
             targets: ghost,
             alpha: 0,
-            scale: 2.1,
-            duration: 220,
+            scale,
+            duration: 140,
             onComplete: () => ghost.destroy(),
           });
-          sceneRef.cameras.main.shake(70, 0.003);
+        }
+
+        function dash() {
+          if (!player || gameState.dashTweenActive) return;
+          gameState.canDash = false;
+          gameState.dashCooldown = Math.max(0.42, 1.18 - (gameState.level - 1) * 0.04);
+          const moveX = (keys.D.isDown || cursors.right.isDown ? 1 : 0) - (keys.A.isDown || cursors.left.isDown ? 1 : 0);
+          const moveY = (keys.S.isDown || cursors.down.isDown ? 1 : 0) - (keys.W.isDown || cursors.up.isDown ? 1 : 0);
+          const fallbackAngle = player.rotation;
+          const safePoint = resolveDashTarget(player.x, player.y, moveX, moveY, fallbackAngle, gameState.dashDistance);
+          gameState.dashInvuln = 0.24;
+          gameState.dashTweenActive = true;
+          statusReadout.textContent = "Dash committed · carve a new angle";
+          player.setVelocity(0, 0);
+          player.body.enable = false;
+          spawnDashGhost(player.x, player.y, 0.22, 1.7);
+          sceneRef.tweens.add({
+            targets: player,
+            x: safePoint.x,
+            y: safePoint.y,
+            duration: 120,
+            ease: "Quad.Out",
+            onUpdate: () => {
+              if (Math.random() > 0.35) {
+                spawnDashGhost(player.x, player.y, 0.12, 1.4);
+              }
+            },
+            onComplete: () => {
+              player.body.enable = true;
+              gameState.dashTweenActive = false;
+              burstImpact(player.x, player.y, 0x22d3ee, 18);
+              if (gameState.shockwaveRadius > 0) {
+                applyShockwave(player.x, player.y, gameState.shockwaveRadius);
+              }
+              sceneRef.cameras.main.shake(70, 0.003);
+            },
+          });
         }
 
         function resolveDashTarget(originX, originY, moveX, moveY, fallbackAngle, dashDistance) {
@@ -370,7 +455,7 @@ TOPDOWN_HTML = dedent(
           for (let travelled = step; travelled <= dashDistance; travelled += step) {
             const nextX = originX + dir.x * travelled;
             const nextY = originY + dir.y * travelled;
-            if (nextX < 26 || nextX > sceneRef.scale.width - 26 || nextY < 26 || nextY > sceneRef.scale.height - 26) {
+            if (nextX < 54 || nextX > sceneRef.scale.width - 54 || nextY < 54 || nextY > sceneRef.scale.height - 54) {
               break;
             }
             const bodyRect = new Phaser.Geom.Rectangle(nextX - 14, nextY - 14, 28, 28);
@@ -383,71 +468,137 @@ TOPDOWN_HTML = dedent(
           return { x: safeX, y: safeY };
         }
 
+        function enemyArchetypeForIndex(wave, index) {
+          const roster = ["chaser", "shooter", "flanker", "bruiser"];
+          return roster[(wave + index) % roster.length];
+        }
+
         function spawnWave(wave) {
-          const count = 2 + Math.min(8, wave);
+          const count = 4 + Math.min(8, wave);
           for (let i = 0; i < count; i += 1) {
             const side = i % 4;
-            const spawnX = side === 0 ? 40 : side === 1 ? sceneRef.scale.width - 40 : Phaser.Math.Between(60, sceneRef.scale.width - 60);
-            const spawnY = side === 2 ? 40 : side === 3 ? sceneRef.scale.height - 40 : Phaser.Math.Between(60, sceneRef.scale.height - 60);
+            const spawnX = side === 0 ? 58 : side === 1 ? sceneRef.scale.width - 58 : Phaser.Math.Between(72, sceneRef.scale.width - 72);
+            const spawnY = side === 2 ? 58 : side === 3 ? sceneRef.scale.height - 58 : Phaser.Math.Between(72, sceneRef.scale.height - 72);
             const enemy = enemies.create(spawnX, spawnY, "enemy-core");
-            enemy.hp = 2 + Math.floor(wave / 2);
-            enemy.fireCooldown = 0.6 + i * 0.12;
-            enemy.body.setCircle(12);
-            enemy.enemyType = i % 2 === 0 ? "chaser" : "shooter";
+            const enemyType = enemyArchetypeForIndex(wave, i);
+            enemy.enemyType = enemyType;
+            enemy.orbitSign = i % 2 === 0 ? 1 : -1;
+            enemy.setCollideWorldBounds(true);
+            if (enemyType === "shooter") {
+              enemy.hp = 2 + Math.floor(wave / 2);
+              enemy.fireCooldown = 0.4 + i * 0.07;
+              enemy.body.setCircle(12);
+              enemy.setTint(0x60a5fa);
+            } else if (enemyType === "flanker") {
+              enemy.hp = 2 + Math.floor(wave / 3);
+              enemy.fireCooldown = 0.68 + i * 0.05;
+              enemy.body.setCircle(11);
+              enemy.setScale(0.92);
+              enemy.setTint(0xfbbf24);
+            } else if (enemyType === "bruiser") {
+              enemy.hp = 5 + Math.floor(wave / 2);
+              enemy.fireCooldown = 1.0 + i * 0.06;
+              enemy.body.setCircle(15);
+              enemy.setScale(1.2);
+              enemy.setTint(0xf97316);
+            } else {
+              enemy.hp = 3 + Math.floor(wave / 2);
+              enemy.fireCooldown = 0.8 + i * 0.05;
+              enemy.body.setCircle(13);
+              enemy.setTint(0xf472b6);
+            }
           }
           comboReadout.textContent = `Combo ${gameState.combo} · Enemies ${enemies.countActive(true)}`;
         }
 
+        function burstImpact(x, y, color, radius) {
+          const pulse = sceneRef.add.circle(x, y, radius, color, 0.24).setBlendMode(Phaser.BlendModes.ADD);
+          sceneRef.tweens.add({
+            targets: pulse,
+            alpha: 0,
+            scale: 1.8,
+            duration: 180,
+            onComplete: () => pulse.destroy(),
+          });
+        }
+
+        function applyEnemyDamage(enemy, damage, impactX, impactY) {
+          if (!enemy || !enemy.active) return;
+          enemy.hp -= damage;
+          enemy.setTint(0xffffff);
+          burstImpact(impactX ?? enemy.x, impactY ?? enemy.y, 0x22d3ee, 10);
+          sceneRef.time.delayedCall(70, () => enemy?.active && enemy.clearTint());
+          if (enemy.hp <= 0) {
+            handleEnemyDefeat(enemy);
+          }
+        }
+
+        function applyShockwave(x, y, radius) {
+          enemies.children.iterate((enemy) => {
+            if (!enemy || !enemy.active) return;
+            if (Phaser.Math.Distance.Between(enemy.x, enemy.y, x, y) <= radius) {
+              applyEnemyDamage(enemy, 1, enemy.x, enemy.y);
+            }
+          });
+        }
+
+        function handleEnemyDefeat(enemy) {
+          const enemyX = enemy.x;
+          const enemyY = enemy.y;
+          enemy.destroy();
+          gameState.combo += 1;
+          gainXp(42 + Math.min(38, gameState.wave * 6));
+          if (gameState.tempoBoostMs > 0) {
+            gameState.tempoBoostUntil = sceneRef.time.now + gameState.tempoBoostMs;
+          }
+          window.IISLeaderboard.postScore(110 + gameState.combo * 26);
+          statusReadout.textContent = "Target broken · keep the combo alive";
+          sceneRef.cameras.main.shake(90, 0.004);
+          burstImpact(enemyX, enemyY, 0xfb7185, 16);
+          if (gameState.impactBurst > 0) {
+            enemies.children.iterate((nearbyEnemy) => {
+              if (!nearbyEnemy || !nearbyEnemy.active) return;
+              if (Phaser.Math.Distance.Between(enemyX, enemyY, nearbyEnemy.x, nearbyEnemy.y) <= 76) {
+                applyEnemyDamage(nearbyEnemy, gameState.impactBurst, nearbyEnemy.x, nearbyEnemy.y);
+              }
+            });
+          }
+          updateHud();
+        }
+
         function onBulletHitEnemy(bullet, enemy) {
+          const damage = bullet.damage || 1;
           if (bullet.pierceLeft > 0) {
             bullet.pierceLeft -= 1;
           } else {
             bullet.destroy();
           }
-          enemy.hp -= 1;
-          enemy.setTint(0xffffff);
-          sceneRef.time.delayedCall(70, () => enemy.clearTint());
-          if (enemy.hp <= 0) {
-            const enemyX = enemy.x;
-            const enemyY = enemy.y;
-            enemy.destroy();
-            gameState.combo += 1;
-            window.IISLeaderboard.postScore(100 + gameState.combo * 25);
-            statusReadout.textContent = "Target broken · keep the combo alive";
-            sceneRef.cameras.main.shake(90, 0.004);
-            spawnRewardShard(enemyX, enemyY, 1 + Math.min(3, Math.floor(gameState.wave / 2)));
-            for (let i = 0; i < 8; i += 1) {
-              const shard = sceneRef.add.rectangle(enemyX, enemyY, 8, 3, i % 2 === 0 ? 0x22d3ee : 0xfb7185, 0.95);
-              shard.setBlendMode(Phaser.BlendModes.ADD);
-              sceneRef.tweens.add({
-                targets: shard,
-                x: enemyX + Phaser.Math.Between(-42, 42),
-                y: enemyY + Phaser.Math.Between(-42, 42),
-                alpha: 0,
-                angle: Phaser.Math.Between(0, 270),
-                duration: 240,
-                onComplete: () => shard.destroy(),
-              });
-            }
-            updateHud();
+          applyEnemyDamage(enemy, damage, bullet.x, bullet.y);
+        }
+
+        function damagePlayer(amount, message, x, y) {
+          gameState.combo = 0;
+          gameState.hp = Math.max(0, gameState.hp - amount);
+          statusReadout.textContent = message;
+          burstImpact(x, y, 0xfb7185, 22);
+          sceneRef.tweens.add({
+            targets: player,
+            alpha: 0.25,
+            yoyo: true,
+            repeat: 3,
+            duration: 60,
+            onComplete: () => player.setAlpha(1),
+          });
+          updateHud();
+          if (gameState.hp <= 0) {
+            triggerGameOver(message);
           }
         }
 
         function onPlayerHitEnemy(playerObj, enemy) {
           if (gameState.dashInvuln > 0) return;
           enemy.destroy();
-          gameState.combo = 0;
-          gameState.hp = Math.max(0, gameState.hp - 1);
-          statusReadout.textContent = "Impact taken · dash out and reset the angle";
-          sceneRef.tweens.add({
-            targets: playerObj,
-            alpha: 0.25,
-            yoyo: true,
-            repeat: 3,
-            duration: 60,
-            onComplete: () => playerObj.setAlpha(1),
-          });
-          updateHud();
+          damagePlayer(1, "Impact taken · dash out and reset the angle", playerObj.x, playerObj.y);
         }
 
         function onPlayerHitByBullet(playerObj, bullet) {
@@ -456,28 +607,22 @@ TOPDOWN_HTML = dedent(
             return;
           }
           bullet.destroy();
-          gameState.combo = 0;
-          gameState.hp = Math.max(0, gameState.hp - 1);
-          statusReadout.textContent = "Enemy fire landed · move, dash, and re-angle";
-          const hitFlash = sceneRef.add.circle(playerObj.x, playerObj.y, 22, 0xfb7185, 0.24).setBlendMode(Phaser.BlendModes.ADD);
-          sceneRef.tweens.add({
-            targets: hitFlash,
-            alpha: 0,
-            scale: 1.8,
-            duration: 180,
-            onComplete: () => hitFlash.destroy(),
-          });
-          updateHud();
+          damagePlayer(1, "Enemy fire landed · move, dash, and re-angle", playerObj.x, playerObj.y);
         }
 
-        function spawnRewardShard(x, y, amount) {
-          for (let i = 0; i < amount; i += 1) {
-            const shard = rewardShards.create(x, y, "bullet-core");
-            shard.setTint(0x67e8f9);
-            shard.setScale(0.7);
-            shard.body.setCircle(6);
-            shard.body.setVelocity(Phaser.Math.Between(-90, 90), Phaser.Math.Between(-90, 90));
-          }
+        function triggerGameOver(reason) {
+          gameState.started = false;
+          gameState.upgradePending = false;
+          gameState.dashTweenActive = false;
+          player.setVelocity(0, 0);
+          player.body.enable = true;
+          sceneRef.physics.world.pause();
+          if (upgradeOverlay) upgradeOverlay.style.display = "none";
+          if (upgradeChoices) upgradeChoices.innerHTML = "";
+          if (gameOverTitle) gameOverTitle.textContent = "RUN BROKEN";
+          if (gameOverDetail) gameOverDetail.textContent = `${reason} HP를 모두 잃었습니다.`;
+          if (gameOverScreen) gameOverScreen.style.display = "flex";
+          statusReadout.textContent = "Game over · restart and rebuild the lane";
         }
 
         function gainXp(amount) {
@@ -491,28 +636,31 @@ TOPDOWN_HTML = dedent(
 
         function levelUp() {
           gameState.level += 1;
-          gameState.xpNext = Math.round(gameState.xpNext * 1.18);
+          gameState.xpNext = Math.round(gameState.xpNext * 1.2);
           presentUpgradeChoices();
         }
 
         function presentUpgradeChoices() {
           if (!upgradeOverlay || !upgradeChoices) return;
           const pool = [
-            { key: "fire_rate", label: "연사 강화", detail: "사격 간격을 줄입니다." },
-            { key: "pierce", label: "관통 강화", detail: "탄환이 적을 추가로 관통합니다." },
-            { key: "spread", label: "확산 사격", detail: "탄환이 여러 갈래로 나갑니다." },
-            { key: "dash", label: "대시 재정비", detail: "대시 거리와 회복 속도를 조금 올립니다." },
-            { key: "hp", label: "최대 체력", detail: "체력 1을 회복하고 최대 체력을 올립니다." },
-            { key: "move", label: "이동 속도", detail: "기본 이동 속도를 끌어올립니다." },
+            { key: "overdrive", label: "오버드라이브", detail: "연사와 탄속을 함께 올려 압박을 밀어냅니다." },
+            { key: "pierce", label: "관통 라인", detail: "탄환이 적 하나를 더 관통합니다." },
+            { key: "spread", label: "삼각 분사", detail: "여러 갈래 탄막으로 측면 적을 정리합니다." },
+            { key: "phase", label: "페이즈 대시", detail: "대시 거리를 늘리고 충격파를 남깁니다." },
+            { key: "plating", label: "복합 장갑", detail: "최대 체력을 늘리고 1 회복합니다." },
+            { key: "tempo", label: "킬 템포", detail: "적 처치 후 잠깐 더 빠르게 돌파합니다." },
+            { key: "impact", label: "애프터쇼크", detail: "적 처치 시 가까운 적에게 충격 피해를 전파합니다." },
+            { key: "move", label: "기동 재세팅", detail: "기본 이동 속도를 높여 각을 더 빨리 만듭니다." },
           ];
           const choices = Phaser.Utils.Array.Shuffle(pool.slice()).slice(0, 3);
           upgradeChoices.innerHTML = "";
           upgradeOverlay.style.display = "flex";
           gameState.upgradePending = true;
+          sceneRef.physics.world.pause();
           choices.forEach((choice) => {
             const button = document.createElement("button");
             button.type = "button";
-            button.style.minHeight = "52px";
+            button.style.minHeight = "58px";
             button.style.padding = "12px 14px";
             button.style.borderRadius = "14px";
             button.style.border = "1px solid rgba(103,232,249,0.2)";
@@ -523,41 +671,44 @@ TOPDOWN_HTML = dedent(
             button.addEventListener("click", () => applyUpgrade(choice.key));
             upgradeChoices.appendChild(button);
           });
-          statusReadout.textContent = `Level ${gameState.level} · upgrade ready`;
+          statusReadout.textContent = `Level ${gameState.level} · choose the next edge`;
         }
 
         function applyUpgrade(key) {
-          if (key === "fire_rate") gameState.fireRateMul = Math.min(2.2, gameState.fireRateMul + 0.2);
+          if (key === "overdrive") {
+            gameState.fireRateMul = Math.min(2.3, gameState.fireRateMul + 0.24);
+            gameState.bulletSpeedMul = Math.min(1.45, gameState.bulletSpeedMul + 0.08);
+          }
           if (key === "pierce") gameState.pierceShots = Math.min(2, gameState.pierceShots + 1);
           if (key === "spread") gameState.spreadShot = Math.min(2, gameState.spreadShot + 1);
-          if (key === "dash") {
-            gameState.dashDistance = Math.min(240, gameState.dashDistance + 24);
-            gameState.dashCooldown = Math.max(0, gameState.dashCooldown - 0.2);
+          if (key === "phase") {
+            gameState.dashDistance = Math.min(280, gameState.dashDistance + 26);
+            gameState.shockwaveRadius = Math.min(86, gameState.shockwaveRadius + 18);
           }
-          if (key === "hp") {
-            gameState.maxHp = Math.min(6, gameState.maxHp + 1);
+          if (key === "plating") {
+            gameState.maxHp = Math.min(8, gameState.maxHp + 1);
             gameState.hp = Math.min(gameState.maxHp, gameState.hp + 1);
           }
-          if (key === "move") gameState.moveSpeedMul = Math.min(1.45, gameState.moveSpeedMul + 0.08);
+          if (key === "tempo") gameState.tempoBoostMs = Math.min(2200, gameState.tempoBoostMs + 700);
+          if (key === "impact") gameState.impactBurst = Math.min(2, gameState.impactBurst + 1);
+          if (key === "move") gameState.moveSpeedMul = Math.min(1.55, gameState.moveSpeedMul + 0.09);
           if (upgradeOverlay) upgradeOverlay.style.display = "none";
           if (upgradeChoices) upgradeChoices.innerHTML = "";
           gameState.upgradePending = false;
+          sceneRef.physics.world.resume();
           statusReadout.textContent = "Upgrade locked · hold the arena";
           updateHud();
-        }
-
-        function onPickupRewardShard(playerObj, shard) {
-          shard.destroy();
-          gainXp(30);
         }
 
         function resetArena() {
           enemies.clear(true, true);
           bullets.clear(true, true);
           enemyBullets.clear(true, true);
-          rewardShards.clear(true, true);
           player.setPosition(sceneRef.scale.width / 2, sceneRef.scale.height / 2);
           player.setVelocity(0, 0);
+          player.setAlpha(1);
+          player.body.enable = true;
+          sceneRef.physics.world.resume();
           gameState.wave = 1;
           gameState.combo = 0;
           gameState.canDash = true;
@@ -566,18 +717,25 @@ TOPDOWN_HTML = dedent(
           gameState.started = false;
           gameState.level = 1;
           gameState.xp = 0;
-          gameState.xpNext = 120;
+          gameState.xpNext = 110;
           gameState.upgradePending = false;
           gameState.fireRateMul = 1;
           gameState.pierceShots = 0;
           gameState.spreadShot = 0;
           gameState.moveSpeedMul = 1;
-          gameState.hp = 3;
-          gameState.maxHp = 3;
-          gameState.dashDistance = 170;
+          gameState.bulletSpeedMul = 1;
+          gameState.hp = 5;
+          gameState.maxHp = 5;
+          gameState.dashDistance = 210;
           gameState.dashInvuln = 0;
+          gameState.dashTweenActive = false;
+          gameState.tempoBoostMs = 0;
+          gameState.tempoBoostUntil = 0;
+          gameState.shockwaveRadius = 0;
+          gameState.impactBurst = 0;
           statusReadout.textContent = "Arena reset · build rhythm again";
           if (titleScreen) titleScreen.style.display = "flex";
+          if (gameOverScreen) gameOverScreen.style.display = "none";
           if (upgradeOverlay) upgradeOverlay.style.display = "none";
           if (upgradeChoices) upgradeChoices.innerHTML = "";
           spawnWave(gameState.wave);

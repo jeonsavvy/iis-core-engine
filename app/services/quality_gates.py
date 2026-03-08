@@ -403,7 +403,7 @@ def evaluate_gameplay_gate(
     if gameplay_profile == "combat":
         advisory_checks.extend(
             [
-                ("combat_mechanical_depth", sum(1 for token in ("dash", "jump", "combo", "parry", "reload", "attack") if token in lowered) >= 3),
+                ("combat_mechanical_depth", sum(1 for token in ("dash", "combo", "aim", "attack", "upgrade", "xp") if token in lowered) >= 3),
                 ("combat_encounter_variety", sum(1 for token in ("elite", "miniboss", "hazard", "wave", "spawnpattern") if token in lowered) >= 3),
             ]
         )
@@ -432,6 +432,14 @@ def evaluate_gameplay_gate(
         advisory_checks.append(("fighter_specific_mechanics", "performattack" in lowered or "attackcooldown" in lowered))
     if any(token in genre_hint for token in ("로그라이크", "roguelike", "탑다운", "topdown")):
         advisory_checks.append(("roguelike_progression", any(token in lowered for token in ("run.level", "difficultyscale", "dashcooldown"))))
+        advisory_checks.extend(
+            [
+                ("topdown_upgrade_pause", "physics.world.pause()" in lowered and "physics.world.resume()" in lowered),
+                ("topdown_kill_fed_xp", "gainxp(" in lowered),
+                ("topdown_arena_lock", "resolvedashtarget" in lowered and ("setcollideworldbounds(true)" in lowered or "world.setbounds" in lowered)),
+                ("topdown_enemy_variety", "flanker" in lowered and "bruiser" in lowered),
+            ]
+        )
     if genre_engine_hint:
         advisory_checks.append(
             (
