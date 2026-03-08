@@ -185,6 +185,7 @@ TOPDOWN_HTML = dedent(
               beginRun();
             }
           });
+          this.time.delayedCall(480, beginRun);
 
           this.physics.add.overlap(bullets, enemies, onBulletHitEnemy);
           this.physics.add.overlap(player, enemies, onPlayerHitEnemy);

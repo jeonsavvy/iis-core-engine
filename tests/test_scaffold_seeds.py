@@ -102,4 +102,5 @@ def test_topdown_scaffold_contains_resilient_start_flow() -> None:
     html = seed.html.lower()
     assert "const beginrun" in html or "function beginrun" in html
     assert 'startbutton?.addeventlistener("pointerdown"' in html or "startbutton?.addeventlistener('pointerdown'" in html
+    assert "delayedcall(480, beginrun)" in html or "settimeout(beginrun" in html
     assert "if (!gamestate.started)" in html
