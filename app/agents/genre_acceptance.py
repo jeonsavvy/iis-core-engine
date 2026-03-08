@@ -114,6 +114,10 @@ def validate_island_flight_acceptance(html: str) -> AcceptanceReport:
         failures.append("fog_missing")
     if "directionallight" not in lowered:
         failures.append("warm_light_missing")
+    if "chain" not in lowered:
+        failures.append("chain_progression_missing")
+    if "medal" not in lowered and "rating" not in lowered:
+        failures.append("rating_loop_missing")
     if "lastsafepoint" not in lowered and "respawn(" not in lowered:
         failures.append("altitude_guard_missing")
     if "island" not in lowered and "sea" not in lowered:
@@ -157,6 +161,14 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
         failures.append("state_flow_missing")
     if "enemybullets" not in lowered and "fireenemybullet" not in lowered:
         failures.append("enemy_pressure_missing")
+    if "xp" not in lowered:
+        failures.append("xp_loop_missing")
+    if "level" not in lowered:
+        failures.append("level_loop_missing")
+    if "upgrade" not in lowered:
+        failures.append("upgrade_loop_missing")
+    if "resolvedashtarget" not in lowered:
+        failures.append("dash_targeting_missing")
     if "coverblocks" not in lowered and "arena cover" not in lowered:
         failures.append("arena_landmark_missing")
     if "shake(" not in lowered:
@@ -172,6 +184,7 @@ def validate_topdown_acceptance(html: str) -> AcceptanceReport:
             "has_crosshair": "crosshair" in lowered,
             "has_enemy_bullets": "enemybullets" in lowered or "fireenemybullet" in lowered,
             "has_cover": "coverblocks" in lowered or "arena cover" in lowered,
+            "has_upgrades": "upgrade" in lowered,
         },
     )
 

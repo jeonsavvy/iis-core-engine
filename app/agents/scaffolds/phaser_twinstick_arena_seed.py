@@ -42,6 +42,7 @@ TOPDOWN_HTML = dedent(
           <span>LOWPOLY TACTICAL ARENA</span>
           <strong id="wave-readout">Wave 1</strong>
           <span id="status-readout">Dash ready · Hold the arena</span>
+          <span id="xp-readout">Level 1 · XP 0 / 120</span>
           <span id="combo-readout">Combo 0 · Enemies 0</span>
           <span id="threat-readout">Threat 0 · Dash ready</span>
         </div>
@@ -52,6 +53,13 @@ TOPDOWN_HTML = dedent(
           Fire: Left Click<br />
           Dash: Shift<br />
           Reset: R
+        </div>
+        <div id="upgrade-overlay" style="display:none;position:absolute;inset:0;z-index:28;align-items:center;justify-content:center;background:rgba(2,6,23,0.74);">
+          <div id="upgrade-card" style="width:min(460px,calc(100% - 48px));padding:24px 28px;border-radius:18px;background:rgba(8,15,32,0.92);border:1px solid rgba(34,211,238,0.24);box-shadow:0 0 48px rgba(34,211,238,0.12);">
+            <h2 style="margin:0 0 10px;font-size:28px;color:#67e8f9;letter-spacing:0.04em;">LEVEL UP</h2>
+            <p style="margin:0 0 18px;color:#cbd5e1;line-height:1.6;font-size:14px;">하나를 선택해 이번 런을 강화하세요.</p>
+            <div id="upgrade-choices" style="display:grid;gap:10px;"></div>
+          </div>
         </div>
       </div>
       <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
@@ -65,10 +73,13 @@ TOPDOWN_HTML = dedent(
         const crosshair = document.getElementById("crosshair");
         const waveReadout = document.getElementById("wave-readout");
         const statusReadout = document.getElementById("status-readout");
+        const xpReadout = document.getElementById("xp-readout");
         const comboReadout = document.getElementById("combo-readout");
         const threatReadout = document.getElementById("threat-readout");
         const titleScreen = document.getElementById("title-screen");
         const startButton = document.getElementById("start-button");
+        const upgradeOverlay = document.getElementById("upgrade-overlay");
+        const upgradeChoices = document.getElementById("upgrade-choices");
 
         const gameState = {
           wave: 1,
@@ -78,6 +89,18 @@ TOPDOWN_HTML = dedent(
           fireCooldown: 0,
           threat: 0,
           started: false,
+          level: 1,
+          xp: 0,
+          xpNext: 120,
+          upgradePending: false,
+          fireRateMul: 1,
+          pierceShots: 0,
+          spreadShot: 0,
+          moveSpeedMul: 1,
+          hp: 3,
+          maxHp: 3,
+          dashDistance: 170,
+          dashInvuln: 0,
         };
 
         const config = {
@@ -97,7 +120,8 @@ TOPDOWN_HTML = dedent(
           }
         };
 
-        let sceneRef, player, cursors, keys, bullets, enemyBullets, enemies, coverBlocks, pointerAim = { x: 0, y: 0 }, dashGhosts;
+        let sceneRef, player, cursors, keys, bullets, enemyBullets, enemies, coverBlocks, rewardShards, pointerAim = { x: 0, y: 0 }, dashGhosts;
+        let coverRects = [];
         const game = new Phaser.Game(config);
 
         function create() {
@@ -130,6 +154,7 @@ TOPDOWN_HTML = dedent(
           bullets = this.physics.add.group();
           enemyBullets = this.physics.add.group();
           enemies = this.physics.add.group();
+          rewardShards = this.physics.add.group();
           coverBlocks = this.physics.add.staticGroup();
           dashGhosts = this.add.group();
 
@@ -145,6 +170,7 @@ TOPDOWN_HTML = dedent(
             this.physics.add.existing(cover, true);
             coverBlocks.add(cover);
           });
+          coverRects = arenaCoverLayout.map(([x, y, width, height]) => new Phaser.Geom.Rectangle(x - width / 2, y - height / 2, width, height));
 
           cursors = this.input.keyboard.createCursorKeys();
           keys = this.input.keyboard.addKeys("W,A,S,D,SHIFT,R");
@@ -190,6 +216,7 @@ TOPDOWN_HTML = dedent(
           this.physics.add.overlap(bullets, enemies, onBulletHitEnemy);
           this.physics.add.overlap(player, enemies, onPlayerHitEnemy);
           this.physics.add.overlap(player, enemyBullets, onPlayerHitByBullet);
+          this.physics.add.overlap(player, rewardShards, onPickupRewardShard);
           this.physics.add.collider(player, coverBlocks);
           this.physics.add.collider(enemies, coverBlocks);
           this.physics.add.collider(enemyBullets, coverBlocks, (bullet) => bullet.destroy());
@@ -204,6 +231,7 @@ TOPDOWN_HTML = dedent(
           const dt = delta / 1000;
           if (!player) return;
           if (!gameState.started) return;
+          if (gameState.upgradePending) return;
 
           if (Phaser.Input.Keyboard.JustDown(keys.R)) {
             resetArena();
@@ -211,7 +239,7 @@ TOPDOWN_HTML = dedent(
 
           const moveX = (keys.D.isDown || cursors.right.isDown ? 1 : 0) - (keys.A.isDown || cursors.left.isDown ? 1 : 0);
           const moveY = (keys.S.isDown || cursors.down.isDown ? 1 : 0) - (keys.W.isDown || cursors.up.isDown ? 1 : 0);
-          const velocity = new Phaser.Math.Vector2(moveX, moveY).normalize().scale(280);
+          const velocity = new Phaser.Math.Vector2(moveX, moveY).normalize().scale(280 * gameState.moveSpeedMul);
           player.setVelocity(velocity.x, velocity.y);
 
           player.rotation = Phaser.Math.Angle.Between(player.x, player.y, pointerAim.x || player.x, pointerAim.y || player.y);
@@ -219,6 +247,7 @@ TOPDOWN_HTML = dedent(
           if (keys.SHIFT.isDown && gameState.canDash) {
             dash();
           }
+          gameState.dashInvuln = Math.max(0, gameState.dashInvuln - dt);
 
           bullets.children.iterate((bullet) => {
             if (!bullet) return;
@@ -232,17 +261,35 @@ TOPDOWN_HTML = dedent(
               bullet.destroy();
             }
           });
+          rewardShards.children.iterate((shard) => {
+            if (!shard || !player) return;
+            const distance = Phaser.Math.Distance.Between(shard.x, shard.y, player.x, player.y);
+            if (distance < 140) {
+              const angle = Phaser.Math.Angle.Between(shard.x, shard.y, player.x, player.y);
+              sceneRef.physics.velocityFromRotation(angle, 110 + (140 - distance) * 1.4, shard.body.velocity);
+            }
+          });
 
           let liveEnemyCount = 0;
           enemies.children.iterate((enemy) => {
             if (!enemy || !player) return;
             liveEnemyCount += 1;
             const chaseVector = new Phaser.Math.Vector2(player.x - enemy.x, player.y - enemy.y).normalize();
-            enemy.body.setVelocity(chaseVector.x * (72 + gameState.wave * 9), chaseVector.y * (72 + gameState.wave * 9));
+            const enemyType = enemy.enemyType || "chaser";
+            if (enemyType === "shooter") {
+              const distanceToPlayer = Phaser.Math.Distance.Between(enemy.x, enemy.y, player.x, player.y);
+              if (distanceToPlayer < 220) {
+                enemy.body.setVelocity(-chaseVector.x * (64 + gameState.wave * 5), -chaseVector.y * (64 + gameState.wave * 5));
+              } else {
+                enemy.body.setVelocity(chaseVector.x * (44 + gameState.wave * 4), chaseVector.y * (44 + gameState.wave * 4));
+              }
+            } else {
+              enemy.body.setVelocity(chaseVector.x * (72 + gameState.wave * 9), chaseVector.y * (72 + gameState.wave * 9));
+            }
             enemy.fireCooldown = (enemy.fireCooldown || 0) - dt;
             if (enemy.fireCooldown <= 0) {
               fireEnemyBullet(enemy);
-              enemy.fireCooldown = 0.8 + Math.random() * 0.7;
+              enemy.fireCooldown = enemyType === "shooter" ? 0.55 + Math.random() * 0.4 : 0.95 + Math.random() * 0.75;
             }
           });
           gameState.threat = liveEnemyCount;
@@ -265,13 +312,18 @@ TOPDOWN_HTML = dedent(
 
         function fireBullet() {
           if (gameState.fireCooldown > 0 || !player) return;
-          const bullet = bullets.create(player.x, player.y, "bullet-core");
-          const angle = player.rotation;
-          sceneRef.physics.velocityFromRotation(angle, 620, bullet.body.velocity);
-          bullet.setScale(0.92);
-          bullet.lifeSpan = 1200;
+          const spreadCount = Math.max(1, 1 + gameState.spreadShot * 2);
+          for (let i = 0; i < spreadCount; i += 1) {
+            const bullet = bullets.create(player.x, player.y, "bullet-core");
+            const spreadOffset = spreadCount === 1 ? 0 : Phaser.Math.DegToRad((i - (spreadCount - 1) / 2) * 8);
+            const angle = player.rotation + spreadOffset;
+            sceneRef.physics.velocityFromRotation(angle, 620, bullet.body.velocity);
+            bullet.setScale(0.92);
+            bullet.lifeSpan = 1200;
+            bullet.pierceLeft = gameState.pierceShots;
+          }
           sceneRef.add.circle(player.x, player.y, 12, 0x22d3ee, 0.2).setBlendMode(Phaser.BlendModes.ADD);
-          gameState.fireCooldown = 0.12;
+          gameState.fireCooldown = 0.12 / gameState.fireRateMul;
         }
 
         function fireEnemyBullet(enemy) {
@@ -285,9 +337,14 @@ TOPDOWN_HTML = dedent(
 
         function dash() {
           gameState.canDash = false;
-          gameState.dashCooldown = 1.4;
-          const angle = player.rotation;
-          sceneRef.physics.velocityFromRotation(angle, 620, player.body.velocity);
+          gameState.dashCooldown = Math.max(0.5, 1.4 - (gameState.level - 1) * 0.04);
+          const moveX = (keys.D.isDown || cursors.right.isDown ? 1 : 0) - (keys.A.isDown || cursors.left.isDown ? 1 : 0);
+          const moveY = (keys.S.isDown || cursors.down.isDown ? 1 : 0) - (keys.W.isDown || cursors.up.isDown ? 1 : 0);
+          const fallbackAngle = player.rotation;
+          const safePoint = resolveDashTarget(player.x, player.y, moveX, moveY, fallbackAngle, gameState.dashDistance);
+          player.setPosition(safePoint.x, safePoint.y);
+          player.setVelocity(0, 0);
+          gameState.dashInvuln = 0.16;
           statusReadout.textContent = "Dash committed · reposition and return fire";
           const ghost = sceneRef.add.circle(player.x, player.y, 18, 0x22d3ee, 0.18);
           dashGhosts.add(ghost);
@@ -301,6 +358,31 @@ TOPDOWN_HTML = dedent(
           sceneRef.cameras.main.shake(70, 0.003);
         }
 
+        function resolveDashTarget(originX, originY, moveX, moveY, fallbackAngle, dashDistance) {
+          let dir = new Phaser.Math.Vector2(moveX, moveY);
+          if (dir.lengthSq() === 0) {
+            dir = new Phaser.Math.Vector2(Math.cos(fallbackAngle), Math.sin(fallbackAngle));
+          }
+          dir = dir.normalize();
+          const step = 10;
+          let safeX = originX;
+          let safeY = originY;
+          for (let travelled = step; travelled <= dashDistance; travelled += step) {
+            const nextX = originX + dir.x * travelled;
+            const nextY = originY + dir.y * travelled;
+            if (nextX < 26 || nextX > sceneRef.scale.width - 26 || nextY < 26 || nextY > sceneRef.scale.height - 26) {
+              break;
+            }
+            const bodyRect = new Phaser.Geom.Rectangle(nextX - 14, nextY - 14, 28, 28);
+            if (coverRects.some((rect) => Phaser.Geom.Intersects.RectangleToRectangle(bodyRect, rect))) {
+              break;
+            }
+            safeX = nextX;
+            safeY = nextY;
+          }
+          return { x: safeX, y: safeY };
+        }
+
         function spawnWave(wave) {
           const count = 2 + Math.min(8, wave);
           for (let i = 0; i < count; i += 1) {
@@ -311,28 +393,36 @@ TOPDOWN_HTML = dedent(
             enemy.hp = 2 + Math.floor(wave / 2);
             enemy.fireCooldown = 0.6 + i * 0.12;
             enemy.body.setCircle(12);
+            enemy.enemyType = i % 2 === 0 ? "chaser" : "shooter";
           }
           comboReadout.textContent = `Combo ${gameState.combo} · Enemies ${enemies.countActive(true)}`;
         }
 
         function onBulletHitEnemy(bullet, enemy) {
-          bullet.destroy();
+          if (bullet.pierceLeft > 0) {
+            bullet.pierceLeft -= 1;
+          } else {
+            bullet.destroy();
+          }
           enemy.hp -= 1;
           enemy.setTint(0xffffff);
           sceneRef.time.delayedCall(70, () => enemy.clearTint());
           if (enemy.hp <= 0) {
+            const enemyX = enemy.x;
+            const enemyY = enemy.y;
             enemy.destroy();
             gameState.combo += 1;
             window.IISLeaderboard.postScore(100 + gameState.combo * 25);
             statusReadout.textContent = "Target broken · keep the combo alive";
             sceneRef.cameras.main.shake(90, 0.004);
+            spawnRewardShard(enemyX, enemyY, 1 + Math.min(3, Math.floor(gameState.wave / 2)));
             for (let i = 0; i < 8; i += 1) {
-              const shard = sceneRef.add.rectangle(enemy.x, enemy.y, 8, 3, i % 2 === 0 ? 0x22d3ee : 0xfb7185, 0.95);
+              const shard = sceneRef.add.rectangle(enemyX, enemyY, 8, 3, i % 2 === 0 ? 0x22d3ee : 0xfb7185, 0.95);
               shard.setBlendMode(Phaser.BlendModes.ADD);
               sceneRef.tweens.add({
                 targets: shard,
-                x: enemy.x + Phaser.Math.Between(-42, 42),
-                y: enemy.y + Phaser.Math.Between(-42, 42),
+                x: enemyX + Phaser.Math.Between(-42, 42),
+                y: enemyY + Phaser.Math.Between(-42, 42),
                 alpha: 0,
                 angle: Phaser.Math.Between(0, 270),
                 duration: 240,
@@ -344,8 +434,10 @@ TOPDOWN_HTML = dedent(
         }
 
         function onPlayerHitEnemy(playerObj, enemy) {
+          if (gameState.dashInvuln > 0) return;
           enemy.destroy();
           gameState.combo = 0;
+          gameState.hp = Math.max(0, gameState.hp - 1);
           statusReadout.textContent = "Impact taken · dash out and reset the angle";
           sceneRef.tweens.add({
             targets: playerObj,
@@ -359,16 +451,111 @@ TOPDOWN_HTML = dedent(
         }
 
         function onPlayerHitByBullet(playerObj, bullet) {
+          if (gameState.dashInvuln > 0) {
+            bullet.destroy();
+            return;
+          }
           bullet.destroy();
           gameState.combo = 0;
+          gameState.hp = Math.max(0, gameState.hp - 1);
           statusReadout.textContent = "Enemy fire landed · move, dash, and re-angle";
-          sceneRef.add.circle(playerObj.x, playerObj.y, 22, 0xfb7185, 0.24).setBlendMode(Phaser.BlendModes.ADD);
+          const hitFlash = sceneRef.add.circle(playerObj.x, playerObj.y, 22, 0xfb7185, 0.24).setBlendMode(Phaser.BlendModes.ADD);
+          sceneRef.tweens.add({
+            targets: hitFlash,
+            alpha: 0,
+            scale: 1.8,
+            duration: 180,
+            onComplete: () => hitFlash.destroy(),
+          });
           updateHud();
+        }
+
+        function spawnRewardShard(x, y, amount) {
+          for (let i = 0; i < amount; i += 1) {
+            const shard = rewardShards.create(x, y, "bullet-core");
+            shard.setTint(0x67e8f9);
+            shard.setScale(0.7);
+            shard.body.setCircle(6);
+            shard.body.setVelocity(Phaser.Math.Between(-90, 90), Phaser.Math.Between(-90, 90));
+          }
+        }
+
+        function gainXp(amount) {
+          gameState.xp += amount;
+          while (gameState.xp >= gameState.xpNext) {
+            gameState.xp -= gameState.xpNext;
+            levelUp();
+          }
+          updateHud();
+        }
+
+        function levelUp() {
+          gameState.level += 1;
+          gameState.xpNext = Math.round(gameState.xpNext * 1.18);
+          presentUpgradeChoices();
+        }
+
+        function presentUpgradeChoices() {
+          if (!upgradeOverlay || !upgradeChoices) return;
+          const pool = [
+            { key: "fire_rate", label: "연사 강화", detail: "사격 간격을 줄입니다." },
+            { key: "pierce", label: "관통 강화", detail: "탄환이 적을 추가로 관통합니다." },
+            { key: "spread", label: "확산 사격", detail: "탄환이 여러 갈래로 나갑니다." },
+            { key: "dash", label: "대시 재정비", detail: "대시 거리와 회복 속도를 조금 올립니다." },
+            { key: "hp", label: "최대 체력", detail: "체력 1을 회복하고 최대 체력을 올립니다." },
+            { key: "move", label: "이동 속도", detail: "기본 이동 속도를 끌어올립니다." },
+          ];
+          const choices = Phaser.Utils.Array.Shuffle(pool.slice()).slice(0, 3);
+          upgradeChoices.innerHTML = "";
+          upgradeOverlay.style.display = "flex";
+          gameState.upgradePending = true;
+          choices.forEach((choice) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.style.minHeight = "52px";
+            button.style.padding = "12px 14px";
+            button.style.borderRadius = "14px";
+            button.style.border = "1px solid rgba(103,232,249,0.2)";
+            button.style.background = "rgba(15,23,42,0.85)";
+            button.style.color = "#e2e8f0";
+            button.style.cursor = "pointer";
+            button.innerHTML = `<strong style="display:block;font-size:14px;color:#67e8f9;">${choice.label}</strong><span style="display:block;margin-top:6px;font-size:12px;line-height:1.5;color:#cbd5e1;">${choice.detail}</span>`;
+            button.addEventListener("click", () => applyUpgrade(choice.key));
+            upgradeChoices.appendChild(button);
+          });
+          statusReadout.textContent = `Level ${gameState.level} · upgrade ready`;
+        }
+
+        function applyUpgrade(key) {
+          if (key === "fire_rate") gameState.fireRateMul = Math.min(2.2, gameState.fireRateMul + 0.2);
+          if (key === "pierce") gameState.pierceShots = Math.min(2, gameState.pierceShots + 1);
+          if (key === "spread") gameState.spreadShot = Math.min(2, gameState.spreadShot + 1);
+          if (key === "dash") {
+            gameState.dashDistance = Math.min(240, gameState.dashDistance + 24);
+            gameState.dashCooldown = Math.max(0, gameState.dashCooldown - 0.2);
+          }
+          if (key === "hp") {
+            gameState.maxHp = Math.min(6, gameState.maxHp + 1);
+            gameState.hp = Math.min(gameState.maxHp, gameState.hp + 1);
+          }
+          if (key === "move") gameState.moveSpeedMul = Math.min(1.45, gameState.moveSpeedMul + 0.08);
+          if (upgradeOverlay) upgradeOverlay.style.display = "none";
+          if (upgradeChoices) upgradeChoices.innerHTML = "";
+          gameState.upgradePending = false;
+          statusReadout.textContent = "Upgrade locked · hold the arena";
+          updateHud();
+        }
+
+        function onPickupRewardShard(playerObj, shard) {
+          shard.destroy();
+          gainXp(30);
         }
 
         function resetArena() {
           enemies.clear(true, true);
           bullets.clear(true, true);
+          enemyBullets.clear(true, true);
+          rewardShards.clear(true, true);
           player.setPosition(sceneRef.scale.width / 2, sceneRef.scale.height / 2);
           player.setVelocity(0, 0);
           gameState.wave = 1;
@@ -377,16 +564,31 @@ TOPDOWN_HTML = dedent(
           gameState.dashCooldown = 0;
           gameState.threat = 0;
           gameState.started = false;
+          gameState.level = 1;
+          gameState.xp = 0;
+          gameState.xpNext = 120;
+          gameState.upgradePending = false;
+          gameState.fireRateMul = 1;
+          gameState.pierceShots = 0;
+          gameState.spreadShot = 0;
+          gameState.moveSpeedMul = 1;
+          gameState.hp = 3;
+          gameState.maxHp = 3;
+          gameState.dashDistance = 170;
+          gameState.dashInvuln = 0;
           statusReadout.textContent = "Arena reset · build rhythm again";
           if (titleScreen) titleScreen.style.display = "flex";
+          if (upgradeOverlay) upgradeOverlay.style.display = "none";
+          if (upgradeChoices) upgradeChoices.innerHTML = "";
           spawnWave(gameState.wave);
           updateHud();
         }
 
         function updateHud() {
           waveReadout.textContent = `Wave ${gameState.wave}`;
+          xpReadout.textContent = `Level ${gameState.level} · XP ${gameState.xp} / ${gameState.xpNext}`;
           comboReadout.textContent = `Combo ${gameState.combo} · Enemies ${enemies ? enemies.countActive(true) : 0}`;
-          threatReadout.textContent = `Threat ${gameState.threat} · ${gameState.canDash ? "Dash ready" : "Dash cooling"}`;
+          threatReadout.textContent = `Threat ${gameState.threat} · HP ${gameState.hp}/${gameState.maxHp} · ${gameState.canDash ? "Dash ready" : "Dash cooling"}`;
         }
       </script>
     </body>

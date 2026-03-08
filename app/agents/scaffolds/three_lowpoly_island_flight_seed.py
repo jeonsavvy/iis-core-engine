@@ -29,6 +29,8 @@ ISLAND_FLIGHT_HTML = dedent(
         <div id="hud">
           <span>LOW-POLY ISLAND FLIGHT</span>
           <strong id="ring-readout">Rings 0 / 8</strong>
+          <span id="chain-readout">Chain x0 · Section 1</span>
+          <span id="medal-readout">Rating Bronze</span>
           <span id="speed-readout">Speed 0 knots</span>
           <span id="altitude-readout">Altitude 18m</span>
           <span id="status-readout">Propeller spinning · explore the islands</span>
@@ -52,6 +54,8 @@ ISLAND_FLIGHT_HTML = dedent(
         window.__iis_game_boot_ok = false;
 
         const ringReadout = document.getElementById("ring-readout");
+        const chainReadout = document.getElementById("chain-readout");
+        const medalReadout = document.getElementById("medal-readout");
         const speedReadout = document.getElementById("speed-readout");
         const altitudeReadout = document.getElementById("altitude-readout");
         const statusReadout = document.getElementById("status-readout");
@@ -235,10 +239,15 @@ ISLAND_FLIGHT_HTML = dedent(
           climbVelocity: 0,
           speed: 22,
           rings: 0,
+          chain: 0,
+          bestChain: 0,
+          section: 1,
+          rating: "Bronze",
           countdown: 3,
           started: false,
           lastSafePoint: new THREE.Vector3(0, 11, 16),
           lastSafeYaw: 0,
+          lastRingAt: performance.now(),
         };
 
         function terrainHeightAt(x, z) {
@@ -263,6 +272,7 @@ ISLAND_FLIGHT_HTML = dedent(
           state.climbVelocity = 0;
           state.speed = 18;
           state.yaw = state.lastSafeYaw;
+          state.chain = 0;
           statusReadout.textContent = reason;
           ringReadout.textContent = `Rings ${state.rings} / ${ringMeshes.length}`;
         }
@@ -277,10 +287,15 @@ ISLAND_FLIGHT_HTML = dedent(
           state.climbVelocity = 0;
           state.speed = 22;
           state.rings = 0;
+          state.chain = 0;
+          state.bestChain = 0;
+          state.section = 1;
+          state.rating = "Bronze";
           state.countdown = 3;
           state.started = false;
           state.lastSafePoint.set(0, 11, 16);
           state.lastSafeYaw = 0;
+          state.lastRingAt = performance.now();
           ringMeshes.forEach((ring) => {
             ring.collected = false;
             ring.mesh.visible = true;
@@ -288,6 +303,29 @@ ISLAND_FLIGHT_HTML = dedent(
           countdownEl.textContent = "3";
           countdownEl.style.opacity = "1";
           statusReadout.textContent = "Propeller spinning · line up for the rings";
+        }
+
+        function updateFlightRating() {
+          const completionRatio = state.rings / ringMeshes.length;
+          if (completionRatio >= 1 && state.bestChain >= 5) {
+            state.rating = "Gold";
+          } else if (completionRatio >= 0.6 || state.bestChain >= 4) {
+            state.rating = "Silver";
+          } else {
+            state.rating = "Bronze";
+          }
+        }
+
+        function advanceSegment() {
+          state.section = Math.min(3, Math.max(1, Math.floor(state.rings / 3) + 1));
+        }
+
+        function grantRingChainBonus(nowMs) {
+          const quickChain = nowMs - state.lastRingAt < 4200;
+          state.chain = quickChain ? state.chain + 1 : 1;
+          state.bestChain = Math.max(state.bestChain, state.chain);
+          state.lastRingAt = nowMs;
+          state.speed = Math.min(34, state.speed + 2.8);
         }
 
         function onKey(event, pressed) {
@@ -393,10 +431,13 @@ ISLAND_FLIGHT_HTML = dedent(
               ring.collected = true;
               ring.mesh.visible = false;
               state.rings += 1;
+              grantRingChainBonus(nowMs);
+              advanceSegment();
+              updateFlightRating();
               state.lastSafePoint.copy(ring.mesh.position).add(new THREE.Vector3(0, 2.5, 10));
               state.lastSafeYaw = state.yaw;
-              statusReadout.textContent = `Ring burst! ${state.rings} / ${ringMeshes.length}`;
-              window.IISLeaderboard.postScore(200 + state.rings * 50);
+              statusReadout.textContent = `Ring burst! Chain x${state.chain} · ${state.rings} / ${ringMeshes.length}`;
+              window.IISLeaderboard.postScore(200 + state.rings * 50 + state.chain * 20);
               playRingTone();
             }
           });
@@ -408,10 +449,12 @@ ISLAND_FLIGHT_HTML = dedent(
           camera.updateProjectionMatrix();
 
           ringReadout.textContent = `Rings ${state.rings} / ${ringMeshes.length}`;
+          chainReadout.textContent = `Chain x${state.chain} · Section ${state.section}`;
+          medalReadout.textContent = `Rating ${state.rating}`;
           speedReadout.textContent = `Speed ${Math.round(state.speed * 3.8)} knots`;
           altitudeReadout.textContent = `Altitude ${Math.round(state.position.y)}m`;
           if (state.rings === ringMeshes.length) {
-            statusReadout.textContent = "All rings cleared · coast over the islands";
+            statusReadout.textContent = `All rings cleared · ${state.rating} flight achieved`;
           }
 
           cloudGroup.children.forEach((cloud, index) => {

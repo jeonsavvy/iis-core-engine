@@ -148,6 +148,10 @@ class PlaytesterAgent:
                 issues.append("Missing stabilize / auto-level control")
             if "ring" not in lower:
                 issues.append("Missing traversal ring loop")
+            if "chain" not in lower:
+                issues.append("Missing chain progression loop")
+            if "medal" not in lower and "rating" not in lower:
+                issues.append("Missing medal/rating loop")
             if "terrainheightat" not in lower:
                 issues.append("Missing terrain clearance guard")
             if "lastsafepoint" not in lower:
@@ -161,6 +165,10 @@ class PlaytesterAgent:
                 issues.append("Missing title/menu state flow")
             if "coverblocks" not in lower:
                 issues.append("Missing arena cover landmarks")
+            if "resolvedashtarget" not in lower:
+                issues.append("Missing dash collision resolver")
+            if "xp" not in lower or "level" not in lower or "upgrade" not in lower:
+                issues.append("Missing progression upgrade loop")
             if "shake(" not in lower:
                 issues.append("Missing impact screen shake")
 

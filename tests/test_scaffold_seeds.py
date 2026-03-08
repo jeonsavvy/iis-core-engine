@@ -77,6 +77,8 @@ def test_island_flight_scaffold_contains_environment_landmarks() -> None:
     assert "cloudgroup" in html
     assert "sunhalo" in html
     assert "lighthousetower" in html
+    assert "chain" in html
+    assert "medal" in html or "rating" in html
 
 
 def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
@@ -94,6 +96,11 @@ def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     assert "title-screen" in html or "start run" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+    assert "xp" in html
+    assert "level" in html
+    assert "upgrade" in html
+    assert "resolvedashtarget" in html
+    assert "enemytype" in html or "kind:" in html
 
 
 def test_topdown_scaffold_contains_resilient_start_flow() -> None:
