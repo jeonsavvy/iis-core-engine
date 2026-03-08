@@ -328,10 +328,17 @@ ISLAND_FLIGHT_HTML = dedent(
           const dt = Math.min(0.033, (nowMs - lastTime) / 1000);
           lastTime = nowMs;
 
+          const flightForward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+
           if (!state.started) {
             state.countdown = Math.max(0, state.countdown - dt);
             const shown = Math.ceil(state.countdown);
             countdownEl.textContent = shown > 0 ? String(shown) : "GO!";
+            const introCamera = plane.position.clone().add(new THREE.Vector3(-6.8, 4.6, 7.2));
+            camera.position.lerp(introCamera, 0.14);
+            camera.lookAt(plane.position.clone().add(flightForward.clone().multiplyScalar(-12)).add(new THREE.Vector3(0, 1.5, 0)));
+            camera.fov = THREE.MathUtils.lerp(camera.fov, 64, dt * 4.2);
+            camera.updateProjectionMatrix();
             if (state.countdown <= 0) {
               state.started = true;
               setTimeout(() => { countdownEl.style.opacity = "0"; }, 240);
@@ -363,7 +370,7 @@ ISLAND_FLIGHT_HTML = dedent(
           plane.quaternion.setFromEuler(rotation);
           propeller.rotation.z += dt * (24 + state.speed * 0.65);
 
-          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
+          const forward = flightForward;
           state.velocity.lerp(forward.multiplyScalar(state.speed), dt * 1.8);
           state.position.addScaledVector(state.velocity, dt);
           state.climbVelocity = THREE.MathUtils.lerp(state.climbVelocity, state.pitch * 14, dt * 2.4);
@@ -394,9 +401,9 @@ ISLAND_FLIGHT_HTML = dedent(
             }
           });
 
-          const desiredCamera = plane.position.clone().add(new THREE.Vector3(0, 4.8, 12.5).applyQuaternion(plane.quaternion));
+          const desiredCamera = plane.position.clone().add(new THREE.Vector3(-2.6, 4.7, 11.2).applyQuaternion(plane.quaternion));
           camera.position.lerp(desiredCamera, 0.12);
-          camera.lookAt(plane.position.clone().add(forward.clone().multiplyScalar(26)).add(new THREE.Vector3(0, 1.8, 0)));
+          camera.lookAt(plane.position.clone().add(forward.clone().multiplyScalar(28)).add(new THREE.Vector3(0, 2.2, 0)));
           camera.fov = THREE.MathUtils.lerp(camera.fov, input.boost ? 78 : 68, dt * 3.8);
           camera.updateProjectionMatrix();
 
