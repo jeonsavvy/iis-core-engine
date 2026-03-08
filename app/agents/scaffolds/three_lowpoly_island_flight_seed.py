@@ -57,7 +57,7 @@ ISLAND_FLIGHT_HTML = dedent(
         const statusReadout = document.getElementById("status-readout");
         const countdownEl = document.getElementById("countdown");
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setClearColor(0x000000, 0);
@@ -77,6 +77,37 @@ ISLAND_FLIGHT_HTML = dedent(
           new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.BackSide, transparent: true, opacity: 0.18 })
         );
         scene.add(skyDome);
+        const sunHalo = new THREE.Mesh(
+          new THREE.SphereGeometry(7.5, 18, 18),
+          new THREE.MeshBasicMaterial({ color: 0xfef3c7, transparent: true, opacity: 0.42 })
+        );
+        sunHalo.position.set(44, 34, -120);
+        scene.add(sunHalo);
+        const cloudGroup = new THREE.Group();
+        scene.add(cloudGroup);
+        [
+          { x: -32, y: 20, z: -42, scale: 1.2 },
+          { x: 18, y: 24, z: -76, scale: 1.4 },
+          { x: -12, y: 18, z: -108, scale: 1.0 },
+          { x: 38, y: 22, z: -138, scale: 1.25 },
+        ].forEach((cloud, index) => {
+          const puff = new THREE.Group();
+          for (let offsetIndex = 0; offsetIndex < 3; offsetIndex += 1) {
+            const bubble = new THREE.Mesh(
+              new THREE.SphereGeometry((1.8 - offsetIndex * 0.25) * cloud.scale, 10, 10),
+              new THREE.MeshStandardMaterial({
+                color: 0xfffbeb,
+                flatShading: true,
+                transparent: true,
+                opacity: 0.9,
+              })
+            );
+            bubble.position.set(offsetIndex * 1.9 * cloud.scale, offsetIndex % 2 === 0 ? 0.3 : -0.2, (offsetIndex - 1) * 0.8);
+            puff.add(bubble);
+          }
+          puff.position.set(cloud.x, cloud.y + Math.sin(index) * 1.2, cloud.z);
+          cloudGroup.add(puff);
+        });
 
         const sea = new THREE.Mesh(
           new THREE.CircleGeometry(220, 64),
@@ -123,6 +154,21 @@ ISLAND_FLIGHT_HTML = dedent(
           crown.position.set(trunk.position.x, trunk.position.y + 2.2, trunk.position.z);
           tree.add(trunk, crown);
           islands.add(tree);
+          if (index === 1) {
+            const lighthouseTower = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.52, 0.76, 6.4, 6),
+              new THREE.MeshStandardMaterial({ color: 0xfffbeb, flatShading: true, roughness: 0.9 })
+            );
+            lighthouseTower.position.set(item.x - 1.2 * item.scale, 2.6, item.z - 0.8 * item.scale);
+            const lighthouseCap = new THREE.Mesh(
+              new THREE.ConeGeometry(1.0, 1.3, 6),
+              new THREE.MeshStandardMaterial({ color: 0xf97316, flatShading: true })
+            );
+            lighthouseCap.position.set(lighthouseTower.position.x, lighthouseTower.position.y + 3.6, lighthouseTower.position.z);
+            const lighthouseBeacon = new THREE.PointLight(0xfef3c7, 2.8, 26);
+            lighthouseBeacon.position.set(lighthouseTower.position.x, lighthouseTower.position.y + 3.1, lighthouseTower.position.z);
+            islands.add(lighthouseTower, lighthouseCap, lighthouseBeacon);
+          }
         });
 
         const plane = new THREE.Group();
@@ -360,6 +406,11 @@ ISLAND_FLIGHT_HTML = dedent(
           if (state.rings === ringMeshes.length) {
             statusReadout.textContent = "All rings cleared · coast over the islands";
           }
+
+          cloudGroup.children.forEach((cloud, index) => {
+            cloud.position.x += Math.sin(nowMs * 0.00018 + index) * 0.012;
+            cloud.position.z += Math.cos(nowMs * 0.00012 + index) * 0.018;
+          });
 
           renderer.render(scene, camera);
           window.requestAnimationFrame(animate);

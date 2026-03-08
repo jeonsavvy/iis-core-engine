@@ -34,6 +34,19 @@ def test_prepare_smoke_workspace_falls_back_to_index_when_entrypoint_invalid(tmp
     assert entry_path.read_text(encoding="utf-8") == html
 
 
+def test_prepare_smoke_workspace_coerces_extensionless_entrypoint_to_index_html(tmp_path: Path) -> None:
+    html = "<html><body>inline</body></html>"
+    entry_path = prepare_smoke_workspace(
+        tmp_dir=str(tmp_path),
+        html_content=html,
+        artifact_files=[],
+        entrypoint_path="inline",
+    )
+
+    assert entry_path.as_posix().endswith("/artifact/inline/index.html")
+    assert entry_path.read_text(encoding="utf-8") == html
+
+
 def test_non_fatal_issue_classifiers() -> None:
     assert is_non_fatal_runtime_issue("Failed to load resource: net::ERR_FILE_NOT_FOUND")
     assert is_non_fatal_runtime_issue("The AudioContext was not allowed to start.")

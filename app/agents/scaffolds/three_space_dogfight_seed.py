@@ -44,7 +44,7 @@ FLIGHT_HTML = dedent(
           <span id="target-readout">Target locked: none</span>
           <span id="lock-strength-readout">Lock 0%</span>
           <span id="wave-readout">Wave 1 · Enemies 3</span>
-          <span id="shield-readout">Shield 100%</span>
+          <span id="hp">Shield 100%</span>
           <span id="status-readout">Boost ready · Cannons online</span>
         </div>
         <div id="controls">
@@ -70,11 +70,11 @@ FLIGHT_HTML = dedent(
         const targetReadout = document.getElementById("target-readout");
         const lockStrengthReadout = document.getElementById("lock-strength-readout");
         const waveReadout = document.getElementById("wave-readout");
-        const shieldReadout = document.getElementById("shield-readout");
+        const shieldReadout = document.getElementById("hp");
         const statusReadout = document.getElementById("status-readout");
         const targetBox = document.getElementById("target-box");
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.getElementById("app").appendChild(renderer.domElement);
@@ -102,6 +102,35 @@ FLIGHT_HTML = dedent(
         }
         stars.geometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
         scene.add(stars);
+        const asteroidField = new THREE.Group();
+        scene.add(asteroidField);
+        for (let i = 0; i < 18; i += 1) {
+          const asteroid = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(0.8 + Math.random() * 1.6),
+            new THREE.MeshStandardMaterial({ color: 0x64748b, flatShading: true, roughness: 1.0, metalness: 0.04 })
+          );
+          asteroid.position.set((Math.random() - 0.5) * 120, (Math.random() - 0.5) * 40, -60 - Math.random() * 180);
+          asteroid.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+          asteroidField.add(asteroid);
+        }
+        const carrierCore = new THREE.Group();
+        scene.add(carrierCore);
+        const carrierHull = new THREE.Mesh(
+          new THREE.BoxGeometry(12, 2.2, 44),
+          new THREE.MeshStandardMaterial({ color: 0x16213d, flatShading: true, roughness: 0.88, metalness: 0.08 })
+        );
+        carrierHull.position.set(0, -9, -180);
+        const carrierDeck = new THREE.Mesh(
+          new THREE.BoxGeometry(20, 0.45, 22),
+          new THREE.MeshStandardMaterial({ color: 0x23386b, flatShading: true, roughness: 0.8 })
+        );
+        carrierDeck.position.set(0, -7.4, -170);
+        const carrierTower = new THREE.Mesh(
+          new THREE.BoxGeometry(4, 4.6, 6),
+          new THREE.MeshStandardMaterial({ color: 0x2f4a85, flatShading: true, roughness: 0.8 })
+        );
+        carrierTower.position.set(3.2, -5.4, -176);
+        carrierCore.add(carrierHull, carrierDeck, carrierTower);
 
         const ship = new THREE.Group();
         const fuselage = new THREE.Mesh(
@@ -126,6 +155,11 @@ FLIGHT_HTML = dedent(
         engineTrail.rotation.x = Math.PI / 2;
         engineTrail.position.set(0, 0, 2.5);
         ship.add(engineTrail);
+        const shieldFlash = new THREE.Mesh(
+          new THREE.SphereGeometry(1.45, 16, 16),
+          new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.0, wireframe: true })
+        );
+        ship.add(shieldFlash);
         scene.add(ship);
 
         const enemyGroup = new THREE.Group();
@@ -264,6 +298,7 @@ FLIGHT_HTML = dedent(
             laser.mesh.position.addScaledVector(laser.velocity, dt);
             if (laser.mesh.position.distanceTo(ship.position) < 1.4) {
               state.shield = Math.max(0, state.shield - 14);
+              shieldFlash.material.opacity = 0.82;
               statusReadout.textContent = "Incoming hit · shields absorbing fire";
               scene.remove(laser.mesh);
               enemyLasers.splice(index, 1);
@@ -322,7 +357,16 @@ FLIGHT_HTML = dedent(
             statusReadout.textContent = `Wave ${state.wave} inbound`;
           }
 
-          const cameraOffset = new THREE.Vector3(0, 3.2, 9.0).applyQuaternion(ship.quaternion);
+          shieldFlash.material.opacity = Math.max(0, shieldFlash.material.opacity - dt * 1.8);
+          shieldFlash.rotation.y += dt * 0.9;
+          asteroidField.children.forEach((asteroid, index) => {
+            asteroid.rotation.x += dt * (0.08 + index * 0.003);
+            asteroid.rotation.y -= dt * (0.06 + index * 0.002);
+          });
+          carrierCore.position.x = Math.sin(now * 0.00018) * 8;
+          carrierCore.rotation.y = Math.sin(now * 0.00011) * 0.12;
+
+          const cameraOffset = new THREE.Vector3(1.2, 2.8, 8.4).applyQuaternion(ship.quaternion);
           const desiredCamera = ship.position.clone().add(cameraOffset);
           camera.position.lerp(desiredCamera, Math.min(1, dt * 4.4));
           camera.fov = THREE.MathUtils.lerp(camera.fov, boostFactor > 1.0 ? 76 : 70, Math.min(1, dt * 3.5));

@@ -64,6 +64,27 @@ class SessionPublisher:
         return None
 
     @staticmethod
+    def _fallback_preview_raster_asset(*, genre_brief: dict[str, Any] | None = None, genre: str = "") -> str | None:
+        asset_pack_key = str((genre_brief or {}).get("asset_pack_key", "") or "").strip()
+        if asset_pack_key == "racing_synthwave_pack_v1":
+            return "/assets/preview-raster/neon-drift.png"
+        if asset_pack_key == "island_flight_pack_v1":
+            return "/assets/preview-raster/aether-courier.png"
+        if asset_pack_key == "space_dogfight_pack_v1":
+            return "/assets/preview-raster/skyline-jet.png"
+        if asset_pack_key == "topdown_lowpoly_pack_v1":
+            return "/assets/preview-raster/timebreakers.png"
+
+        lowered = genre.casefold()
+        if "race" in lowered or "racing" in lowered or "레이싱" in lowered:
+            return "/assets/preview-raster/neon-drift.png"
+        if "flight" in lowered or "비행" in lowered:
+            return "/assets/preview-raster/aether-courier.png"
+        if "shoot" in lowered or "슈팅" in lowered:
+            return "/assets/preview-raster/timebreakers.png"
+        return None
+
+    @staticmethod
     def _resolve_telegram_media_url(*, thumbnail_url: str | None = None, screenshot_url: str | None = None) -> str | None:
         for candidate in (thumbnail_url, screenshot_url):
             normalized = str(candidate or "").strip()
@@ -82,6 +103,13 @@ class SessionPublisher:
         if base_url:
             return f"{base_url}/play/{slug}"
         return f"/play/{slug}"
+
+    def _resolve_portal_asset_url(self, asset_path: str | None) -> str | None:
+        normalized_path = str(asset_path or "").strip()
+        base_url = str(self.settings.public_portal_base_url or "").strip().rstrip("/")
+        if not normalized_path or not base_url or not normalized_path.startswith("/"):
+            return None
+        return f"{base_url}{normalized_path}"
 
     @staticmethod
     def _normalize_catalog_tag(value: str) -> str:
@@ -191,6 +219,11 @@ class SessionPublisher:
         if not screenshot_url:
             screenshot_url = self._fallback_preview_asset(genre_brief=genre_brief, genre=genre)
         thumbnail_url = screenshot_url
+        telegram_photo_url = self._resolve_telegram_media_url(thumbnail_url=thumbnail_url, screenshot_url=screenshot_url)
+        if telegram_photo_url is None:
+            telegram_photo_url = self._resolve_portal_asset_url(
+                self._fallback_preview_raster_asset(genre_brief=genre_brief, genre=genre)
+            )
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],
@@ -265,7 +298,7 @@ class SessionPublisher:
                 marketing_line=marketing_summary,
                 play_url=play_url,
                 public_url=public_url or None,
-                photo_url=self._resolve_telegram_media_url(thumbnail_url=thumbnail_url, screenshot_url=screenshot_url),
+                photo_url=telegram_photo_url,
                 genre=genre,
                 slug=slug,
             )

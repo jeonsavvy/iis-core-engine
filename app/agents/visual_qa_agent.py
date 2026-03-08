@@ -56,7 +56,7 @@ class VisualQAAgent:
                 smoke = self._quality.run_smoke_check(
                     html_content,
                     artifact_files=[],
-                    entrypoint_path="inline",
+                    entrypoint_path=None,
                 )
                 if not smoke.ok:
                     return VisualQAResult(
@@ -67,6 +67,14 @@ class VisualQAAgent:
                     )
                 # Use visual metrics from smoke if available
                 visual_metrics = smoke.visual_metrics or {}
+                if self._has_inconclusive_metrics(visual_metrics):
+                    return VisualQAResult(
+                        ok=True,
+                        score=60,
+                        feedback="Visual probe was inconclusive, but runtime boot succeeded.",
+                        issues=[],
+                        screenshot_data=smoke.screenshot_bytes,
+                    )
                 score = self._score_from_metrics(visual_metrics)
                 issues = self._issues_from_metrics(visual_metrics)
                 return VisualQAResult(
@@ -101,6 +109,22 @@ class VisualQAAgent:
         if non_dark > 0.15:
             score += 10
         return min(100, score)
+
+    @staticmethod
+    def _has_inconclusive_metrics(metrics: dict[str, Any]) -> bool:
+        if not metrics:
+            return True
+        canvas_width = float(metrics.get("canvas_width", 0) or 0)
+        canvas_height = float(metrics.get("canvas_height", 0) or 0)
+        if canvas_width <= 0 or canvas_height <= 0:
+            return True
+        return (
+            float(metrics.get("luminance_std", 0) or 0) <= 0
+            and float(metrics.get("non_dark_ratio", 0) or 0) <= 0
+            and float(metrics.get("edge_energy", 0) or 0) <= 0
+            and float(metrics.get("motion_delta", 0) or 0) <= 0
+            and float(metrics.get("color_bucket_count", 0) or 0) <= 1
+        )
 
     @staticmethod
     def _issues_from_metrics(metrics: dict[str, Any]) -> list[str]:

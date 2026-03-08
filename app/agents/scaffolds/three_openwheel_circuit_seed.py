@@ -60,7 +60,7 @@ RACING_HTML = dedent(
         statusStateEl.style.color = "#fbbf24";
         document.getElementById("hud").appendChild(statusStateEl);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.getElementById("app").appendChild(renderer.domElement);
@@ -149,7 +149,11 @@ RACING_HTML = dedent(
         scene.add(ground);
 
         const startPosition = trackCurve.getPointAt(0.0);
-        const trackHalfWidth = 4.2;
+        const startTangent = trackCurve.getTangentAt(0.0).normalize();
+        const startNormal = new THREE.Vector3(-startTangent.z, 0, startTangent.x).normalize();
+        const startHeading = Math.atan2(startTangent.x, startTangent.z);
+        const startGridPosition = startPosition.clone().add(startTangent.clone().multiplyScalar(-2.8));
+        const trackHalfWidth = 4.8;
         const checkpointMarkers = [];
         const checkpointState = {
           currentCheckpointIndex: 0,
@@ -159,43 +163,61 @@ RACING_HTML = dedent(
           lapStartMs: performance.now(),
           bestLapMs: null,
           lastLapMs: null,
-          lastSafePoint: startPosition.clone(),
-          lastSafeHeading: 0,
+          lastSafePoint: startGridPosition.clone(),
+          lastSafeHeading: startHeading,
         };
-        [0.02, 0.27, 0.53, 0.78].forEach((t, index) => {
+        [0.16, 0.39, 0.62, 0.85].forEach((t, index) => {
           const position = trackCurve.getPointAt(t);
           const tangent = trackCurve.getTangentAt(t).normalize();
           const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
           const gate = new THREE.Group();
-          const postMaterial = new THREE.MeshStandardMaterial({ color: index === 0 ? 0x34d399 : 0x7c3aed, emissive: index === 0 ? 0x052e16 : 0x2e1065 });
-          const postLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 3.6, 10), postMaterial);
+          const postMaterial = new THREE.MeshStandardMaterial({
+            color: index === 0 ? 0x34d399 : 0x7c3aed,
+            emissive: index === 0 ? 0x0f5132 : 0x312e81,
+            transparent: true,
+            opacity: 0.9,
+          });
+          const postLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 2.4, 10), postMaterial);
           const postRight = postLeft.clone();
-          postLeft.position.copy(position).add(normal.clone().multiplyScalar(trackHalfWidth - 0.65)).add(new THREE.Vector3(0, 1.8, 0));
-          postRight.position.copy(position).add(normal.clone().multiplyScalar(-(trackHalfWidth - 0.65))).add(new THREE.Vector3(0, 1.8, 0));
+          const gateSpan = trackHalfWidth + 0.95;
+          postLeft.position.copy(position).add(normal.clone().multiplyScalar(gateSpan)).add(new THREE.Vector3(0, 1.2, 0));
+          postRight.position.copy(position).add(normal.clone().multiplyScalar(-gateSpan)).add(new THREE.Vector3(0, 1.2, 0));
           const gateBar = new THREE.Mesh(
-            new THREE.BoxGeometry(trackHalfWidth * 1.5, 0.16, 0.16),
-            new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x111827 })
+            new THREE.BoxGeometry(trackHalfWidth * 1.22, 0.12, 0.14),
+            new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x0f172a })
           );
-          gateBar.position.copy(position).add(new THREE.Vector3(0, 3.35, 0));
+          gateBar.position.copy(position).add(new THREE.Vector3(0, 2.35, 0));
           gateBar.rotation.y = Math.atan2(tangent.x, tangent.z);
-          gate.add(postLeft, postRight, gateBar);
+          const gateRibbon = new THREE.Mesh(
+            new THREE.TorusGeometry(trackHalfWidth * 0.52, 0.08, 10, 48),
+            new THREE.MeshBasicMaterial({
+              color: index === 0 ? 0x22d3ee : 0xf472b6,
+              transparent: true,
+              opacity: 0.7,
+            })
+          );
+          gateRibbon.position.copy(position).add(new THREE.Vector3(0, 1.55, 0));
+          gateRibbon.rotation.y = Math.atan2(tangent.x, tangent.z);
+          gateRibbon.rotation.x = Math.PI / 2;
+          gate.add(postLeft, postRight, gateBar, gateRibbon);
           scene.add(gate);
-          checkpointMarkers.push({ marker: gate, position, tangent, normal, threshold: 4.4 });
+          checkpointMarkers.push({ marker: gate, position, tangent, normal, threshold: 5.1 });
         });
         const startGateLeft = new THREE.Mesh(
-          new THREE.BoxGeometry(0.28, 5.0, 0.28),
+          new THREE.BoxGeometry(0.2, 3.4, 0.2),
           new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x082f49 })
         );
-        startGateLeft.position.copy(startPosition).add(new THREE.Vector3(-4.0, 2.5, 0.5));
+        startGateLeft.position.copy(startPosition).add(startNormal.clone().multiplyScalar(trackHalfWidth + 1.0)).add(new THREE.Vector3(0, 1.7, 0));
         scene.add(startGateLeft);
         const startGateRight = startGateLeft.clone();
-        startGateRight.position.copy(startPosition).add(new THREE.Vector3(4.0, 2.5, 0.5));
+        startGateRight.position.copy(startPosition).add(startNormal.clone().multiplyScalar(-(trackHalfWidth + 1.0))).add(new THREE.Vector3(0, 1.7, 0));
         scene.add(startGateRight);
         const startGateBar = new THREE.Mesh(
-          new THREE.BoxGeometry(8.5, 0.18, 0.18),
+          new THREE.BoxGeometry(trackHalfWidth * 1.35, 0.14, 0.14),
           new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x111827 })
         );
-        startGateBar.position.copy(startPosition).add(new THREE.Vector3(0, 4.8, 0.5));
+        startGateBar.position.copy(startPosition).add(new THREE.Vector3(0, 3.25, 0));
+        startGateBar.rotation.y = startHeading;
         scene.add(startGateBar);
 
         const car = new THREE.Group();
@@ -242,8 +264,8 @@ RACING_HTML = dedent(
 
         const input = { throttle: false, brake: false, left: false, right: false };
         const carState = {
-          position: trackCurve.getPointAt(0.0).clone(),
-          heading: 0,
+          position: startGridPosition.clone(),
+          heading: startHeading,
           speed: 0,
           steerVelocity: 0,
           accelRate: 19,
@@ -264,12 +286,12 @@ RACING_HTML = dedent(
           carState.offTrackTimer = 0;
           carState.wrongWayTimer = 0;
           hintStateEl.textContent = reason;
-          statusStateEl.textContent = "TRACK LOCKED";
+          statusStateEl.textContent = "CHECKPOINT READY";
         }
 
         function resetRace() {
-          carState.position.copy(trackCurve.getPointAt(0.0));
-          carState.heading = 0;
+          carState.position.copy(startGridPosition);
+          carState.heading = startHeading;
           carState.speed = 0;
           carState.steerVelocity = 0;
           checkpointState.currentCheckpointIndex = 0;
@@ -277,8 +299,8 @@ RACING_HTML = dedent(
           checkpointState.lapCount = 1;
           checkpointState.lapStartMs = performance.now();
           checkpointState.lapTimerMs = 0;
-          checkpointState.lastSafePoint = startPosition.clone();
-          checkpointState.lastSafeHeading = 0;
+          checkpointState.lastSafePoint = startGridPosition.clone();
+          checkpointState.lastSafeHeading = startHeading;
           carState.offTrackTimer = 0;
           carState.wrongWayTimer = 0;
           carState.countdown = 3;
@@ -290,8 +312,8 @@ RACING_HTML = dedent(
               }
             });
           });
-          hintStateEl.textContent = "Reset complete — attack the circuit again";
-          statusStateEl.textContent = "TRACK LOCKED";
+          hintStateEl.textContent = "Grid set — punch the throttle and clip the apex";
+          statusStateEl.textContent = "CHECKPOINT READY";
           countdownEl.textContent = "3";
           countdownEl.style.opacity = "1";
         }
@@ -438,7 +460,7 @@ RACING_HTML = dedent(
           } else {
             carState.wrongWayTimer = Math.max(0, carState.wrongWayTimer - dt * 2);
           }
-          statusStateEl.textContent = wrongWay ? "WRONG WAY" : offTrack ? "OFF TRACK" : "TRACK LOCKED";
+          statusStateEl.textContent = wrongWay ? "WRONG WAY" : offTrack ? "OFF TRACK" : "CHECKPOINT READY";
 
           car.position.copy(carState.position);
           car.position.y = 0.18;
@@ -449,10 +471,10 @@ RACING_HTML = dedent(
             particle.material.opacity = Math.max(0.08, Math.min(0.46, carState.speed / 120));
           });
 
-          const cameraOffset = new THREE.Vector3(0, 2.7, -6.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+          const cameraOffset = new THREE.Vector3(0.12, 3.2, -7.6).applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
           const desiredCamera = car.position.clone().add(cameraOffset);
           camera.position.lerp(desiredCamera, 0.14);
-          camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(20)).add(new THREE.Vector3(0, 1.25, 0)));
+          camera.lookAt(car.position.clone().add(nearest.tangent.clone().multiplyScalar(28)).add(new THREE.Vector3(0, 1.6, 0)));
           camera.fov = THREE.MathUtils.lerp(camera.fov, 64 + Math.min(14, carState.speed * 0.16), dt * 4.5);
           camera.updateProjectionMatrix();
 

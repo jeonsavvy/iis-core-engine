@@ -44,7 +44,12 @@ def prepare_smoke_workspace(
     chosen_html_path: Path | None = None
     entry_rel_path = _safe_relative_path(entrypoint_path or "")
     if entry_rel_path is not None:
-        candidate = root / entry_rel_path
+        normalized_entry_rel_path = (
+            entry_rel_path / "index.html"
+            if entry_rel_path.suffix.lower() != ".html"
+            else entry_rel_path
+        )
+        candidate = root / normalized_entry_rel_path
         candidate.parent.mkdir(parents=True, exist_ok=True)
         chosen_html_path = candidate
     else:
@@ -220,6 +225,7 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
               };
               const overlay = document.getElementById("overlay");
               const overlayText = document.getElementById("overlay-text")?.textContent ?? "";
+              const countdownText = document.getElementById("countdown")?.textContent ?? "";
               const timerText = document.getElementById("timer")?.textContent ?? "";
               const scoreText = document.getElementById("score")?.textContent ?? "";
               const hpText = document.getElementById("hp")?.textContent ?? "";
@@ -231,6 +237,7 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
                 boot_ok: Boolean(window.__iis_game_boot_ok),
                 overlay_visible: Boolean(overlay && overlay.classList.contains("show")),
                 overlay_text: String(overlayText),
+                countdown_text: String(countdownText),
                 timer_text: String(timerText),
                 score_text: String(scoreText),
                 hp_text: String(hpText),

@@ -44,6 +44,15 @@ def test_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "__iis_game_boot_ok" in html
 
 
+def test_flight_scaffold_contains_depth_landmarks() -> None:
+    seed = get_scaffold_seed("three_space_dogfight_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "carriercore" in html
+    assert "asteroidfield" in html
+    assert "shieldflash" in html
+
+
 def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
     seed = get_scaffold_seed("three_lowpoly_island_flight_seed")
     assert seed is not None
@@ -59,6 +68,15 @@ def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "lastsafepoint" in html or "respawn(" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+
+
+def test_island_flight_scaffold_contains_environment_landmarks() -> None:
+    seed = get_scaffold_seed("three_lowpoly_island_flight_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "cloudgroup" in html
+    assert "sunhalo" in html
+    assert "lighthousetower" in html
 
 
 def test_topdown_scaffold_contains_required_runtime_tokens() -> None:

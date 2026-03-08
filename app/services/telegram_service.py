@@ -3,7 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from app.core.config import Settings
-from app.services.http_client import request_with_retry
+from app.services.http_client import ExternalCallError, request_with_retry
 
 
 class TelegramService:
@@ -48,14 +48,17 @@ class TelegramService:
             return {"status": "skipped", "reason": "TELEGRAM_BOT_TOKEN is not configured."}
 
         url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
-        request_with_retry(
-            "POST",
-            url,
-            timeout_seconds=self.settings.http_timeout_seconds,
-            max_retries=self.settings.http_max_retries,
-            json={"chat_id": chat_id, "text": text, "disable_notification": disable_notification},
-        )
-        return {"status": "sent"}
+        try:
+            request_with_retry(
+                "POST",
+                url,
+                timeout_seconds=self.settings.http_timeout_seconds,
+                max_retries=self.settings.http_max_retries,
+                json={"chat_id": chat_id, "text": text, "disable_notification": disable_notification},
+            )
+            return {"status": "sent"}
+        except ExternalCallError as exc:
+            return {"status": "error", "reason": str(exc)}
 
     def send_photo(
         self,
@@ -69,19 +72,22 @@ class TelegramService:
             return {"status": "skipped", "reason": "TELEGRAM_BOT_TOKEN is not configured."}
 
         url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendPhoto"
-        request_with_retry(
-            "POST",
-            url,
-            timeout_seconds=self.settings.http_timeout_seconds,
-            max_retries=self.settings.http_max_retries,
-            json={
-                "chat_id": chat_id,
-                "photo": photo_url,
-                "caption": caption[:900],
-                "disable_notification": disable_notification,
-            },
-        )
-        return {"status": "sent"}
+        try:
+            request_with_retry(
+                "POST",
+                url,
+                timeout_seconds=self.settings.http_timeout_seconds,
+                max_retries=self.settings.http_max_retries,
+                json={
+                    "chat_id": chat_id,
+                    "photo": photo_url,
+                    "caption": caption[:900],
+                    "disable_notification": disable_notification,
+                },
+            )
+            return {"status": "sent"}
+        except ExternalCallError as exc:
+            return {"status": "error", "reason": str(exc)}
 
     def broadcast_message(self, text: str, *, disable_notification: bool = False) -> dict[str, str]:
         allowed = self.settings.telegram_allowed_chat_id_set()

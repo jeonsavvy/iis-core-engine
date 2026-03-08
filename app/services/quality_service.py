@@ -195,6 +195,15 @@ class QualityService:
                     hp_after = str((probe_after or {}).get("hp_text", "")).strip()
                     overlay_before = bool((probe_before or {}).get("overlay_visible", False))
                     overlay_after = bool((probe_after or {}).get("overlay_visible", False))
+                    start_gate_active = any(
+                        bool((probe or {}).get("start_gate_visible", False))
+                        for probe in (probe_before, probe_mid, probe_after)
+                    )
+                    countdown_active = any(
+                        str((probe or {}).get("countdown_text", "")).strip()
+                        not in {"", "GO!"}
+                        for probe in (probe_before, probe_mid, probe_after)
+                    )
                     input_reaction_ok = any(
                         (
                             timer_before != timer_after,
@@ -203,7 +212,7 @@ class QualityService:
                             overlay_before != overlay_after,
                         )
                     )
-                    if not input_reaction_ok:
+                    if not input_reaction_ok and not start_gate_active and not countdown_active:
                         non_fatal_warnings.append("input_reaction_missing")
                     runtime_probe_summary = {
                         "probe_before": probe_before or {},
@@ -212,6 +221,8 @@ class QualityService:
                         "executed_inputs": executed_inputs,
                         "input_failures": input_failures,
                         "input_reaction_ok": input_reaction_ok,
+                        "start_gate_active": start_gate_active,
+                        "countdown_active": countdown_active,
                     }
 
                     try:

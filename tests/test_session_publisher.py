@@ -25,6 +25,13 @@ def test_fallback_preview_asset_maps_known_genre_packs() -> None:
     assert SessionPublisher._fallback_preview_asset(genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"}) == "/assets/preview/timebreakers.svg"
 
 
+def test_fallback_preview_raster_asset_maps_known_genre_packs() -> None:
+    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "racing_synthwave_pack_v1"}) == "/assets/preview-raster/neon-drift.png"
+    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "island_flight_pack_v1"}) == "/assets/preview-raster/aether-courier.png"
+    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "space_dogfight_pack_v1"}) == "/assets/preview-raster/skyline-jet.png"
+    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"}) == "/assets/preview-raster/timebreakers.png"
+
+
 
 def test_resolve_telegram_media_url_prefers_absolute_thumbnail() -> None:
     result = SessionPublisher._resolve_telegram_media_url(
@@ -40,6 +47,19 @@ def test_resolve_telegram_media_url_skips_relative_svg_preview_asset() -> None:
         screenshot_url=None,
     )
     assert result is None
+
+
+def test_resolve_portal_asset_url_uses_public_portal_base_url() -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+            public_portal_base_url="https://arcade.example.com/",
+        )
+    )
+
+    assert publisher._resolve_portal_asset_url("/assets/preview-raster/neon-drift.png") == "https://arcade.example.com/assets/preview-raster/neon-drift.png"
 
 
 def test_resolve_play_url_uses_public_portal_base_url_when_configured() -> None:
