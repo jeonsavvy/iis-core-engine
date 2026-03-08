@@ -94,6 +94,17 @@ def is_non_fatal_request_failure(*, resource_type: str, url: str, error_text: st
     return False
 
 
+def is_representative_capture_ready(probe: dict[str, object] | None) -> bool:
+    if not isinstance(probe, dict):
+        return True
+
+    if bool(probe.get("start_gate_visible", False)):
+        return False
+
+    countdown_text = str(probe.get("countdown_text", "") or "").strip().casefold()
+    return countdown_text in {"", "go!"}
+
+
 def capture_visual_metrics(page) -> dict[str, float] | None:
     try:
         result = page.evaluate(

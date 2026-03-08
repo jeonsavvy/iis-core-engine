@@ -158,3 +158,18 @@ def test_broadcast_launch_announcement_falls_back_to_text_when_photo_missing(mon
     assert len(sent_messages) == 1
     assert "Aether Courier" in sent_messages[0][1]
     assert "https://arcade.example.com/play/aether-courier" in sent_messages[0][1]
+
+
+def test_build_launch_text_omits_public_link_even_when_present() -> None:
+    text = TelegramService._build_launch_text(
+        title="Golden Isles Flight",
+        marketing_line="따뜻한 섬과 바다 위를 날아가는 3D 비행 런치",
+        play_url="https://arcade.example.com/play/golden-isles-flight",
+        public_url="https://cdn.example.com/games/golden-isles-flight/index.html",
+        genre="flight",
+        slug="golden-isles-flight",
+    )
+
+    assert "https://arcade.example.com/play/golden-isles-flight" in text
+    assert "Public" not in text
+    assert "https://cdn.example.com/games/golden-isles-flight/index.html" not in text

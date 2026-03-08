@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.services.quality_smoke import (
     evaluate_runtime_liveness,
+    is_representative_capture_ready,
     is_non_fatal_request_failure,
     is_non_fatal_runtime_issue,
     prepare_smoke_workspace,
@@ -61,6 +62,13 @@ def test_non_fatal_issue_classifiers() -> None:
         url="https://example.com/app.js",
         error_text="timed out",
     )
+
+
+def test_representative_capture_waits_until_countdown_clears() -> None:
+    assert not is_representative_capture_ready({"countdown_text": "2", "start_gate_visible": False})
+    assert not is_representative_capture_ready({"countdown_text": "", "start_gate_visible": True})
+    assert is_representative_capture_ready({"countdown_text": "", "start_gate_visible": False})
+    assert is_representative_capture_ready({"countdown_text": "GO!", "start_gate_visible": False})
 
 
 def test_runtime_liveness_flags_game_over_overlay_as_warning() -> None:

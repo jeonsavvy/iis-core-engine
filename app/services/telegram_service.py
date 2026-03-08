@@ -38,9 +38,6 @@ class TelegramService:
         normalized_title = title.strip() or "New Launch"
         normalized_line = marketing_line.strip() or cls._fallback_marketing_line(title=normalized_title, genre=genre)
         lines = [normalized_title, normalized_line, "", f"Play\n{play_url.strip()}"]
-        normalized_public = (public_url or "").strip()
-        if normalized_public and normalized_public != play_url.strip():
-            lines.extend(["", f"Public\n{normalized_public}"])
         return "\n".join(lines).strip()
 
     def send_message(self, chat_id: str, text: str, *, disable_notification: bool = False) -> dict[str, str]:

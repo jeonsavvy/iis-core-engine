@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from datetime import datetime
 
 from app.core.config import Settings
@@ -143,3 +144,42 @@ def test_publish_uses_session_user_id_for_created_by(monkeypatch) -> None:
 
     assert result["success"] is True
     assert recorded["created_by"] == "user-1"
+
+
+def test_publish_uses_text_only_telegram_alert_when_only_placeholder_media_exists(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+            public_portal_base_url="https://arcade.example.com",
+        )
+    )
+
+    sent_payload: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        publisher._publisher,
+        "publish_game",
+        lambda **_: {
+            "status": "published",
+            "public_url": "https://cdn.example.com/games/golden-isles-flight/index.html",
+            "game_id": "game-1",
+        },
+    )
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **_: True)
+    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=None))
+    monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
+    publisher._archiver = None
+
+    __import__("asyncio").run(
+        publisher.publish(
+            slug="golden-isles-flight",
+            game_name="Golden Isles Flight",
+            genre="flight",
+            html_content="<html>ok</html>",
+            genre_brief={"asset_pack_key": "island_flight_pack_v1"},
+        )
+    )
+
+    assert sent_payload["photo_url"] is None

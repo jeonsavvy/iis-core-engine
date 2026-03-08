@@ -220,10 +220,6 @@ class SessionPublisher:
             screenshot_url = self._fallback_preview_asset(genre_brief=genre_brief, genre=genre)
         thumbnail_url = screenshot_url
         telegram_photo_url = self._resolve_telegram_media_url(thumbnail_url=thumbnail_url, screenshot_url=screenshot_url)
-        if telegram_photo_url is None:
-            telegram_photo_url = self._resolve_portal_asset_url(
-                self._fallback_preview_raster_asset(genre_brief=genre_brief, genre=genre)
-            )
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],

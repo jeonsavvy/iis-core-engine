@@ -19,6 +19,7 @@ from app.services.quality_smoke import (
     capture_runtime_probe,
     capture_visual_metrics,
     evaluate_runtime_liveness,
+    is_representative_capture_ready,
     is_non_fatal_request_failure,
     is_non_fatal_runtime_issue,
     prepare_smoke_workspace,
@@ -226,6 +227,13 @@ class QualityService:
                     }
 
                     try:
+                        capture_probe = probe_after or probe_mid or probe_before
+                        settle_attempts = 0
+                        while settle_attempts < 10 and not is_representative_capture_ready(capture_probe):
+                            page.wait_for_timeout(400)
+                            capture_probe = capture_runtime_probe(page)
+                            settle_attempts += 1
+
                         canvas = page.locator("canvas")
                         if canvas.count() > 0:
                             screenshot_bytes = canvas.first.screenshot(type="png")
