@@ -94,3 +94,12 @@ def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     assert "title-screen" in html or "start run" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+
+
+def test_topdown_scaffold_contains_resilient_start_flow() -> None:
+    seed = get_scaffold_seed("phaser_twinstick_arena_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "const beginrun" in html or "function beginrun" in html
+    assert 'startbutton?.addeventlistener("pointerdown"' in html or "startbutton?.addeventlistener('pointerdown'" in html
+    assert "if (!gamestate.started)" in html

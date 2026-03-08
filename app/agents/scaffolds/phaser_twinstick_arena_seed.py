@@ -156,11 +156,34 @@ TOPDOWN_HTML = dedent(
               crosshair.style.top = `${pointer.y}px`;
             }
           });
-          this.input.on("pointerdown", () => fireBullet());
-          startButton?.addEventListener("click", () => {
+          const beginRun = () => {
+            if (gameState.started) return;
             gameState.started = true;
             if (titleScreen) titleScreen.style.display = "none";
             statusReadout.textContent = "Run live · dash through the barrage";
+          };
+          this.input.on("pointerdown", () => {
+            if (!gameState.started) {
+              beginRun();
+              return;
+            }
+            fireBullet();
+          });
+          startButton?.addEventListener("click", beginRun);
+          startButton?.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            beginRun();
+          });
+          startButton?.addEventListener("touchend", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            beginRun();
+          }, { passive: false });
+          window.addEventListener("keydown", (event) => {
+            if (!gameState.started && ["Enter", "Space", "KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
+              beginRun();
+            }
           });
 
           this.physics.add.overlap(bullets, enemies, onBulletHitEnemy);
