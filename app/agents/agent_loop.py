@@ -27,7 +27,7 @@ from app.agents.visual_qa_agent import VisualQAAgent, VisualQAResult
 logger = logging.getLogger(__name__)
 
 _MAX_AUTO_REFINE_ROUNDS = 2
-_AUTO_REPAIR_CATEGORIES = {"fatal_runtime", "runtime_bug", "gameplay_bug"}
+_AUTO_REPAIR_CATEGORIES = {"fatal_runtime", "runtime_bug", "gameplay_bug", "contract_drift"}
 
 
 @dataclass
@@ -220,12 +220,11 @@ def _append_acceptance_reject_activity(
         AgentActivity(
             agent="codegen",
             action="refine",
-            summary=f"Rejected scaffold specialization: {', '.join(acceptance_failures[:4])}",
-            decision_reason="scaffold_specialization_rejected",
+            summary="장르 감각을 기준선 위에서 다시 보정합니다.",
+            decision_reason="genre_contract_retry",
             input_signal=user_prompt[:500],
-            change_impact="reverted_to_scaffold_baseline",
+            change_impact="contract_alignment_retry",
             confidence=0.95,
-            error_code="scaffold_specialization_rejected",
             metadata={
                 "genre_brief": genre_brief,
                 "scaffold_key": scaffold_key,
@@ -237,6 +236,20 @@ def _append_acceptance_reject_activity(
             },
         )
     )
+
+
+def _acceptance_loop_issues(acceptance_failures: list[str]) -> list[LoopIssue]:
+    return [
+        LoopIssue(
+            category="contract_drift",
+            severity="warn",
+            message=f"Genre contract drift: {failure}",
+            source="genre_acceptance",
+            auto_repair=True,
+            error_code=None,
+        )
+        for failure in acceptance_failures
+    ]
 
 
 class AgentLoop:
@@ -411,29 +424,29 @@ class AgentLoop:
 
         final_html = codegen_result.html
         reverted_to_baseline = False
+        acceptance_failures: list[str] = []
         if scaffold is not None and not is_modification:
             acceptance = validate_genre_acceptance(
                 archetype=str(genre_brief.get("archetype", "")),
                 html=final_html,
             )
-            if not acceptance.ok:
+            acceptance_failures = list(acceptance.failures)
+            if acceptance_failures:
                 _append_acceptance_reject_activity(
                     activities=activities,
                     user_prompt=user_prompt,
                     genre_brief=genre_brief,
                     scaffold_key=scaffold_key,
                     scaffold_version=scaffold_version,
-                    acceptance_failures=acceptance.failures,
-                    generation_mode="scaffold_reverted_to_baseline",
+                    acceptance_failures=acceptance_failures,
+                    generation_mode="scaffold_specialization_retry",
                 )
-                final_html = baseline_html
-                reverted_to_baseline = True
         refinement_rounds = 0
         latest_issues: list[LoopIssue] = []
 
         if auto_qa and (self._visual_qa is not None or self._playtester is not None):
             for round_idx in range(_MAX_AUTO_REFINE_ROUNDS + 1):
-                latest_issues = []
+                latest_issues = _acceptance_loop_issues(acceptance_failures)
                 latest_issues.extend(
                     await self._run_visual_qa(
                         html=final_html,
@@ -505,25 +518,23 @@ class AgentLoop:
                 )
 
                 final_html = refine_result.html
-                if scaffold is not None:
+                acceptance_failures = []
+                if scaffold is not None and not is_modification:
                     refined_acceptance = validate_genre_acceptance(
                         archetype=str(genre_brief.get("archetype", "")),
                         html=final_html,
                     )
-                    if not refined_acceptance.ok:
+                    acceptance_failures = list(refined_acceptance.failures)
+                    if acceptance_failures:
                         _append_acceptance_reject_activity(
                             activities=activities,
                             user_prompt=user_prompt,
                             genre_brief=genre_brief,
                             scaffold_key=scaffold_key,
                             scaffold_version=scaffold_version,
-                            acceptance_failures=refined_acceptance.failures,
+                            acceptance_failures=acceptance_failures,
                             generation_mode="repair_from_scaffold",
                         )
-                        final_html = baseline_html
-                        reverted_to_baseline = True
-                        latest_issues = []
-                        break
                 refinement_rounds += 1
                 activities.append(
                     AgentActivity(
@@ -547,6 +558,33 @@ class AgentLoop:
 
         fatal_messages = _issue_messages(latest_issues, categories={"fatal_runtime"})
         if fatal_messages:
+            if scaffold is not None and not is_modification:
+                activities.append(
+                    AgentActivity(
+                        agent="codegen",
+                        action="refine",
+                        summary="초기 베이스라인으로 안전하게 되돌리고 다음 수정을 이어갈 수 있게 유지했습니다.",
+                        decision_reason="fatal_runtime_fallback_to_scaffold",
+                        input_signal=user_prompt[:500],
+                        change_impact="baseline_preserved",
+                        confidence=1.0,
+                        metadata={
+                            "genre_brief": genre_brief,
+                            "scaffold_key": scaffold_key,
+                            "scaffold_version": scaffold_version,
+                            "fatal_messages": fatal_messages[:4],
+                        },
+                    )
+                )
+                return AgentLoopResult(
+                    html=baseline_html,
+                    activities=activities,
+                    final_score=0,
+                    generation_source=codegen_result.generation_source,
+                    auto_refined=refinement_rounds > 0,
+                    refinement_rounds=refinement_rounds,
+                    reverted_to_baseline=True,
+                )
             return AgentLoopResult(
                 html=final_html,
                 activities=activities,

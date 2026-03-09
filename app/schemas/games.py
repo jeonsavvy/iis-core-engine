@@ -19,3 +19,18 @@ class DeleteGameResponse(BaseModel):
     deleted: dict[str, bool]
     details: dict[str, Any] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RepairPresentationRequest(BaseModel):
+    rebroadcast_telegram: bool = False
+    require_thumbnail: bool = True
+
+
+class RepairPresentationResponse(BaseModel):
+    status: str
+    game_id: UUID
+    slug: str
+    visibility: str
+    thumbnail_url: str | None = None
+    telegram: dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)

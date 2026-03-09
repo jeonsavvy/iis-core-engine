@@ -182,4 +182,95 @@ def test_publish_uses_text_only_telegram_alert_when_only_placeholder_media_exist
         )
     )
 
-    assert sent_payload["photo_url"] is None
+    assert sent_payload == {}
+
+
+def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+            public_portal_base_url="https://arcade.example.com",
+        )
+    )
+
+    update_calls: list[dict[str, object]] = []
+    sent_payload: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        publisher._publisher,
+        "publish_game",
+        lambda **_: {
+            "status": "published",
+            "public_url": "https://cdn.example.com/games/lowpoly-siege/index.html",
+            "game_id": "game-1",
+        },
+    )
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **kwargs: update_calls.append(kwargs) or True)
+    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=None))
+    monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
+    publisher._archiver = None
+
+    result = __import__("asyncio").run(
+        publisher.publish(
+            slug="lowpoly-siege",
+            game_name="Lowpoly Siege",
+            genre="topdown shooter",
+            html_content="<html>ok</html>",
+            genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"},
+        )
+    )
+
+    assert result["presentation_status"] == "repair_pending"
+    assert result["thumbnail_url"] is None
+    assert update_calls[-1]["visibility"] == "hidden"
+    assert update_calls[-1]["thumbnail_url"] is None
+    assert update_calls[-1]["hero_image_url"] is None
+    assert sent_payload == {}
+
+
+def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+            public_portal_base_url="https://arcade.example.com",
+        )
+    )
+
+    update_calls: list[dict[str, object]] = []
+    screenshot_url = "https://cdn.example.com/games/lowpoly-siege/canonical.png"
+
+    monkeypatch.setattr(
+        publisher._publisher,
+        "publish_game",
+        lambda **_: {
+            "status": "published",
+            "public_url": "https://cdn.example.com/games/lowpoly-siege/index.html",
+            "game_id": "game-1",
+        },
+    )
+    monkeypatch.setattr(publisher._publisher, "upload_screenshot", lambda **_: screenshot_url)
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **kwargs: update_calls.append(kwargs) or True)
+    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=b"png"))
+    monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
+    publisher._archiver = None
+
+    result = __import__("asyncio").run(
+        publisher.publish(
+            slug="lowpoly-siege",
+            game_name="Lowpoly Siege",
+            genre="topdown shooter",
+            html_content="<html>ok</html>",
+            genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"},
+        )
+    )
+
+    assert result["presentation_status"] == "ready"
+    assert result["thumbnail_url"] == screenshot_url
+    assert update_calls[-1]["visibility"] == "public"
+    assert update_calls[-1]["screenshot_url"] == screenshot_url
+    assert update_calls[-1]["thumbnail_url"] == screenshot_url
+    assert update_calls[-1]["hero_image_url"] == screenshot_url

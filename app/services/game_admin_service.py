@@ -5,8 +5,11 @@ from uuid import UUID
 
 from app.core.config import Settings
 from app.services.github_service import GitHubArchiveService
+from app.services.http_client import ExternalCallError, request_with_retry
 from app.services.publisher_service import PublisherService
 from app.services.supabase_service import create_supabase_admin_client
+from app.services.quality_service import QualityService
+from app.services.telegram_service import TelegramService
 
 
 class GameAdminService:
@@ -21,6 +24,8 @@ class GameAdminService:
         self.client = create_supabase_admin_client(settings)
         self.publisher_service = publisher_service or PublisherService(settings)
         self.github_archive_service = github_archive_service or GitHubArchiveService(settings)
+        self.quality_service = QualityService(settings)
+        self.telegram_service = TelegramService(settings)
 
     def delete_game(
         self,
@@ -105,4 +110,99 @@ class GameAdminService:
             "deleted": deleted,
             "details": details,
             "warnings": warnings,
+        }
+
+    def repair_presentation(
+        self,
+        *,
+        game_id: UUID,
+        rebroadcast_telegram: bool,
+        require_thumbnail: bool,
+    ) -> dict[str, Any]:
+        if not self.client:
+            return {"status": "error", "reason": "supabase client is not configured", "game_id": str(game_id)}
+
+        lookup = self.client.table("games_metadata").select("*").eq("id", str(game_id)).limit(1).execute()
+        rows = lookup.data or []
+        if not rows:
+            return {"status": "not_found", "reason": "game_not_found", "game_id": str(game_id)}
+
+        game_row = rows[0]
+        slug = str(game_row.get("slug") or "").strip()
+        public_url = str(game_row.get("url") or "").strip()
+        if not slug or not public_url.startswith(("http://", "https://")):
+            return {
+                "status": "error",
+                "reason": "game_public_url_missing",
+                "game_id": str(game_id),
+                "slug": slug or "",
+            }
+
+        details: dict[str, Any] = {"public_url": public_url}
+        try:
+            response = request_with_retry(
+                "GET",
+                public_url,
+                timeout_seconds=self.settings.http_timeout_seconds,
+                max_retries=self.settings.http_max_retries,
+            )
+        except ExternalCallError as exc:
+            return {
+                "status": "partial_error",
+                "reason": "artifact_fetch_failed",
+                "game_id": str(game_id),
+                "slug": slug,
+                "visibility": str(game_row.get("visibility") or "hidden"),
+                "details": {"error": str(exc)},
+            }
+
+        smoke = self.quality_service.run_smoke_check(response.text)
+        screenshot_url = None
+        if smoke.screenshot_bytes:
+            screenshot_url = self.publisher_service.upload_screenshot(slug=slug, screenshot_bytes=smoke.screenshot_bytes)
+        details["smoke_reason"] = smoke.reason
+
+        if not screenshot_url and require_thumbnail:
+            self.publisher_service.update_game_marketing(slug=slug, visibility="hidden")
+            return {
+                "status": "partial_error",
+                "reason": "thumbnail_generation_failed",
+                "game_id": str(game_id),
+                "slug": slug,
+                "visibility": "hidden",
+                "thumbnail_url": None,
+                "telegram": {"status": "skipped"},
+                "details": details,
+            }
+
+        visibility = "public" if screenshot_url else str(game_row.get("visibility") or "hidden")
+        self.publisher_service.update_game_marketing(
+            slug=slug,
+            screenshot_url=screenshot_url,
+            thumbnail_url=screenshot_url,
+            hero_image_url=screenshot_url,
+            visibility=visibility,
+        )
+
+        telegram_result: dict[str, Any] = {"status": "skipped"}
+        if rebroadcast_telegram and screenshot_url:
+            play_base = str(self.settings.public_portal_base_url or "").strip().rstrip("/")
+            play_url = f"{play_base}/play/{slug}" if play_base else f"/play/{slug}"
+            telegram_result = self.telegram_service.broadcast_launch_announcement(
+                title=str(game_row.get("name") or slug),
+                marketing_line=str(game_row.get("marketing_summary") or game_row.get("short_description") or "").strip(),
+                play_url=play_url,
+                photo_url=screenshot_url,
+                genre=str(game_row.get("genre_primary") or game_row.get("genre") or "").strip(),
+                slug=slug,
+            )
+
+        return {
+            "status": "ok",
+            "game_id": str(game_id),
+            "slug": slug,
+            "visibility": visibility,
+            "thumbnail_url": screenshot_url,
+            "telegram": telegram_result,
+            "details": details,
         }

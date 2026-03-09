@@ -105,6 +105,7 @@ class PublisherService:
             "genre": genre,
             "url": public_url,
             "status": "active",
+            "visibility": "hidden",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if created_by:

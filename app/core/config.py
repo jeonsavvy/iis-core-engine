@@ -92,7 +92,7 @@ class Settings(BaseSettings):
 
     prompt_async_enabled: bool = True
     human_agent_issue_loop_enabled: bool = True
-    publish_approval_required: bool = True
+    publish_approval_required: bool = False
     engine_audit_enabled: bool = True
     prompt_run_timeout_seconds: float = Field(default=150.0, ge=10.0, le=900.0)
     prompt_worker_concurrency: int = Field(default=1, ge=1, le=8)

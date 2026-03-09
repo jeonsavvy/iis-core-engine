@@ -204,6 +204,8 @@ class PublishResponse(BaseModel):
     game_slug: str = ""
     game_url: str = ""
     error: str = ""
+    presentation_status: str = "ready"
+    thumbnail_url: str | None = None
     marketing_summary: str = ""
     play_overview: list[str] = Field(default_factory=list)
     controls_guide: list[str] = Field(default_factory=list)
@@ -1057,8 +1059,8 @@ async def _execute_prompt_run(
                 event_type="scaffold_reverted_to_baseline",
                 agent="codegen",
                 action="revert",
-                summary="Specialization rejected, reverted to deterministic scaffold baseline",
-                decision_reason="genre_acceptance_rejected_specialization",
+                summary="초기 베이스라인으로 안전하게 되돌려 플레이 가능한 상태를 유지했습니다.",
+                decision_reason="fatal_runtime_fallback_to_scaffold",
                 input_signal=prompt[:500],
                 change_impact="baseline_preserved",
                 confidence=1.0,
@@ -1874,24 +1876,6 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     if str(session.get("status", "active")) == "cancelled":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cancelled session cannot be published")
 
-    if settings.publish_approval_required:
-        approval = store.get_latest_publish_approval(session_id)
-        if not approval:
-            store.add_session_event(
-                session_id=session_id,
-                event_type="publish_blocked_unapproved",
-                action="publish",
-                summary="Publish blocked: approval required",
-                decision_reason="approval_gate_required",
-                change_impact="publish_blocked",
-                confidence=1.0,
-                error_code="publish_unapproved",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "publish_blocked_unapproved", "code": "publish_unapproved"},
-            )
-
     html = str(session.get("current_html", ""))
     if not html.strip():
         raise HTTPException(status_code=400, detail="No game to publish. Generate a game first.")
@@ -1965,6 +1949,8 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             public_url=str(publish_result.get("public_url")) if publish_result.get("public_url") else None,
             metadata={
                 "game_name": game_name,
+                "presentation_status": str(publish_result.get("presentation_status", "ready")),
+                "thumbnail_url": str(publish_result.get("thumbnail_url", "")).strip() or None,
                 "marketing_summary": publish_result.get("marketing_summary", ""),
                 "play_overview": publish_result.get("play_overview", []),
                 "controls_guide": publish_result.get("controls_guide", []),
@@ -1985,6 +1971,8 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             success=True,
             game_slug=game_slug,
             game_url=game_url,
+            presentation_status=str(publish_result.get("presentation_status", "ready")),
+            thumbnail_url=str(publish_result.get("thumbnail_url", "")).strip() or None,
             marketing_summary=str(publish_result.get("marketing_summary", "")),
             play_overview=publish_result.get("play_overview") if isinstance(publish_result.get("play_overview"), list) else [],
             controls_guide=publish_result.get("controls_guide") if isinstance(publish_result.get("controls_guide"), list) else [],

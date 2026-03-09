@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
-from app.api.v1.endpoints.games import delete_game
-from app.schemas.games import DeleteGameRequest
+from app.api.v1.endpoints.games import delete_game, repair_game_presentation
+from app.schemas.games import DeleteGameRequest, RepairPresentationRequest
 
 
 class StubGameAdminService:
@@ -29,6 +29,20 @@ class StubGameAdminService:
             "delete_storage": delete_storage,
             "delete_archive": delete_archive,
             "reason": reason,
+        }
+        return dict(type(self).result)
+
+    def repair_presentation(
+        self,
+        *,
+        game_id: UUID,
+        rebroadcast_telegram: bool,
+        require_thumbnail: bool,
+    ) -> dict[str, Any]:
+        type(self).last_call = {
+            "game_id": game_id,
+            "rebroadcast_telegram": rebroadcast_telegram,
+            "require_thumbnail": require_thumbnail,
         }
         return dict(type(self).result)
 
@@ -141,5 +155,55 @@ def test_delete_game_raises_409_for_partial_error(monkeypatch) -> None:
         assert exc.status_code == 409
         assert isinstance(exc.detail, dict)
         assert exc.detail.get("status") == "partial_error"
+    else:
+        raise AssertionError("expected HTTPException for partial_error")
+
+
+def test_repair_game_presentation_returns_response_when_service_succeeds(monkeypatch) -> None:
+    game_id = uuid4()
+    _set_stub_result(
+        monkeypatch,
+        {
+            "status": "ok",
+            "game_id": str(game_id),
+            "slug": "lowpoly-siege",
+            "thumbnail_url": "https://cdn.example.com/games/lowpoly-siege/canonical.png",
+            "visibility": "public",
+            "telegram": {"status": "skipped"},
+        },
+    )
+
+    response = repair_game_presentation(
+        game_id=game_id,
+        payload=RepairPresentationRequest(rebroadcast_telegram=False, require_thumbnail=True),
+    )
+
+    assert response.status == "ok"
+    assert response.game_id == game_id
+    assert response.thumbnail_url == "https://cdn.example.com/games/lowpoly-siege/canonical.png"
+    assert StubGameAdminService.last_call is not None
+    assert StubGameAdminService.last_call["require_thumbnail"] is True
+
+
+def test_repair_game_presentation_raises_409_for_partial_error(monkeypatch) -> None:
+    game_id = uuid4()
+    _set_stub_result(
+        monkeypatch,
+        {
+            "status": "partial_error",
+            "reason": "thumbnail_generation_failed",
+            "game_id": str(game_id),
+            "slug": "lowpoly-siege",
+            "visibility": "hidden",
+        },
+    )
+
+    try:
+        repair_game_presentation(
+            game_id=game_id,
+            payload=RepairPresentationRequest(rebroadcast_telegram=False, require_thumbnail=True),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 409
     else:
         raise AssertionError("expected HTTPException for partial_error")

@@ -100,6 +100,8 @@ class QualityService:
         screenshot_bytes = None
         visual_metrics: dict[str, object] | None = None
         runtime_probe_summary: dict[str, object] | None = None
+        early_playable_screenshot_bytes = None
+        mid_playable_screenshot_bytes = None
 
         try:
             with TemporaryDirectory(prefix="iis-smoke-") as tmp_dir:
@@ -162,7 +164,22 @@ class QualityService:
                     page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
                     page.wait_for_timeout(250)
                     probe_before = capture_runtime_probe(page)
-                    input_sequence = ["ArrowUp", "ArrowLeft", "ArrowRight", "Space", "KeyR"]
+                    had_start_gate = bool((probe_before or {}).get("start_gate_visible", False))
+                    if had_start_gate:
+                        try:
+                            viewport = page.viewport_size or {"width": 1280, "height": 720}
+                            page.mouse.click(int(viewport["width"]) // 2, int(viewport["height"]) // 2)
+                            page.wait_for_timeout(220)
+                            probe_before = capture_runtime_probe(page)
+                            if not bool((probe_before or {}).get("start_gate_visible", False)):
+                                canvas = page.locator("canvas")
+                                if canvas.count() > 0:
+                                    early_playable_screenshot_bytes = canvas.first.screenshot(type="png")
+                                else:
+                                    early_playable_screenshot_bytes = page.screenshot(type="png")
+                        except Exception:
+                            non_fatal_warnings.append("start_gate_click_failed")
+                    input_sequence = ["ArrowUp", "ArrowLeft", "ArrowRight", "Space"]
                     executed_inputs: list[str] = []
                     input_failures: list[str] = []
                     for key in input_sequence:
@@ -176,6 +193,15 @@ class QualityService:
                         non_fatal_warnings.append("input_probe_keypress_failed")
                     page.wait_for_timeout(1200)
                     probe_mid = capture_runtime_probe(page)
+                    if not bool((probe_mid or {}).get("start_gate_visible", False)) and not bool((probe_mid or {}).get("game_over_visible", False)):
+                        try:
+                            canvas = page.locator("canvas")
+                            if canvas.count() > 0:
+                                mid_playable_screenshot_bytes = canvas.first.screenshot(type="png")
+                            else:
+                                mid_playable_screenshot_bytes = page.screenshot(type="png")
+                        except Exception:
+                            mid_playable_screenshot_bytes = None
                     runtime_fatal, runtime_warnings = evaluate_runtime_liveness(before=probe_before, after=probe_mid)
                     fatal_errors.extend(runtime_fatal)
                     non_fatal_warnings.extend(runtime_warnings)
@@ -239,6 +265,12 @@ class QualityService:
                             screenshot_bytes = canvas.first.screenshot(type="png")
                         else:
                             screenshot_bytes = page.screenshot(type="png")
+                        if (mid_playable_screenshot_bytes or early_playable_screenshot_bytes) and (
+                            bool((probe_after or {}).get("start_gate_visible", False))
+                            or bool((probe_after or {}).get("overlay_visible", False))
+                            or bool((probe_after or {}).get("game_over_visible", False))
+                        ):
+                            screenshot_bytes = mid_playable_screenshot_bytes or early_playable_screenshot_bytes
                         frame_samples: list[dict[str, float]] = []
                         for attempt in range(4):
                             captured = capture_visual_metrics(page)

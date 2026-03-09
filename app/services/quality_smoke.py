@@ -240,6 +240,7 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
               const timerText = document.getElementById("timer")?.textContent ?? "";
               const scoreText = document.getElementById("score")?.textContent ?? "";
               const hpText = document.getElementById("hp")?.textContent ?? "";
+              const titleScreen = document.getElementById("title-screen");
               const canvas = document.querySelector("canvas");
               const root = document.documentElement;
               const visibleText = collectVisibleText("h1, h2, h3, [role='dialog'], [role='alert'], button, .overlay, .modal, .hud-overlay, #overlay, #overlay-text");
@@ -255,9 +256,12 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
                 visible_ui_text: visibleText,
                 game_over_visible: visibleTextLower.includes("game over") || visibleTextLower.includes("최종 점수"),
                 start_gate_visible:
-                  visibleTextLower.includes("tap to start")
+                  isVisible(titleScreen)
+                  || visibleTextLower.includes("tap to start")
                   || visibleTextLower.includes("click to start")
                   || visibleTextLower.includes("press start")
+                  || visibleTextLower.includes("start run")
+                  || visibleTextLower.includes("start game")
                   || visibleTextLower.includes("시작하려면"),
                 canvas_width: Number(canvas?.width || 0),
                 canvas_height: Number(canvas?.height || 0),

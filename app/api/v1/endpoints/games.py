@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.security import verify_internal_api_token
 from app.core.config import get_settings
-from app.schemas.games import DeleteGameRequest, DeleteGameResponse
+from app.schemas.games import DeleteGameRequest, DeleteGameResponse, RepairPresentationRequest, RepairPresentationResponse
 from app.services.game_admin_service import GameAdminService
 
 router = APIRouter(
@@ -38,3 +38,26 @@ def delete_game(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result)
 
     return DeleteGameResponse(**result)
+
+
+@router.post("/{game_id}/repair-presentation", response_model=RepairPresentationResponse)
+def repair_game_presentation(
+    game_id: UUID,
+    payload: RepairPresentationRequest,
+) -> RepairPresentationResponse:
+    service = GameAdminService(get_settings())
+    result = service.repair_presentation(
+        game_id=game_id,
+        rebroadcast_telegram=payload.rebroadcast_telegram,
+        require_thumbnail=payload.require_thumbnail,
+    )
+
+    status_value = str(result.get("status"))
+    if status_value == "not_found":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result)
+    if status_value == "error":
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result)
+    if status_value == "partial_error":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result)
+
+    return RepairPresentationResponse(**result)

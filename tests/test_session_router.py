@@ -379,6 +379,8 @@ class FakePublisher:
             "game_id": "game-1",
             "game_slug": slug,
             "play_url": f"/play/{slug}",
+            "presentation_status": "ready",
+            "thumbnail_url": f"https://cdn.example.com/games/{slug}/canonical.png",
             "marketing_summary": f"{game_name} summary",
             "play_overview": ["overview"],
             "controls_guide": ["controls"],
@@ -564,7 +566,7 @@ def test_run_cancel_marks_cancelled() -> None:
     assert cancelled.json()["status"] == "cancelled"
 
 
-def test_publish_requires_approval() -> None:
+def test_publish_succeeds_without_manual_approval() -> None:
     client, _ = make_client()
     session_id = create_session(client)
 
@@ -573,16 +575,11 @@ def test_publish_requires_approval() -> None:
     run = wait_run_terminal(client, session_id, run_id)
     assert run["status"] == "succeeded"
 
-    blocked = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
-    assert blocked.status_code == 409
-    assert blocked.json()["detail"]["code"] == "publish_unapproved"
-
-    approved = client.post(f"/api/v1/sessions/{session_id}/approve-publish", json={"note": "looks good"})
-    assert approved.status_code == 200
-
     published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
     assert published.status_code == 200
     assert published.json()["game_url"] == "/play/road-rush"
+    assert published.json()["presentation_status"] == "ready"
+    assert published.json()["thumbnail_url"] == "https://cdn.example.com/games/road-rush/canonical.png"
     assert published.json()["marketing_summary"] == "T summary"
     assert published.json()["play_overview"] == ["overview"]
     assert published.json()["controls_guide"] == ["controls"]
