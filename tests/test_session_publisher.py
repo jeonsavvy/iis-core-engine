@@ -198,6 +198,10 @@ def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypat
     update_calls: list[dict[str, object]] = []
     sent_payload: dict[str, object] = {}
 
+    def fake_update_game_marketing(**kwargs: object) -> bool:
+        update_calls.append(dict(kwargs))
+        return True
+
     monkeypatch.setattr(
         publisher._publisher,
         "publish_game",
@@ -207,7 +211,7 @@ def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypat
             "game_id": "game-1",
         },
     )
-    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **kwargs: update_calls.append(kwargs) or True)
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
     monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=None))
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
     publisher._archiver = None
@@ -243,6 +247,10 @@ def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(
     update_calls: list[dict[str, object]] = []
     screenshot_url = "https://cdn.example.com/games/lowpoly-siege/canonical.png"
 
+    def fake_update_game_marketing(**kwargs: object) -> bool:
+        update_calls.append(dict(kwargs))
+        return True
+
     monkeypatch.setattr(
         publisher._publisher,
         "publish_game",
@@ -253,7 +261,7 @@ def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(
         },
     )
     monkeypatch.setattr(publisher._publisher, "upload_screenshot", lambda **_: screenshot_url)
-    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **kwargs: update_calls.append(kwargs) or True)
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
     monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=b"png"))
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
     publisher._archiver = None
