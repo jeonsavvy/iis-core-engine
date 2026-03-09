@@ -167,10 +167,14 @@ def test_publish_uses_portal_preview_thumbnail_when_runtime_capture_is_missing(m
             "game_id": "game-1",
         },
     )
+    def fake_update_game_marketing(**kwargs: object) -> bool:
+        update_calls.append(dict(kwargs))
+        return True
+
     monkeypatch.setattr(
         publisher._publisher,
         "update_game_marketing",
-        lambda **kwargs: update_calls.append(dict(kwargs)) or True,
+        fake_update_game_marketing,
     )
     monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
