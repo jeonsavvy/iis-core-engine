@@ -133,6 +133,38 @@ def test_compile_generated_artifact_rewrites_three_namespace_addons_with_shim() 
     assert "rewrite_three_namespace_addons" in meta["transforms_applied"]
 
 
+def test_playable_artifact_missing_requirements_accepts_core_three_mathutils_usage() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
+        "requestAnimationFrame(()=>{});"
+        "const nextFov = THREE.MathUtils.lerp(60, 70, 0.5);"
+        "</script></body></html>"
+    )
+    missing = playable_artifact_missing_requirements(html)
+    assert "unsupported_three_namespace_addon_utils" not in missing
+
+
+def test_compile_generated_artifact_keeps_core_three_mathutils_namespace() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
+        "requestAnimationFrame(()=>{});"
+        "camera.fov = THREE.MathUtils.lerp(camera.fov, 58, 0.5);"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(html)
+    assert "THREE.MathUtils.lerp" in compiled
+    assert "window.__iis_addon_shims.MathUtils" not in compiled
+    assert "rewrite_three_namespace_addons" not in meta["transforms_applied"]
+
+
 def test_compile_generated_artifact_rewrites_unresolved_addon_constructors() -> None:
     html = (
         "<html><body><canvas></canvas><script>"

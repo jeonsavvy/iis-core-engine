@@ -153,7 +153,11 @@ class SessionPublisher:
         )
 
     def repair_presentation_contract_html(self, *, html_content: str) -> tuple[str, list[str]]:
-        compiled, meta = compile_generated_artifact(html_content)
+        compiled, meta = compile_generated_artifact(
+            html_content,
+            visual_precheck_enabled=False,
+            deterministic_visual_fix=False,
+        )
         raw_transforms = meta.get("transforms_applied")
         transforms = [str(item) for item in raw_transforms] if isinstance(raw_transforms, list) else []
         if _PUBLISH_PRESENTATION_REPAIR_MARKER not in compiled:

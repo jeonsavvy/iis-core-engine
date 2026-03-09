@@ -359,3 +359,19 @@ def test_repair_presentation_contract_html_appends_publish_override_hook() -> No
     assert "iis-publish-presentation-repair" in repaired
     assert "__iisPreparePresentationCapture" in repaired
     assert "inject_publish_presentation_repair" in transforms
+
+
+def test_repair_presentation_contract_html_does_not_inject_visual_overlay_shim() -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+        )
+    )
+
+    repaired, _transforms = publisher.repair_presentation_contract_html(
+        html_content="<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>"
+    )
+
+    assert "iis-visual-contract-shim" not in repaired

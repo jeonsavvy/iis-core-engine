@@ -26,6 +26,13 @@ _CORE_THREE_NAMESPACE_LOADERS = {
     "TextureLoader",
 }
 
+_CORE_THREE_NAMESPACE_UTILS = {
+    "AnimationUtils",
+    "LoaderUtils",
+    "MathUtils",
+    "ShapeUtils",
+}
+
 _GLOBAL_CONSTRUCTORS_ALLOWLIST = {
     "Array",
     "ArrayBuffer",
@@ -92,6 +99,8 @@ def _collect_declared_identifiers(source: str) -> set[str]:
 def _detect_three_namespace_addon_usage(source: str) -> list[str]:
     failures: list[str] = []
     for symbol in _THREE_NAMESPACE_SYMBOL_RE.findall(source):
+        if symbol in _CORE_THREE_NAMESPACE_UTILS:
+            continue
         if symbol == "BufferGeometryUtils":
             failures.append("unsupported_three_buffergeometryutils")
             failures.append("unsupported_three_namespace_addon_utils")
@@ -576,6 +585,7 @@ def compile_generated_artifact(
         transforms_applied.append("inject_restart_contract_shim")
 
     namespace_symbols = _NAMESPACE_ADDON_RE.findall(transformed)
+    namespace_symbols = [symbol for symbol in namespace_symbols if symbol not in _CORE_THREE_NAMESPACE_UTILS]
     if namespace_symbols:
         transformed = _NAMESPACE_ADDON_RE.sub(r"window.__iis_addon_shims.\1", transformed)
         transforms_applied.append("rewrite_three_namespace_addons")
