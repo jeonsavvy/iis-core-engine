@@ -149,6 +149,29 @@ class QualityService:
                             break
                         page.wait_for_timeout(120)
 
+                    probe = capture_runtime_probe(page)
+                    if bool((probe or {}).get("start_gate_visible", False)):
+                        try:
+                            viewport = page.viewport_size or {"width": 1280, "height": 720}
+                            page.mouse.click(int(viewport["width"]) // 2, int(viewport["height"]) // 2)
+                            page.wait_for_timeout(220)
+                        except Exception:
+                            pass
+
+                    for _ in range(30):
+                        probe = capture_runtime_probe(page)
+                        if is_representative_capture_ready(probe):
+                            break
+                        if bool((probe or {}).get("start_gate_visible", False)):
+                            try:
+                                viewport = page.viewport_size or {"width": 1280, "height": 720}
+                                page.mouse.click(int(viewport["width"]) // 2, int(viewport["height"]) // 2)
+                            except Exception:
+                                pass
+                        page.wait_for_timeout(120)
+
+                    page.wait_for_timeout(120)
+
                     canvas = page.locator("canvas")
                     screenshot_bytes = cast(bytes, canvas.first.screenshot(type="png") if canvas.count() > 0 else page.screenshot(type="png"))
                     browser.close()

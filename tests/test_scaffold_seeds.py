@@ -74,6 +74,7 @@ def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "__iis_game_boot_ok" in html
     assert "__iispresentationready" in html
     assert "__iispreparepresentationcapture" in html
+    assert "introfocus" in html
 
 
 def test_island_flight_scaffold_contains_environment_landmarks() -> None:

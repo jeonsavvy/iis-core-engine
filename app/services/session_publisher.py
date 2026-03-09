@@ -207,17 +207,20 @@ class SessionPublisher:
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
         play_url = self._resolve_play_url(slug=slug)
-        screenshot_url: str | None = None
-        thumbnail_url: str | None = None
+        actual_screenshot_url: str | None = None
         if result.get("status") == "published":
             try:
                 presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
                 if presentation_screenshot:
-                    screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
+                    actual_screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
             except Exception as exc:
                 logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
-        canonical_thumbnail_url = self._resolve_telegram_media_url(thumbnail_url=screenshot_url, screenshot_url=screenshot_url)
-        screenshot_url = canonical_thumbnail_url
+        fallback_thumbnail_path = self._fallback_preview_raster_asset(genre_brief=genre_brief, genre=genre)
+        fallback_thumbnail_url = self._resolve_portal_asset_url(fallback_thumbnail_path)
+        canonical_thumbnail_url = self._resolve_telegram_media_url(
+            thumbnail_url=actual_screenshot_url or fallback_thumbnail_url,
+            screenshot_url=actual_screenshot_url,
+        )
         thumbnail_url = canonical_thumbnail_url
         telegram_photo_url = canonical_thumbnail_url
         presentation_status = "ready" if canonical_thumbnail_url else "repair_pending"
@@ -250,7 +253,7 @@ class SessionPublisher:
             game_name=game_name,
             genre=genre,
             genre_brief=genre_brief,
-            screenshot_url=screenshot_url,
+            screenshot_url=canonical_thumbnail_url,
             marketing_summary=marketing_summary,
             play_overview=play_overview,
             controls_guide=controls_guide,
@@ -259,7 +262,7 @@ class SessionPublisher:
         self._publisher.update_game_marketing(
             slug=slug,
             ai_review="\n".join(play_overview[:3]).strip() or None,
-            screenshot_url=screenshot_url,
+            screenshot_url=actual_screenshot_url,
             thumbnail_url=thumbnail_url,
             marketing_summary=marketing_summary or None,
             play_overview=play_overview or None,
@@ -271,7 +274,7 @@ class SessionPublisher:
             genre_tags=public_game_metadata.get("genre_tags") if isinstance(public_game_metadata.get("genre_tags"), list) else None,
             hero_image_url=thumbnail_url,
             released_at=str(public_game_metadata.get("released_at", "")).strip() or None,
-            visibility="public",
+            visibility="public" if canonical_thumbnail_url else "hidden",
             play_count_cached=int(public_game_metadata.get("play_count_cached", 0) or 0),
         )
 
@@ -289,19 +292,18 @@ class SessionPublisher:
             except Exception as exc:
                 logger.warning("Archive commit failed (non-fatal): %s", exc)
 
-        if telegram_photo_url:
-            try:
-                self._telegram.broadcast_launch_announcement(
-                    title=game_name,
-                    marketing_line=marketing_summary,
-                    play_url=play_url,
-                    public_url=public_url or None,
-                    photo_url=telegram_photo_url,
-                    genre=genre,
-                    slug=slug,
-                )
-            except Exception as exc:
-                logger.warning("Telegram publish notification failed (non-fatal): %s", exc)
+        try:
+            self._telegram.broadcast_launch_announcement(
+                title=game_name,
+                marketing_line=marketing_summary,
+                play_url=play_url,
+                public_url=public_url or None,
+                photo_url=telegram_photo_url,
+                genre=genre,
+                slug=slug,
+            )
+        except Exception as exc:
+            logger.warning("Telegram publish notification failed (non-fatal): %s", exc)
 
         return {
             "success": True,
@@ -311,7 +313,7 @@ class SessionPublisher:
             "play_url": play_url,
             "presentation_status": presentation_status,
             "thumbnail_url": thumbnail_url,
-            "screenshot_url": screenshot_url,
+            "screenshot_url": actual_screenshot_url,
             "marketing_summary": marketing_summary,
             "play_overview": play_overview,
             "controls_guide": controls_guide,

@@ -230,6 +230,7 @@ ISLAND_FLIGHT_HTML = dedent(
         });
 
         const input = { pitchUp: false, pitchDown: false, yawLeft: false, yawRight: false, boost: false, stabilize: false };
+        const introFocus = new THREE.Vector3(0, 12.5, -54);
         const state = {
           position: new THREE.Vector3(0, 11, 16),
           velocity: new THREE.Vector3(0, 0, -18),
@@ -394,10 +395,10 @@ ISLAND_FLIGHT_HTML = dedent(
             state.countdown = Math.max(0, state.countdown - dt);
             const shown = Math.ceil(state.countdown);
             countdownEl.textContent = shown > 0 ? String(shown) : "GO!";
-            const introCamera = plane.position.clone().add(new THREE.Vector3(-6.8, 4.6, 7.2));
+            const introCamera = plane.position.clone().add(new THREE.Vector3(-8.4, 7.2, 13.6));
             camera.position.lerp(introCamera, 0.14);
-            camera.lookAt(plane.position.clone().add(flightForward.clone().multiplyScalar(-12)).add(new THREE.Vector3(0, 1.5, 0)));
-            camera.fov = THREE.MathUtils.lerp(camera.fov, 64, dt * 4.2);
+            camera.lookAt(introFocus);
+            camera.fov = THREE.MathUtils.lerp(camera.fov, 58, dt * 4.2);
             camera.updateProjectionMatrix();
             if (state.countdown <= 0) {
               state.started = true;
