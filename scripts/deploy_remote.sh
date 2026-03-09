@@ -115,6 +115,39 @@ restart_services() {
   fi
 }
 
+verify_playwright_runtime() {
+  "${VENV_DIR}/bin/python" - <<'PY'
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto("data:text/html,<html><body><h1>playwright-ok</h1></body></html>", wait_until="domcontentloaded")
+    text = page.text_content("h1")
+    if text != "playwright-ok":
+        raise SystemExit("playwright_runtime_check_failed")
+    browser.close()
+
+print("playwright_runtime_ok")
+PY
+}
+
+ensure_playwright_runtime() {
+  if [[ "${INSTALL_PLAYWRIGHT_RUNTIME:-1}" != "1" ]]; then
+    echo "Skipping Playwright runtime install because INSTALL_PLAYWRIGHT_RUNTIME=${INSTALL_PLAYWRIGHT_RUNTIME}"
+    return
+  fi
+
+  if verify_playwright_runtime >/dev/null 2>&1; then
+    echo "Playwright runtime already available."
+    return
+  fi
+
+  echo "Installing Playwright Chromium runtime and OS dependencies..."
+  "${VENV_DIR}/bin/python" -m playwright install --with-deps chromium
+  verify_playwright_runtime
+}
+
 upsert_env_value() {
   local file_path="$1"
   local key="$2"
@@ -192,6 +225,7 @@ fi
 "${VENV_DIR}/bin/pip" install --upgrade pip
 "${VENV_DIR}/bin/pip" install -r requirements.txt
 "${VENV_DIR}/bin/python" --version
+ensure_playwright_runtime
 
 restart_services
 
