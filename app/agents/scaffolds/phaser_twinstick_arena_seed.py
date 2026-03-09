@@ -30,18 +30,18 @@ TOPDOWN_HTML = dedent(
     </head>
     <body>
       <div id="game-root">
-        <div id="title-screen" class="overlay-screen">
+        <div id="title-screen" class="overlay-screen" data-iis-title-screen>
           <div class="overlay-card">
             <h1>LOWPOLY SIEGE</h1>
             <p>로우폴리 전장에서 커버를 돌며 적 압박을 끊어내세요. 대시로 각을 만들고 웨이브를 버티는 택티컬 탑뷰 슈팅 베이스라인입니다.</p>
-            <button id="start-button" type="button">START RUN</button>
+            <button id="start-button" type="button" data-iis-start-button>START RUN</button>
           </div>
         </div>
-        <div id="game-over-screen" class="overlay-screen" style="display:none;">
+        <div id="game-over-screen" class="overlay-screen" style="display:none;" data-iis-game-over>
           <div class="overlay-card">
             <h2 id="game-over-title">RUN BROKEN</h2>
             <p id="game-over-detail">HP를 모두 잃었습니다. 전장을 다시 읽고 재진입하세요.</p>
-            <button id="restart-button" type="button">RESTART RUN</button>
+            <button id="restart-button" type="button" data-iis-restart-button>RESTART RUN</button>
           </div>
         </div>
         <div id="crosshair"></div>

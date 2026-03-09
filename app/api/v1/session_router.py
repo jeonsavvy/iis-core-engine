@@ -16,6 +16,7 @@ from app.agents.genre_briefs import build_genre_brief, scaffold_seed_for_brief
 from app.agents.scaffolds import get_scaffold_seed
 from app.api.security import verify_internal_api_token
 from app.core.config import Settings, get_settings
+from app.services.session_publisher import PublishPresentationError
 from app.services.vertex_service import VertexCapacityExhausted
 
 logger = logging.getLogger(__name__)
@@ -1926,13 +1927,14 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
     if not publishable:
         summary = _summarize_publish_issues(publish_issues, limit=3) or "Runtime fatal issue detected"
+        is_presentation_block = publish_error_code == "publish_presentation_blocked"
         store.add_session_event(
             session_id=session_id,
-            event_type="publish_blocked_runtime",
-            agent="playtester",
+            event_type="publish_blocked_presentation" if is_presentation_block else "publish_blocked_runtime",
+            agent="publisher" if is_presentation_block else "playtester",
             action="publish",
             summary=summary[:_EVENT_SUMMARY_MAX_LEN],
-            decision_reason="runtime_fatal_must_be_zero",
+            decision_reason="presentation_contract_required" if is_presentation_block else "runtime_fatal_must_be_zero",
             input_signal=game_name,
             change_impact="publish_blocked",
             confidence=1.0,
@@ -1945,7 +1947,11 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "publish_blocked_runtime", "code": publish_error_code, "issues": publish_issues[:8]},
+            detail={
+                "error": "publish_blocked_presentation" if is_presentation_block else "publish_blocked_runtime",
+                "code": publish_error_code,
+                "issues": publish_issues[:8],
+            },
         )
 
     try:
@@ -1999,6 +2005,29 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             play_overview=publish_result.get("play_overview") if isinstance(publish_result.get("play_overview"), list) else [],
             controls_guide=publish_result.get("controls_guide") if isinstance(publish_result.get("controls_guide"), list) else [],
         )
+    except PublishPresentationError as exc:
+        summary = _summarize_publish_issues(exc.issues, limit=3) or str(exc)
+        store.add_session_event(
+            session_id=session_id,
+            event_type="publish_blocked_presentation",
+            agent="publisher",
+            action="publish",
+            summary=summary[:_EVENT_SUMMARY_MAX_LEN],
+            decision_reason="actual_presentation_capture_required",
+            input_signal=game_name,
+            change_impact="publish_blocked",
+            confidence=1.0,
+            error_code=exc.code,
+            metadata={
+                "issues": exc.issues[:8],
+                "category": "publish_blocker",
+                "presentation_repair_transforms": repair_transforms if 'repair_transforms' in locals() else [],
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "publish_blocked_presentation", "code": exc.code, "issues": exc.issues[:8]},
+        ) from exc
     except Exception as exc:
         logger.exception("Publish failed: %s", exc)
         store.add_session_event(

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.agents.agent_loop import AgentActivity, AgentLoopResult
 from app.agents.codegen_agent import CodegenResult
 from app.api.v1.session_router import router as session_router
+from app.services.session_publisher import PublishPresentationError
 from app.services.vertex_service import BuilderRoute, VertexCapacityExhausted
 
 
@@ -351,6 +352,7 @@ class FakePublisher:
         self.presentation_ok = True
         self.presentation_issues: list[str] = []
         self.repair_missing_presentation = True
+        self.publish_error: Exception | None = None
 
     async def publish(
         self,
@@ -364,6 +366,8 @@ class FakePublisher:
         genre_brief: dict[str, Any] | None = None,
         created_by: str | None = None,
     ) -> dict[str, Any]:
+        if self.publish_error is not None:
+            raise self.publish_error
         self.calls.append(
             {
                 "slug": slug,
@@ -649,6 +653,25 @@ def test_publish_repairs_presentation_contract_before_publishing() -> None:
     published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
     assert published.status_code == 200
     assert "__iisPreparePresentationCapture" in client.app.state.publisher_service.calls[-1]["html_content"]
+
+
+def test_publish_returns_conflict_when_actual_screenshot_capture_fails() -> None:
+    client, store = make_client()
+    client.app.state.publisher_service.publish_error = PublishPresentationError(
+        code="publish_presentation_capture_failed",
+        issues=["actual_presentation_screenshot_missing"],
+    )
+    session_id = create_session(client)
+    store.update_session_html(
+        session_id,
+        "<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};window.__iisPresentationReady=true;window.__iisPreparePresentationCapture=()=>({delay_ms:0});requestAnimationFrame(()=>{});</script></body></html>",
+        score=0,
+    )
+
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert published.status_code == 409
+    assert published.json()["detail"]["code"] == "publish_presentation_capture_failed"
+    assert "actual_presentation_screenshot_missing" in published.json()["detail"]["issues"]
 
 
 def test_issue_propose_apply_flow() -> None:

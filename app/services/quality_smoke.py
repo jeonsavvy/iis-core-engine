@@ -100,6 +100,10 @@ def is_representative_capture_ready(probe: dict[str, object] | None) -> bool:
 
     if bool(probe.get("start_gate_visible", False)):
         return False
+    if bool(probe.get("overlay_visible", False)):
+        return False
+    if bool(probe.get("game_over_visible", False)):
+        return False
 
     countdown_text = str(probe.get("countdown_text", "") or "").strip().casefold()
     return countdown_text in {"", "go!"}
@@ -234,9 +238,26 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
                 });
                 return rows.slice(0, 10).join(" | ").slice(0, 1200);
               };
+              const hasVisibleSelector = (selectors) => selectors.some((selector) =>
+                Array.from(document.querySelectorAll(selector)).some((node) => isVisible(node))
+              );
+              const firstVisibleText = (selectors) => {
+                for (const selector of selectors) {
+                  for (const node of document.querySelectorAll(selector)) {
+                    if (!isVisible(node)) continue;
+                    const raw = String(node.textContent ?? "").replace(/\\s+/g, " ").trim();
+                    if (raw) return raw;
+                  }
+                }
+                return "";
+              };
+              const titleSelectors = ['#title-screen', '#start-screen', '#start-overlay', '[data-iis-title-screen]', '[data-iis-start-screen]', '[data-screen="title"]', '[data-screen="start"]', '.title-screen', '.start-screen', '.start-overlay'];
+              const overlaySelectors = ['#overlay', '#overlay-text', '[data-iis-overlay]', '[data-screen="overlay"]'];
+              const countdownSelectors = ['#countdown', '[data-iis-countdown]', '[data-role="countdown"]', '.countdown', '.countdown-overlay'];
+              const gameOverSelectors = ['#game-over', '#game-over-screen', '[data-iis-game-over]', '[data-state="game-over"]', '.game-over', '.game-over-screen'];
               const overlay = document.getElementById("overlay");
-              const overlayText = document.getElementById("overlay-text")?.textContent ?? "";
-              const countdownText = document.getElementById("countdown")?.textContent ?? "";
+              const overlayText = firstVisibleText(['#overlay-text', '#overlay', '[data-iis-overlay]']) || document.getElementById("overlay-text")?.textContent ?? "";
+              const countdownText = firstVisibleText(countdownSelectors) || document.getElementById("countdown")?.textContent ?? "";
               const timerText = document.getElementById("timer")?.textContent ?? "";
               const scoreText = document.getElementById("score")?.textContent ?? "";
               const hpText = document.getElementById("hp")?.textContent ?? "";
@@ -247,21 +268,31 @@ def capture_runtime_probe(page) -> dict[str, object] | None:
               const visibleTextLower = visibleText.toLowerCase();
               return {
                 boot_ok: Boolean(window.__iis_game_boot_ok),
-                overlay_visible: Boolean(overlay && overlay.classList.contains("show")),
+                overlay_visible: Boolean((overlay && overlay.classList.contains("show")) || hasVisibleSelector(overlaySelectors)),
                 overlay_text: String(overlayText),
                 countdown_text: String(countdownText),
                 timer_text: String(timerText),
                 score_text: String(scoreText),
                 hp_text: String(hpText),
                 visible_ui_text: visibleText,
-                game_over_visible: visibleTextLower.includes("game over") || visibleTextLower.includes("최종 점수"),
+                game_over_visible:
+                  hasVisibleSelector(gameOverSelectors)
+                  || visibleTextLower.includes("game over")
+                  || visibleTextLower.includes("최종 점수"),
                 start_gate_visible:
                   isVisible(titleScreen)
+                  || hasVisibleSelector(titleSelectors)
                   || visibleTextLower.includes("tap to start")
                   || visibleTextLower.includes("click to start")
                   || visibleTextLower.includes("press start")
                   || visibleTextLower.includes("start run")
                   || visibleTextLower.includes("start game")
+                  || visibleTextLower.includes("play now")
+                  || visibleTextLower.includes("begin run")
+                  || visibleTextLower.includes("launch")
+                  || visibleTextLower.includes("continue")
+                  || visibleTextLower.includes("tap anywhere")
+                  || visibleTextLower.includes("click anywhere")
                   || visibleTextLower.includes("시작하려면"),
                 canvas_width: Number(canvas?.width || 0),
                 canvas_height: Number(canvas?.height || 0),

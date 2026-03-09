@@ -40,7 +40,7 @@ RACING_HTML = dedent(
           Throttle / Brake: W / S or ↑ / ↓<br />
           Reset: R
         </div>
-        <div id="countdown">3</div>
+        <div id="countdown" data-iis-countdown>3</div>
       </div>
       <script type="module">
         import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";

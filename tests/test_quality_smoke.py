@@ -67,6 +67,8 @@ def test_non_fatal_issue_classifiers() -> None:
 def test_representative_capture_waits_until_countdown_clears() -> None:
     assert not is_representative_capture_ready({"countdown_text": "2", "start_gate_visible": False})
     assert not is_representative_capture_ready({"countdown_text": "", "start_gate_visible": True})
+    assert not is_representative_capture_ready({"countdown_text": "", "start_gate_visible": False, "overlay_visible": True})
+    assert not is_representative_capture_ready({"countdown_text": "", "start_gate_visible": False, "game_over_visible": True})
     assert is_representative_capture_ready({"countdown_text": "", "start_gate_visible": False})
     assert is_representative_capture_ready({"countdown_text": "GO!", "start_gate_visible": False})
 

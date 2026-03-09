@@ -195,6 +195,51 @@ def _inject_runtime_contract_shim(
     return f"{runtime_script}{html_content}"
 
 
+def build_presentation_contract_script(
+    *,
+    script_id: str,
+    reason: str,
+    force_override: bool,
+) -> str:
+    assignment_open = "" if force_override else "if(typeof window.__iisPreparePresentationCapture!=='function'){"
+    assignment_close = "" if force_override else "}"
+    return (
+        f"<script id=\"{script_id}\">(function(){{"
+        "if(typeof window.__iisPresentationReady==='undefined'){window.__iisPresentationReady=false;}"
+        "const hideSelectors=['#title-screen','#start-screen','#start-overlay','#game-over','#game-over-screen','#overlay','#overlay-text','#countdown','[data-iis-title-screen]','[data-iis-start-screen]','[data-iis-start-button]','[data-iis-restart-button]','[data-iis-countdown]','[data-iis-overlay]','[data-iis-game-over]','[data-screen=\"title\"]','[data-screen=\"start\"]','[data-screen=\"game-over\"]','[data-role=\"countdown\"]','.title-screen','.start-screen','.start-overlay','.game-over','.game-over-screen','.countdown','.countdown-overlay'];"
+        "const buttonSelectors='button,[role=\"button\"],input[type=\"button\"],input[type=\"submit\"],[data-iis-start-button],[data-iis-restart-button],[data-action]';"
+        "const startTokens=['start','play','begin','launch','continue','resume','tap to start','click to start','press start','start run','start game','play now','시작','플레이','계속'];"
+        "const restartTokens=['restart','retry','again','respawn','new run','reset','다시','재시작','재도전'];"
+        "const visible=(node)=>{if(!node||!(node instanceof HTMLElement)){return false;}const style=window.getComputedStyle(node);if(!style){return false;}if(style.display==='none'||style.visibility==='hidden'||Number(style.opacity||'1')<=0.01){return false;}const rect=node.getBoundingClientRect();return rect.width>1&&rect.height>1;};"
+        "const readText=(node)=>{if(!node){return '';}const value=('value' in node&&typeof node.value==='string')?node.value:'';const label=(typeof node.getAttribute==='function'&&typeof node.getAttribute('aria-label')==='string')?node.getAttribute('aria-label'):'';return String(node.textContent||value||label||'').replace(/\\s+/g,' ').trim().toLowerCase();};"
+        "const hideNode=(node)=>{if(node&&node instanceof HTMLElement){node.dataset.iisPresentationHidden='1';node.style.display='none';node.style.visibility='hidden';node.style.opacity='0';node.style.pointerEvents='none';}};"
+        "const hideKnownScreens=()=>{hideSelectors.forEach((selector)=>{document.querySelectorAll(selector).forEach((node)=>hideNode(node));});};"
+        "const clearCountdown=()=>{['#countdown','[data-iis-countdown]','[data-role=\"countdown\"]','.countdown','.countdown-overlay'].forEach((selector)=>{document.querySelectorAll(selector).forEach((node)=>{if(node&&node instanceof HTMLElement){node.textContent='';hideNode(node);}});});};"
+        "const clickMatchingButtons=(tokens)=>{Array.from(document.querySelectorAll(buttonSelectors)).forEach((node)=>{if(!(node instanceof HTMLElement)||!visible(node)){return;}const lowered=readText(node);if(!tokens.some((token)=>lowered.includes(token))){return;}try{node.click();}catch(_){try{node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));}catch(__){}}});};"
+        "const hidePromptLikeText=()=>{Array.from(document.querySelectorAll('h1,h2,h3,dialog,[role=\"dialog\"],section,article,div,p,span')).forEach((node)=>{if(!(node instanceof HTMLElement)||!visible(node)){return;}const lowered=readText(node);if(!lowered){return;}if(startTokens.some((token)=>lowered.includes(token))||restartTokens.some((token)=>lowered.includes(token))||lowered.includes('game over')||lowered.includes('tap anywhere')||lowered.includes('click anywhere')){hideNode(node.closest('dialog,[role=\"dialog\"],section,article,div')||node);}});};"
+        "const synthInput=()=>{try{window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));}catch(_){ }try{window.dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space',bubbles:true}));}catch(_){ }try{const centerX=Math.max(4,Math.floor(window.innerWidth/2));const centerY=Math.max(4,Math.floor(window.innerHeight/2));const target=document.elementFromPoint(centerX,centerY)||document.body;target.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:centerX,clientY:centerY}));target.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:centerX,clientY:centerY}));}catch(_){ }};"
+        "const settle=()=>{hideKnownScreens();clearCountdown();hidePromptLikeText();clickMatchingButtons(startTokens);clickMatchingButtons(restartTokens);};"
+        "window.__iisRunPresentationCleanup=settle;"
+        f"{assignment_open}"
+        "window.__iisPreparePresentationCapture=function(){"
+        "window.__iisPresentationReady=false;"
+        "settle();"
+        "synthInput();"
+        "requestAnimationFrame(()=>{"
+        "settle();"
+        "synthInput();"
+        "setTimeout(()=>{"
+        "settle();"
+        "window.__iisPresentationReady=true;"
+        "},220);"
+        "});"
+        f"return {{delay_ms:320,reason:'{reason}'}};"
+        "};"
+        f"{assignment_close}"
+        "})();</script>"
+    )
+
+
 def _inject_presentation_contract_shim(
     html_content: str,
     *,
@@ -206,24 +251,11 @@ def _inject_presentation_contract_shim(
     if not (presentation_ready_missing or presentation_hook_missing):
         return html_content
 
-    script_lines = ["<script id=\"iis-presentation-contract-shim\">(function(){"]
-    if presentation_ready_missing:
-        script_lines.append("if(typeof window.__iisPresentationReady==='undefined'){window.__iisPresentationReady=false;}")
-    if presentation_hook_missing:
-        script_lines.append(
-            "if(typeof window.__iisPreparePresentationCapture!=='function'){"
-            "window.__iisPreparePresentationCapture=function(){"
-            "window.__iisPresentationReady=false;"
-            "const hide=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement){node.style.display='none';node.style.opacity='0';}};"
-            "const click=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement&&typeof node.click==='function'){try{node.click();}catch(_){}}};"
-            "click('#restart-button');click('#start-button');hide('#title-screen');hide('#game-over-screen');"
-            "const countdown=document.getElementById('countdown');if(countdown&&countdown instanceof HTMLElement){countdown.style.opacity='0';countdown.textContent='';}"
-            "setTimeout(function(){window.__iisPresentationReady=true;},180);"
-            "return {delay_ms:220,reason:'auto_presentation_contract_shim'};"
-            "};}"
-        )
-    script_lines.append("})();</script>")
-    presentation_script = "".join(script_lines)
+    presentation_script = build_presentation_contract_script(
+        script_id="iis-presentation-contract-shim",
+        reason="auto_presentation_contract_shim",
+        force_override=False,
+    )
     lowered = html_content.casefold()
     body_close = lowered.rfind("</body>")
     if body_close >= 0:

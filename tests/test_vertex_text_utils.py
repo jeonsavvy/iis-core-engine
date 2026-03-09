@@ -167,6 +167,8 @@ def test_compile_generated_artifact_injects_presentation_contract_shim_when_miss
     compiled, meta = compile_generated_artifact(html)
     assert "__iisPresentationReady" in compiled
     assert "__iisPreparePresentationCapture" in compiled
+    assert "data-iis-title-screen" in compiled
+    assert "data-iis-start-button" in compiled
     assert "inject_presentation_contract_shim" in meta["transforms_applied"]
 
 

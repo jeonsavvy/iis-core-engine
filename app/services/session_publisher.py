@@ -17,11 +17,19 @@ from app.services.quality_service import QualityService
 from app.services.publisher_service import PublisherService
 from app.services.github_service import GitHubArchiveService
 from app.services.telegram_service import TelegramService
-from app.services.vertex_text_utils import compile_generated_artifact
+from app.services.vertex_text_utils import build_presentation_contract_script, compile_generated_artifact
 
 logger = logging.getLogger(__name__)
 
 _PUBLISH_PRESENTATION_REPAIR_MARKER = 'id="iis-publish-presentation-repair"'
+
+
+class PublishPresentationError(RuntimeError):
+    def __init__(self, *, code: str, issues: list[str] | None = None) -> None:
+        resolved_issues = [str(item).strip() for item in (issues or []) if str(item).strip()]
+        super().__init__(resolved_issues[0] if resolved_issues else code)
+        self.code = code
+        self.issues = resolved_issues or [code]
 
 
 class SessionPublisher:
@@ -46,48 +54,6 @@ class SessionPublisher:
             logger.warning("GitHub archive service not available, skipping.")
 
     @staticmethod
-    def _fallback_preview_asset(*, genre_brief: dict[str, Any] | None = None, genre: str = "") -> str | None:
-        asset_pack_key = str((genre_brief or {}).get("asset_pack_key", "") or "").strip()
-        if asset_pack_key == "racing_synthwave_pack_v1":
-            return "/assets/preview/neon-drift.svg"
-        if asset_pack_key == "island_flight_pack_v1":
-            return "/assets/preview/aether-courier.svg"
-        if asset_pack_key == "space_dogfight_pack_v1":
-            return "/assets/preview/skyline-jet.svg"
-        if asset_pack_key == "topdown_lowpoly_pack_v1":
-            return "/assets/preview/timebreakers.svg"
-
-        lowered = genre.casefold()
-        if "race" in lowered or "racing" in lowered or "레이싱" in lowered:
-            return "/assets/preview/neon-drift.svg"
-        if "flight" in lowered or "비행" in lowered:
-            return "/assets/preview/aether-courier.svg"
-        if "shoot" in lowered or "슈팅" in lowered:
-            return "/assets/preview/timebreakers.svg"
-        return None
-
-    @staticmethod
-    def _fallback_preview_raster_asset(*, genre_brief: dict[str, Any] | None = None, genre: str = "") -> str | None:
-        asset_pack_key = str((genre_brief or {}).get("asset_pack_key", "") or "").strip()
-        if asset_pack_key == "racing_synthwave_pack_v1":
-            return "/assets/preview-raster/neon-drift.png"
-        if asset_pack_key == "island_flight_pack_v1":
-            return "/assets/preview-raster/aether-courier.png"
-        if asset_pack_key == "space_dogfight_pack_v1":
-            return "/assets/preview-raster/skyline-jet.png"
-        if asset_pack_key == "topdown_lowpoly_pack_v1":
-            return "/assets/preview-raster/timebreakers.png"
-
-        lowered = genre.casefold()
-        if "race" in lowered or "racing" in lowered or "레이싱" in lowered:
-            return "/assets/preview-raster/neon-drift.png"
-        if "flight" in lowered or "비행" in lowered:
-            return "/assets/preview-raster/aether-courier.png"
-        if "shoot" in lowered or "슈팅" in lowered:
-            return "/assets/preview-raster/timebreakers.png"
-        return None
-
-    @staticmethod
     def _resolve_telegram_media_url(*, thumbnail_url: str | None = None, screenshot_url: str | None = None) -> str | None:
         for candidate in (thumbnail_url, screenshot_url):
             normalized = str(candidate or "").strip()
@@ -106,13 +72,6 @@ class SessionPublisher:
         if base_url:
             return f"{base_url}/play/{slug}"
         return f"/play/{slug}"
-
-    def _resolve_portal_asset_url(self, asset_path: str | None) -> str | None:
-        normalized_path = str(asset_path or "").strip()
-        base_url = str(self.settings.public_portal_base_url or "").strip().rstrip("/")
-        if not normalized_path or not base_url or not normalized_path.startswith("/"):
-            return None
-        return f"{base_url}{normalized_path}"
 
     @staticmethod
     def _normalize_catalog_tag(value: str) -> str:
@@ -197,21 +156,10 @@ class SessionPublisher:
         raw_transforms = meta.get("transforms_applied")
         transforms = [str(item) for item in raw_transforms] if isinstance(raw_transforms, list) else []
         if _PUBLISH_PRESENTATION_REPAIR_MARKER not in compiled:
-            repair_script = (
-                "<script id=\"iis-publish-presentation-repair\">"
-                "(function(){"
-                "const hide=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement){node.style.display='none';node.style.opacity='0';}};"
-                "const click=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement&&typeof node.click==='function'){try{node.click();}catch(_){}}};"
-                "window.__iisPresentationReady=false;"
-                "window.__iisPreparePresentationCapture=function(){"
-                "window.__iisPresentationReady=false;"
-                "click('#restart-button');click('#start-button');hide('#title-screen');hide('#game-over-screen');"
-                "const countdown=document.getElementById('countdown');if(countdown&&countdown instanceof HTMLElement){countdown.style.opacity='0';countdown.textContent='';}"
-                "setTimeout(function(){window.__iisPresentationReady=true;},180);"
-                "return {delay_ms:220,reason:'publisher_repair_presentation'};"
-                "};"
-                "})();"
-                "</script>"
+            repair_script = build_presentation_contract_script(
+                script_id="iis-publish-presentation-repair",
+                reason="publisher_repair_presentation",
+                force_override=True,
             )
             lowered = compiled.casefold()
             body_close = lowered.rfind("</body>")
@@ -240,6 +188,13 @@ class SessionPublisher:
         Returns:
             dict with keys: success, public_url, game_id, error
         """
+        presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
+        if not presentation_screenshot:
+            raise PublishPresentationError(
+                code="publish_presentation_capture_failed",
+                issues=["actual_presentation_screenshot_missing"],
+            )
+
         result = self._publisher.publish_game(
             slug=slug,
             name=game_name,
@@ -250,26 +205,46 @@ class SessionPublisher:
             created_by=created_by,
         )
 
+        if str(result.get("status", "")).strip() != "published":
+            raise RuntimeError(str(result.get("reason") or "publish_game_failed"))
+
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
         play_url = self._resolve_play_url(slug=slug)
-        actual_screenshot_url: str | None = None
-        if result.get("status") == "published":
-            try:
-                presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
-                if presentation_screenshot:
-                    actual_screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
-            except Exception as exc:
-                logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
-        fallback_thumbnail_path = self._fallback_preview_raster_asset(genre_brief=genre_brief, genre=genre)
-        fallback_thumbnail_url = self._resolve_portal_asset_url(fallback_thumbnail_path)
+        actual_screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
+        if not actual_screenshot_url:
+            self._publisher.update_game_marketing(
+                slug=slug,
+                screenshot_url=None,
+                thumbnail_url=None,
+                hero_image_url=None,
+                visibility="hidden",
+            )
+            raise PublishPresentationError(
+                code="publish_presentation_capture_failed",
+                issues=["actual_presentation_screenshot_upload_failed"],
+            )
+
         canonical_thumbnail_url = self._resolve_telegram_media_url(
-            thumbnail_url=actual_screenshot_url or fallback_thumbnail_url,
+            thumbnail_url=actual_screenshot_url,
             screenshot_url=actual_screenshot_url,
         )
-        thumbnail_url = canonical_thumbnail_url
-        telegram_photo_url = canonical_thumbnail_url
-        presentation_status = "ready" if canonical_thumbnail_url else "repair_pending"
+        if not canonical_thumbnail_url:
+            self._publisher.update_game_marketing(
+                slug=slug,
+                screenshot_url=actual_screenshot_url,
+                thumbnail_url=None,
+                hero_image_url=None,
+                visibility="hidden",
+            )
+            raise PublishPresentationError(
+                code="publish_presentation_capture_failed",
+                issues=["actual_presentation_thumbnail_url_invalid"],
+            )
+
+        thumbnail_url = actual_screenshot_url
+        telegram_photo_url = actual_screenshot_url
+        presentation_status = "ready"
         publish_copy = {
             "marketing_summary": "",
             "play_overview": [],
@@ -299,7 +274,7 @@ class SessionPublisher:
             game_name=game_name,
             genre=genre,
             genre_brief=genre_brief,
-            screenshot_url=canonical_thumbnail_url,
+            screenshot_url=actual_screenshot_url,
             marketing_summary=marketing_summary,
             play_overview=play_overview,
             controls_guide=controls_guide,
@@ -318,9 +293,9 @@ class SessionPublisher:
             description=str(public_game_metadata.get("description", "")).strip() or None,
             genre_primary=str(public_game_metadata.get("genre_primary", "")).strip() or None,
             genre_tags=public_game_metadata.get("genre_tags") if isinstance(public_game_metadata.get("genre_tags"), list) else None,
-            hero_image_url=thumbnail_url,
+            hero_image_url=actual_screenshot_url,
             released_at=str(public_game_metadata.get("released_at", "")).strip() or None,
-            visibility="public" if canonical_thumbnail_url else "hidden",
+            visibility="public",
             play_count_cached=int(public_game_metadata.get("play_count_cached", 0) or 0),
         )
 

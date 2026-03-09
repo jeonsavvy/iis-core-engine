@@ -43,7 +43,7 @@ ISLAND_FLIGHT_HTML = dedent(
           Stabilize: Space<br />
           Reset: R
         </div>
-        <div id="countdown">3</div>
+        <div id="countdown" data-iis-countdown>3</div>
       </div>
       <script type="module">
         import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";

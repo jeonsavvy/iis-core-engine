@@ -276,6 +276,10 @@ class QualityService:
                                 pass
                         page.wait_for_timeout(120)
 
+                    if not is_representative_capture_ready(probe):
+                        browser.close()
+                        return None
+
                     page.wait_for_timeout(120)
 
                     canvas = page.locator("canvas")

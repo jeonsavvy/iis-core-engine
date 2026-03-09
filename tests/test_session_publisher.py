@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from app.core.config import Settings
 from app.services.session_publisher import SessionPublisher
 
@@ -18,21 +20,6 @@ def test_session_publisher_initializes_without_archive_repo_local_path_setting()
     assert publisher is not None
 
 
-def test_fallback_preview_asset_maps_known_genre_packs() -> None:
-    assert SessionPublisher._fallback_preview_asset(genre_brief={"asset_pack_key": "racing_synthwave_pack_v1"}) == "/assets/preview/neon-drift.svg"
-    assert SessionPublisher._fallback_preview_asset(genre_brief={"asset_pack_key": "island_flight_pack_v1"}) == "/assets/preview/aether-courier.svg"
-    assert SessionPublisher._fallback_preview_asset(genre_brief={"asset_pack_key": "space_dogfight_pack_v1"}) == "/assets/preview/skyline-jet.svg"
-    assert SessionPublisher._fallback_preview_asset(genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"}) == "/assets/preview/timebreakers.svg"
-
-
-def test_fallback_preview_raster_asset_maps_known_genre_packs() -> None:
-    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "racing_synthwave_pack_v1"}) == "/assets/preview-raster/neon-drift.png"
-    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "island_flight_pack_v1"}) == "/assets/preview-raster/aether-courier.png"
-    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "space_dogfight_pack_v1"}) == "/assets/preview-raster/skyline-jet.png"
-    assert SessionPublisher._fallback_preview_raster_asset(genre_brief={"asset_pack_key": "topdown_lowpoly_pack_v1"}) == "/assets/preview-raster/timebreakers.png"
-
-
-
 def test_resolve_telegram_media_url_prefers_absolute_thumbnail() -> None:
     result = SessionPublisher._resolve_telegram_media_url(
         thumbnail_url="https://cdn.example.com/thumb.png",
@@ -47,19 +34,6 @@ def test_resolve_telegram_media_url_skips_relative_svg_preview_asset() -> None:
         screenshot_url=None,
     )
     assert result is None
-
-
-def test_resolve_portal_asset_url_uses_public_portal_base_url() -> None:
-    publisher = SessionPublisher(
-        Settings(
-            supabase_url="",
-            supabase_service_role_key="",
-            google_application_credentials="",
-            public_portal_base_url="https://arcade.example.com/",
-        )
-    )
-
-    assert publisher._resolve_portal_asset_url("/assets/preview-raster/neon-drift.png") == "https://arcade.example.com/assets/preview-raster/neon-drift.png"
 
 
 def test_resolve_play_url_uses_public_portal_base_url_when_configured() -> None:
@@ -126,6 +100,8 @@ def test_publish_uses_session_user_id_for_created_by(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(publisher._publisher, "publish_game", fake_publish_game)
+    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: b"png")
+    monkeypatch.setattr(publisher._publisher, "upload_screenshot", lambda **_: "https://cdn.example.com/games/neon-drift/canonical.png")
     monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **_: True)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
     publisher._archiver = None
@@ -145,62 +121,55 @@ def test_publish_uses_session_user_id_for_created_by(monkeypatch) -> None:
     assert recorded["created_by"] == "user-1"
 
 
-def test_publish_uses_portal_preview_thumbnail_when_runtime_capture_is_missing(monkeypatch) -> None:
+def test_publish_fails_fast_when_actual_runtime_capture_is_missing(monkeypatch) -> None:
     publisher = SessionPublisher(
         Settings(
             supabase_url="",
             supabase_service_role_key="",
             google_application_credentials="",
-            public_portal_base_url="https://arcade.example.com",
         )
     )
 
+    publish_calls: list[dict[str, object]] = []
     sent_payload: dict[str, object] = {}
     update_calls: list[dict[str, object]] = []
 
-    monkeypatch.setattr(
-        publisher._publisher,
-        "publish_game",
-        lambda **_: {
+    def fake_publish_game(**kwargs: object) -> dict[str, object]:
+        publish_calls.append(dict(kwargs))
+        return {
             "status": "published",
             "public_url": "https://cdn.example.com/games/golden-isles-flight/index.html",
             "game_id": "game-1",
-        },
-    )
+        }
+
+    monkeypatch.setattr(publisher._publisher, "publish_game", fake_publish_game)
+
     def fake_update_game_marketing(**kwargs: object) -> bool:
         update_calls.append(dict(kwargs))
         return True
 
-    monkeypatch.setattr(
-        publisher._publisher,
-        "update_game_marketing",
-        fake_update_game_marketing,
-    )
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
     monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
     publisher._archiver = None
 
-    result = __import__("asyncio").run(
-        publisher.publish(
-            slug="golden-isles-flight",
-            game_name="Golden Isles Flight",
-            genre="flight",
-            html_content="<html>ok</html>",
-            genre_brief={"asset_pack_key": "island_flight_pack_v1"},
+    with pytest.raises(RuntimeError, match="actual_presentation_screenshot_missing"):
+        __import__("asyncio").run(
+            publisher.publish(
+                slug="golden-isles-flight",
+                game_name="Golden Isles Flight",
+                genre="flight",
+                html_content="<html>ok</html>",
+                genre_brief={"asset_pack_key": "island_flight_pack_v1"},
+            )
         )
-    )
 
-    fallback_thumbnail = "https://arcade.example.com/assets/preview-raster/aether-courier.png"
-    assert result["presentation_status"] == "ready"
-    assert result["thumbnail_url"] == fallback_thumbnail
-    assert update_calls[-1]["visibility"] == "public"
-    assert update_calls[-1]["screenshot_url"] is None
-    assert update_calls[-1]["thumbnail_url"] == fallback_thumbnail
-    assert update_calls[-1]["hero_image_url"] == fallback_thumbnail
-    assert sent_payload["photo_url"] == fallback_thumbnail
+    assert publish_calls == []
+    assert update_calls == []
+    assert sent_payload == {}
 
 
-def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypatch) -> None:
+def test_publish_marks_game_hidden_when_actual_screenshot_upload_fails(monkeypatch) -> None:
     publisher = SessionPublisher(
         Settings(
             supabase_url="",
@@ -226,26 +195,26 @@ def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypat
         },
     )
     monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
-    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: b"png")
+    monkeypatch.setattr(publisher._publisher, "upload_screenshot", lambda **_: None)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
     publisher._archiver = None
 
-    result = __import__("asyncio").run(
-        publisher.publish(
-            slug="lowpoly-siege",
-            game_name="Lowpoly Siege",
-            genre="unknown",
-            html_content="<html>ok</html>",
-            genre_brief={"asset_pack_key": "unknown_pack"},
+    with pytest.raises(RuntimeError, match="actual_presentation_screenshot_upload_failed"):
+        __import__("asyncio").run(
+            publisher.publish(
+                slug="lowpoly-siege",
+                game_name="Lowpoly Siege",
+                genre="unknown",
+                html_content="<html>ok</html>",
+                genre_brief={"asset_pack_key": "unknown_pack"},
+            )
         )
-    )
 
-    assert result["presentation_status"] == "repair_pending"
-    assert result["thumbnail_url"] is None
     assert update_calls[-1]["visibility"] == "hidden"
     assert update_calls[-1]["thumbnail_url"] is None
     assert update_calls[-1]["hero_image_url"] is None
-    assert sent_payload["photo_url"] is None
+    assert sent_payload == {}
 
 
 def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(monkeypatch) -> None:
@@ -282,7 +251,7 @@ def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(
 
     result = __import__("asyncio").run(
         publisher.publish(
-            slug="lowpoly-siege",
+            slug="golden-isles-flight",
             game_name="Lowpoly Siege",
             genre="topdown shooter",
             html_content="<html>ok</html>",

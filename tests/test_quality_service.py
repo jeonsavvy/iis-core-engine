@@ -139,3 +139,20 @@ def test_validate_presentation_contract_reports_missing_hooks_without_running_br
     assert ok is False
     assert "presentation_capture_hook" in issues
     assert "presentation_ready_flag" in issues
+
+
+def test_capture_presentation_screenshot_returns_none_when_frame_never_becomes_representative(monkeypatch: MonkeyPatch) -> None:
+    page = FakePage()
+    browser = FakeBrowser(page=page)
+
+    def fake_capture_runtime_probe(_page: FakePage) -> dict[str, object]:
+        page.last_probe_index += 1
+        return {"start_gate_visible": False, "countdown_text": "", "overlay_visible": True}
+
+    monkeypatch.setattr(quality_service, "sync_playwright", lambda: FakePlaywrightContext(browser))
+    monkeypatch.setattr(quality_service, "capture_runtime_probe", fake_capture_runtime_probe)
+
+    service = QualityService(Settings(playwright_required=False, qa_smoke_timeout_seconds=8.0))
+    screenshot = service.capture_presentation_screenshot("<html><body>stub</body></html>")
+
+    assert screenshot is None
