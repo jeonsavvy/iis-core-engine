@@ -353,6 +353,15 @@ class FakePublisher:
         self.presentation_issues: list[str] = []
         self.repair_missing_presentation = True
         self.publish_error: Exception | None = None
+        self.thumbnail_candidates: list[dict[str, str]] = [
+            {
+                "id": "auto-1",
+                "label": "자동 캡처 1",
+                "source": "auto",
+                "mime_type": "image/png",
+                "data_url": "data:image/png;base64,Y2FuZGlkYXRl",
+            }
+        ]
 
     async def publish(
         self,
@@ -365,6 +374,9 @@ class FakePublisher:
         recent_events: list[dict[str, Any]] | None = None,
         genre_brief: dict[str, Any] | None = None,
         created_by: str | None = None,
+        selected_thumbnail_bytes: bytes | None = None,
+        selected_thumbnail_mime_type: str | None = None,
+        selected_thumbnail_name: str | None = None,
     ) -> dict[str, Any]:
         if self.publish_error is not None:
             raise self.publish_error
@@ -378,6 +390,9 @@ class FakePublisher:
                 "recent_events": recent_events or [],
                 "genre_brief": genre_brief or {},
                 "created_by": created_by,
+                "selected_thumbnail_name": selected_thumbnail_name,
+                "selected_thumbnail_mime_type": selected_thumbnail_mime_type,
+                "selected_thumbnail_bytes": selected_thumbnail_bytes,
             }
         )
         return {
@@ -392,6 +407,9 @@ class FakePublisher:
             "play_overview": ["overview"],
             "controls_guide": ["controls"],
         }
+
+    def generate_publish_thumbnail_candidates(self, *, html_content: str) -> list[dict[str, str]]:
+        return list(self.thumbnail_candidates)
 
     def validate_presentation_contract(self, *, html_content: str) -> tuple[bool, list[str]]:
         if "__iisPreparePresentationCapture" not in html_content or "__iisPresentationReady" not in html_content:
@@ -640,6 +658,36 @@ def test_publish_blocks_when_presentation_contract_is_missing() -> None:
     assert "presentation_capture_hook" in published.json()["detail"]["issues"]
 
 
+def test_publish_skips_presentation_gate_when_thumbnail_override_is_provided() -> None:
+    client, store = make_client()
+    client.app.state.publisher_service.repair_missing_presentation = False
+    client.app.state.publisher_service.presentation_ok = False
+    client.app.state.publisher_service.presentation_issues = ["presentation_capture_hook"]
+    session_id = create_session(client)
+    store.update_session_html(
+        session_id,
+        "<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>",
+        score=0,
+    )
+
+    published = client.post(
+        f"/api/v1/sessions/{session_id}/publish",
+        json={
+            "slug": "road-rush",
+            "selected_thumbnail": {
+                "name": "manual.png",
+                "mime_type": "image/png",
+                "data_url": "data:image/png;base64,bWFudWFs",
+            },
+        },
+    )
+
+    assert published.status_code == 200
+    assert client.app.state.publisher_service.calls[-1]["selected_thumbnail_name"] == "manual.png"
+    assert client.app.state.publisher_service.calls[-1]["selected_thumbnail_mime_type"] == "image/png"
+    assert client.app.state.publisher_service.calls[-1]["selected_thumbnail_bytes"] == b"manual"
+
+
 def test_publish_repairs_presentation_contract_before_publishing() -> None:
     client, store = make_client()
     client.app.state.publisher_service.repair_missing_presentation = True
@@ -672,6 +720,17 @@ def test_publish_returns_conflict_when_actual_screenshot_capture_fails() -> None
     assert published.status_code == 409
     assert published.json()["detail"]["code"] == "publish_presentation_capture_failed"
     assert "actual_presentation_screenshot_missing" in published.json()["detail"]["issues"]
+
+
+def test_publish_thumbnail_candidates_returns_auto_candidates() -> None:
+    client, store = make_client()
+    session_id = create_session(client)
+    store.update_session_html(session_id, "<html>draft</html>", score=0)
+
+    response = client.get(f"/api/v1/sessions/{session_id}/publish-thumbnail-candidates")
+
+    assert response.status_code == 200
+    assert response.json()["candidates"][0]["id"] == "auto-1"
 
 
 def test_issue_propose_apply_flow() -> None:

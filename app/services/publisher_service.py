@@ -130,14 +130,20 @@ class PublisherService:
             "uploaded_files": [row["storage_path"] for row in files_to_upload],
         }
 
-    def upload_screenshot(self, *, slug: str, screenshot_bytes: bytes) -> str | None:
+    def upload_screenshot(self, *, slug: str, screenshot_bytes: bytes, mime_type: str = "image/png") -> str | None:
         if not self.client:
             return None
 
         bucket = self.client.storage.from_(self.settings.supabase_storage_bucket)
-        storage_path = f"{slug}/screenshot.png"
+        normalized_mime = str(mime_type or "image/png").strip().lower()
+        extension = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/webp": "webp",
+        }.get(normalized_mime, "png")
+        storage_path = f"{slug}/screenshot.{extension}"
         file_options = {
-            "content-type": "image/png",
+            "content-type": normalized_mime,
             "cache-control": "60",
             "x-upsert": "true",
         }
@@ -148,7 +154,7 @@ class PublisherService:
                 bucket.upload(
                     storage_path,
                     screenshot_bytes,
-                    file_options={"content-type": "image/png", "cache-control": "60", "upsert": "true"},
+                    file_options={"content-type": normalized_mime, "cache-control": "60", "upsert": "true"},
                 )
             except Exception:
                 bucket.update(storage_path, screenshot_bytes, file_options=file_options)

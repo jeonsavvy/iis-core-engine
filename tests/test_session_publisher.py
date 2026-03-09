@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 
 import pytest
@@ -119,6 +120,81 @@ def test_publish_uses_session_user_id_for_created_by(monkeypatch) -> None:
 
     assert result["success"] is True
     assert recorded["created_by"] == "user-1"
+
+
+def test_publish_uses_selected_thumbnail_without_runtime_capture(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+        )
+    )
+
+    uploaded: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        publisher._publisher,
+        "publish_game",
+        lambda **_: {
+            "status": "published",
+            "public_url": "https://cdn.example.com/games/neon-drift/index.html",
+            "game_id": "game-1",
+        },
+    )
+    monkeypatch.setattr(
+        publisher._publisher,
+        "upload_screenshot",
+        lambda **kwargs: uploaded.update(kwargs) or "https://cdn.example.com/games/neon-drift/manual.webp",
+    )
+    monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **_: True)
+    monkeypatch.setattr(
+        publisher._quality,
+        "capture_presentation_screenshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runtime capture should not run")),
+    )
+    monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
+    publisher._archiver = None
+
+    result = __import__("asyncio").run(
+        publisher.publish(
+            slug="neon-drift",
+            game_name="Neon Drift",
+            genre="racing",
+            html_content="<html>ok</html>",
+            selected_thumbnail_bytes=b"manual-image",
+            selected_thumbnail_mime_type="image/webp",
+            selected_thumbnail_name="manual.webp",
+        )
+    )
+
+    assert result["thumbnail_url"] == "https://cdn.example.com/games/neon-drift/manual.webp"
+    assert uploaded["screenshot_bytes"] == b"manual-image"
+    assert uploaded["mime_type"] == "image/webp"
+
+
+def test_generate_publish_thumbnail_candidates_returns_data_urls(monkeypatch) -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+        )
+    )
+    monkeypatch.setattr(
+        publisher._quality,
+        "capture_publish_thumbnail_candidates",
+        lambda *_args, **_kwargs: [
+            {"label": "자동 캡처 1", "reason": "auto", "bytes": b"candidate-1"},
+            {"label": "자동 캡처 2", "reason": "auto", "bytes": b"candidate-2"},
+        ],
+    )
+
+    result = publisher.generate_publish_thumbnail_candidates(html_content="<html>ok</html>")
+
+    assert len(result) == 2
+    assert result[0]["data_url"] == f"data:image/png;base64,{base64.b64encode(b'candidate-1').decode('ascii')}"
+    assert result[0]["source"] == "auto"
 
 
 def test_publish_fails_fast_when_actual_runtime_capture_is_missing(monkeypatch) -> None:

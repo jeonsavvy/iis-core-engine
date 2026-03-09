@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import asyncio
 import logging
 import re
@@ -198,6 +199,7 @@ class ApprovePublishResponse(BaseModel):
 class PublishRequest(BaseModel):
     game_name: str = ""
     slug: str = ""
+    selected_thumbnail: ImageAttachmentRequest | None = None
 
 
 class PublishResponse(BaseModel):
@@ -210,6 +212,18 @@ class PublishResponse(BaseModel):
     marketing_summary: str = ""
     play_overview: list[str] = Field(default_factory=list)
     controls_guide: list[str] = Field(default_factory=list)
+
+
+class PublishThumbnailCandidateResponse(BaseModel):
+    id: str
+    label: str
+    source: str = "auto"
+    mime_type: str = "image/png"
+    data_url: str
+
+
+class PublishThumbnailCandidatesResponse(BaseModel):
+    candidates: list[PublishThumbnailCandidateResponse] = Field(default_factory=list)
 
 
 class ConversationMessageResponse(BaseModel):
@@ -580,6 +594,26 @@ def _attachment_metadata(image_attachment: ImageAttachmentRequest | None) -> dic
     }
 
 
+def _decode_image_attachment(image_attachment: ImageAttachmentRequest | None) -> dict[str, Any] | None:
+    metadata = _attachment_metadata(image_attachment)
+    if metadata is None or image_attachment is None:
+        return None
+    prefix = f"data:{metadata['mime_type']};base64,"
+    encoded = image_attachment.data_url.strip()[len(prefix):]
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_image_payload", "code": "image_attachment_invalid"},
+        ) from exc
+    return {
+        "name": str(metadata["name"]),
+        "mime_type": str(metadata["mime_type"]),
+        "bytes": decoded,
+    }
+
+
 def _infer_issue_category(*, title: str, details: str, has_attachment: bool) -> str:
     text = f"{title} {details}".casefold()
 
@@ -757,7 +791,7 @@ def _get_prompt_run_semaphore(app: Any) -> asyncio.Semaphore:
     return cast(asyncio.Semaphore, semaphore)
 
 
-async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, list[str]]:
+async def _validate_publish_runtime(*, app: Any, html: str, skip_presentation_validation: bool = False) -> tuple[bool, str, list[str]]:
     playtester = getattr(app.state, "playtester_agent", None)
     if playtester is None:
         return False, "playtester_unavailable", ["Playtester agent is unavailable"]
@@ -766,6 +800,9 @@ async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, 
     issues = result.fatal_issues or result.issues
     if not result.boots_ok:
         return False, "publish_runtime_blocked", issues
+
+    if skip_presentation_validation:
+        return True, "", issues
 
     publisher = getattr(app.state, "publisher_service", None)
     if publisher is None:
@@ -1898,6 +1935,7 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Publisher not configured",
         )
+    selected_thumbnail = _decode_image_attachment(body.selected_thumbnail)
 
     preferred_slug = _normalize_slug(body.slug)
     fallback_slug = _normalize_slug(str(session.get("title", "")))[:32]
@@ -1924,7 +1962,11 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             html = repaired_html
             store.update_session_html(session_id, html, score=int(session.get("score", 0) or 0))
 
-    publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
+    publishable, publish_error_code, publish_issues = await _validate_publish_runtime(
+        app=request.app,
+        html=html,
+        skip_presentation_validation=selected_thumbnail is not None,
+    )
     if not publishable:
         summary = _summarize_publish_issues(publish_issues, limit=3) or "Runtime fatal issue detected"
         is_presentation_block = publish_error_code == "publish_presentation_blocked"
@@ -1965,6 +2007,9 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             recent_events=recent_events,
             genre_brief=genre_brief,
             created_by=str(session.get("user_id") or actor_id or "").strip() or None,
+            selected_thumbnail_bytes=selected_thumbnail.get("bytes") if isinstance(selected_thumbnail, dict) else None,
+            selected_thumbnail_mime_type=selected_thumbnail.get("mime_type") if isinstance(selected_thumbnail, dict) else None,
+            selected_thumbnail_name=selected_thumbnail.get("name") if isinstance(selected_thumbnail, dict) else None,
         )
         store.update_session_status(session_id, "published")
         game_slug = str(publish_result.get("game_slug", slug))
@@ -2044,6 +2089,44 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "publish_failed", "detail": str(exc)[:200]},
         )
+
+
+@router.get("/{session_id}/publish-thumbnail-candidates", response_model=PublishThumbnailCandidatesResponse)
+async def publish_thumbnail_candidates(session_id: str, request: Request) -> PublishThumbnailCandidatesResponse:
+    store = _get_session_store(request)
+    session = _load_session_or_404(store, session_id)
+    html = str(session.get("current_html", "") or "").strip()
+    if not html:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No game to capture. Generate a game first.")
+
+    publisher = getattr(request.app.state, "publisher_service", None)
+    if publisher is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Publisher not configured")
+
+    repair_presentation = getattr(publisher, "repair_presentation_contract_html", None)
+    if callable(repair_presentation):
+        repaired_html, _ = repair_presentation(html_content=html)
+        if isinstance(repaired_html, str) and repaired_html.strip():
+            html = repaired_html
+
+    generate_candidates = getattr(publisher, "generate_publish_thumbnail_candidates", None)
+    if not callable(generate_candidates):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Thumbnail candidate generation is unavailable")
+
+    raw_candidates = generate_candidates(html_content=html)
+    return PublishThumbnailCandidatesResponse(
+        candidates=[
+            PublishThumbnailCandidateResponse(
+                id=str(row.get("id", f"auto-{index + 1}")),
+                label=str(row.get("label", f"자동 캡처 {index + 1}")),
+                source=str(row.get("source", "auto")),
+                mime_type=str(row.get("mime_type", "image/png")),
+                data_url=str(row.get("data_url", "")),
+            )
+            for index, row in enumerate(raw_candidates)
+            if isinstance(row, dict) and str(row.get("data_url", "")).strip()
+        ]
+    )
 
 
 @router.post("/{session_id}/cancel", response_model=CancelSessionResponse)

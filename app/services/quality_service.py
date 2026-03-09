@@ -293,6 +293,105 @@ class QualityService:
         except Exception:
             return None
 
+    def capture_publish_thumbnail_candidates(
+        self,
+        html_content: str,
+        *,
+        artifact_files: list[dict[str, Any]] | None = None,
+        entrypoint_path: str | None = None,
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        seen: set[bytes] = set()
+
+        try:
+            with TemporaryDirectory(prefix="iis-thumb-candidates-") as tmp_dir:
+                html_path = prepare_smoke_workspace(
+                    tmp_dir=tmp_dir,
+                    html_content=html_content,
+                    artifact_files=artifact_files,
+                    entrypoint_path=entrypoint_path,
+                )
+
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+                    page = browser.new_page()
+                    page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
+                    page.wait_for_timeout(250)
+
+                    def record_candidate(label: str, reason: str) -> None:
+                        try:
+                            canvas = page.locator("canvas")
+                            if canvas.count() > 0:
+                                image_bytes = cast(bytes, canvas.first.screenshot(type="png"))
+                            else:
+                                image_bytes = cast(bytes, page.screenshot(type="png"))
+                        except Exception:
+                            return
+                        if image_bytes in seen:
+                            return
+                        seen.add(image_bytes)
+                        candidates.append({"label": label, "reason": reason, "bytes": image_bytes})
+
+                    record_candidate("자동 캡처 1", "initial_frame")
+
+                    try:
+                        prep_state = page.evaluate(
+                            """
+                            () => {
+                              if (typeof window.__iisPreparePresentationCapture !== "function") {
+                                return { hook_present: false, delay_ms: 0 };
+                              }
+                              try {
+                                const raw = window.__iisPreparePresentationCapture();
+                                const row = raw && typeof raw === "object" ? raw : {};
+                                return {
+                                  hook_present: true,
+                                  delay_ms: Number(row.delay_ms ?? row.delayMs ?? 0) || 0,
+                                };
+                              } catch (error) {
+                                return { hook_present: true, delay_ms: 0, error: String(error) };
+                              }
+                            }
+                            """
+                        )
+                        if isinstance(prep_state, dict) and bool(prep_state.get("hook_present", False)):
+                            raw_delay = prep_state.get("delay_ms")
+                            if isinstance(raw_delay, (int, float)) and int(raw_delay) > 0:
+                                page.wait_for_timeout(int(max(0, min(2500, raw_delay))))
+                            for _ in range(15):
+                                ready = page.evaluate("() => Boolean(window.__iisPresentationReady)")
+                                if bool(ready):
+                                    break
+                                page.wait_for_timeout(120)
+                            record_candidate("자동 캡처 2", "presentation_hook")
+                    except Exception:
+                        pass
+
+                    try:
+                        viewport = page.viewport_size or {"width": 1280, "height": 720}
+                        page.mouse.click(int(viewport["width"]) // 2, int(viewport["height"]) // 2)
+                        page.wait_for_timeout(260)
+                        record_candidate("자동 캡처 3", "center_click")
+                    except Exception:
+                        pass
+
+                    for key in ("ArrowUp", "ArrowRight", "Space"):
+                        try:
+                            page.keyboard.press(key)
+                        except Exception:
+                            continue
+                        page.wait_for_timeout(180)
+                    page.wait_for_timeout(900)
+                    record_candidate("자동 캡처 4", "input_probe")
+
+                    page.wait_for_timeout(1600)
+                    record_candidate("자동 캡처 5", "late_frame")
+                    browser.close()
+        except Exception:
+            return []
+
+        return candidates[:4]
+
     def run_smoke_check(
         self,
         html_content: str,

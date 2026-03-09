@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from base64 import b64encode
 from typing import Any
 from urllib.parse import urlparse
 from datetime import datetime, timezone
@@ -182,13 +183,20 @@ class SessionPublisher:
         recent_events: list[dict[str, Any]] | None = None,
         genre_brief: dict[str, Any] | None = None,
         created_by: str | None = None,
+        selected_thumbnail_bytes: bytes | None = None,
+        selected_thumbnail_mime_type: str | None = None,
+        selected_thumbnail_name: str | None = None,
     ) -> dict[str, Any]:
         """Publish game HTML to Supabase storage + games_metadata.
 
         Returns:
             dict with keys: success, public_url, game_id, error
         """
-        presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
+        presentation_screenshot = selected_thumbnail_bytes
+        screenshot_mime_type = str(selected_thumbnail_mime_type or "image/png").strip() or "image/png"
+        if not presentation_screenshot:
+            presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
+            screenshot_mime_type = "image/png"
         if not presentation_screenshot:
             raise PublishPresentationError(
                 code="publish_presentation_capture_failed",
@@ -211,7 +219,11 @@ class SessionPublisher:
         public_url = result.get("public_url", "")
         game_id = result.get("game_id", "")
         play_url = self._resolve_play_url(slug=slug)
-        actual_screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
+        actual_screenshot_url = self._publisher.upload_screenshot(
+            slug=slug,
+            screenshot_bytes=presentation_screenshot,
+            mime_type=screenshot_mime_type,
+        )
         if not actual_screenshot_url:
             self._publisher.update_game_marketing(
                 slug=slug,
@@ -339,3 +351,22 @@ class SessionPublisher:
             "play_overview": play_overview,
             "controls_guide": controls_guide,
         }
+
+    def generate_publish_thumbnail_candidates(self, *, html_content: str) -> list[dict[str, str]]:
+        raw_candidates = self._quality.capture_publish_thumbnail_candidates(html_content)
+        response: list[dict[str, str]] = []
+        for index, row in enumerate(raw_candidates, start=1):
+            image_bytes = row.get("bytes") if isinstance(row, dict) else None
+            if not isinstance(image_bytes, (bytes, bytearray)):
+                continue
+            label = str((row or {}).get("label", "")).strip() or f"자동 캡처 {index}"
+            response.append(
+                {
+                    "id": f"auto-{index}",
+                    "label": label,
+                    "source": "auto",
+                    "mime_type": "image/png",
+                    "data_url": f"data:image/png;base64,{b64encode(bytes(image_bytes)).decode('ascii')}",
+                }
+            )
+        return response
