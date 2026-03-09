@@ -35,6 +35,16 @@ cp .env.example .env
 4. 사용자는 이슈를 등록하고 수정안을 검토한 뒤 반영할 수 있습니다.
 5. 퍼블리시 승인 후 HTML, 공개 메타데이터, 썸네일, 아카이브 저장소가 함께 갱신됩니다.
 
+## 왜 Vertex를 사용하나
+
+이 저장소에서 AI는 단순 문장 생성기가 아니라, 세션 기반 제작 흐름의 핵심 처리 계층입니다.
+
+- GDD, 분석 계약, 계획 계약, 디자인 계약처럼 **구조화된 결과** 를 만들어야 합니다.
+- 실제 게임 HTML과 퍼블리시용 텍스트처럼 **자유 형식 결과** 도 함께 다뤄야 합니다.
+- 실행 중 특정 모델 경로가 흔들릴 때를 대비해 preview / pro / flash 경로를 순차 fallback 하도록 구성했습니다.
+
+즉, Vertex는 한 번의 응답을 받기 위한 선택이 아니라, **구조화된 생성 + 텍스트 생성 + 세션 운영 fallback** 을 한 흐름으로 맞추기 위한 구성입니다.
+
 ## 주요 API 범위
 
 ### Health
@@ -89,6 +99,13 @@ cp .env.example .env
 | `PLAYWRIGHT_REQUIRED` | 퍼블리시 전 런타임 검증 강제 여부입니다. |
 | `HTTP_TIMEOUT_SECONDS` / `HTTP_MAX_RETRIES` | 외부 호출 정책입니다. |
 
+## 운영 인프라 관점
+
+- 세션, 공개 메타데이터, 스토리지는 **Supabase** 를 사용합니다.
+- 공개 포털은 Cloudflare Workers에서 제공되고, 이 저장소는 그 뒤에서 동작하는 백엔드 런타임을 담당합니다.
+- 백엔드 배포는 **AWS EC2 기반 원격 서버** 에 SSH로 배포하는 흐름을 사용합니다.
+- 퍼블리시된 공개 정적 결과물은 직접 이 저장소에 남기지 않고 `iis-games-archive` 와 공개 스토리지 경로로 분리합니다.
+
 ## Supabase SQL 파일 정리 기준
 
 현재 운영 경로 기준 주요 파일:
@@ -129,9 +146,11 @@ PYTHONPATH=. pytest -q -s
 - 원격 배포 스크립트: `scripts/deploy_remote.sh`
 - systemd 템플릿: `deploy/systemd/iis-core-api.service.tmpl`
 - 운영 문서:
-  - `docs/oracle-arm-runbook.md`
   - `docs/scaffold-v3-migration.md`
   - `docs/telegram-operations.md`
+
+이 저장소는 포털 화면을 직접 배포하지 않습니다.
+백엔드 API, 세션 처리, 퍼블리시 경로, 외부 연동이 이 저장소의 실제 배포 대상입니다.
 
 ## 공개 저장소 기준
 
