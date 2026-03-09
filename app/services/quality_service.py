@@ -88,6 +88,78 @@ class QualityService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    def capture_presentation_screenshot(
+        self,
+        html_content: str,
+        *,
+        artifact_files: list[dict[str, Any]] | None = None,
+        entrypoint_path: str | None = None,
+    ) -> bytes | None:
+        try:
+            with TemporaryDirectory(prefix="iis-presentation-") as tmp_dir:
+                html_path = prepare_smoke_workspace(
+                    tmp_dir=tmp_dir,
+                    html_content=html_content,
+                    artifact_files=artifact_files,
+                    entrypoint_path=entrypoint_path,
+                )
+
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+                    page = browser.new_page()
+                    page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
+                    page.wait_for_timeout(250)
+
+                    prep_state = page.evaluate(
+                        """
+                        () => {
+                          const noop = { hook_present: false, ready: Boolean(window.__iisPresentationReady), delay_ms: 0 };
+                          if (typeof window.__iisPreparePresentationCapture !== "function") return noop;
+                          try {
+                            const raw = window.__iisPreparePresentationCapture();
+                            const row = raw && typeof raw === "object" ? raw : {};
+                            return {
+                              hook_present: true,
+                              ready: Boolean(window.__iisPresentationReady || row.ready),
+                              delay_ms: Number(row.delay_ms ?? row.delayMs ?? 0) || 0,
+                              reason: String(row.reason ?? ""),
+                            };
+                          } catch (error) {
+                            return {
+                              hook_present: true,
+                              ready: false,
+                              delay_ms: 0,
+                              reason: String(error),
+                            };
+                          }
+                        }
+                        """
+                    )
+                    delay_ms = 0
+                    if isinstance(prep_state, dict):
+                        raw_delay = prep_state.get("delay_ms")
+                        if isinstance(raw_delay, (int, float)):
+                            delay_ms = int(max(0, min(2500, raw_delay)))
+                    if delay_ms > 0:
+                        page.wait_for_timeout(delay_ms)
+
+                    for _ in range(15):
+                        ready = page.evaluate("() => Boolean(window.__iisPresentationReady)")
+                        if bool(ready):
+                            break
+                        page.wait_for_timeout(120)
+
+                    canvas = page.locator("canvas")
+                    screenshot_bytes = cast(bytes, canvas.first.screenshot(type="png") if canvas.count() > 0 else page.screenshot(type="png"))
+                    browser.close()
+                    return screenshot_bytes
+        except PlaywrightError:
+            if self.settings.playwright_required:
+                raise
+            return None
+        except Exception:
+            return None
+
     def run_smoke_check(
         self,
         html_content: str,

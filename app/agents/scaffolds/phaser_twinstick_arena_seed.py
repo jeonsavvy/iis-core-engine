@@ -75,6 +75,7 @@ TOPDOWN_HTML = dedent(
           window.IISLeaderboard = { postScore: (score) => console.log("IIS:score", score) };
         }
         window.__iis_game_boot_ok = false;
+        window.__iisPresentationReady = false;
         // Phaser runs its own requestAnimationFrame loop internally.
 
         const crosshair = document.getElementById("crosshair");
@@ -233,6 +234,22 @@ TOPDOWN_HTML = dedent(
             event.stopPropagation();
             restartRun();
           });
+          window.__iisPreparePresentationCapture = () => {
+            resetArena();
+            beginRun();
+            gameState.upgradePending = false;
+            gameState.dashTweenActive = false;
+            player.setPosition(sceneRef.scale.width / 2, sceneRef.scale.height / 2);
+            player.setVelocity(0, 0);
+            statusReadout.textContent = "Arena preview · ready to publish";
+            sceneRef.physics.world.pause();
+            window.__iisPresentationReady = false;
+            sceneRef.time.delayedCall(120, () => {
+              updateHud();
+              window.__iisPresentationReady = true;
+            });
+            return { delay_ms: 140, reason: "arena_thumbnail_mode" };
+          };
           window.addEventListener("keydown", (event) => {
             if (!gameState.started && ["Enter", "Space", "KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
               beginRun();
@@ -251,6 +268,7 @@ TOPDOWN_HTML = dedent(
           spawnWave(gameState.wave);
           updateHud();
           window.__iis_game_boot_ok = true;
+          window.__iisPresentationReady = true;
         }
 
         function update(time, delta) {

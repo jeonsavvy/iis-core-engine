@@ -156,11 +156,10 @@ class GameAdminService:
                 "details": {"error": str(exc)},
             }
 
-        smoke = self.quality_service.run_smoke_check(response.text)
         screenshot_url = None
-        if smoke.screenshot_bytes:
-            screenshot_url = self.publisher_service.upload_screenshot(slug=slug, screenshot_bytes=smoke.screenshot_bytes)
-        details["smoke_reason"] = smoke.reason
+        presentation_screenshot = self.quality_service.capture_presentation_screenshot(response.text)
+        if presentation_screenshot:
+            screenshot_url = self.publisher_service.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
 
         if not screenshot_url and require_thumbnail:
             self.publisher_service.update_game_marketing(slug=slug, visibility="hidden")

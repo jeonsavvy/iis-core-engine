@@ -211,9 +211,9 @@ class SessionPublisher:
         thumbnail_url: str | None = None
         if result.get("status") == "published":
             try:
-                smoke = self._quality.run_smoke_check(html_content)
-                if smoke.screenshot_bytes:
-                    screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=smoke.screenshot_bytes)
+                presentation_screenshot = self._quality.capture_presentation_screenshot(html_content)
+                if presentation_screenshot:
+                    screenshot_url = self._publisher.upload_screenshot(slug=slug, screenshot_bytes=presentation_screenshot)
             except Exception as exc:
                 logger.warning("Publish screenshot capture failed (non-fatal): %s", exc)
         canonical_thumbnail_url = self._resolve_telegram_media_url(thumbnail_url=screenshot_url, screenshot_url=screenshot_url)
@@ -271,7 +271,7 @@ class SessionPublisher:
             genre_tags=public_game_metadata.get("genre_tags") if isinstance(public_game_metadata.get("genre_tags"), list) else None,
             hero_image_url=thumbnail_url,
             released_at=str(public_game_metadata.get("released_at", "")).strip() or None,
-            visibility="public" if presentation_status == "ready" else "hidden",
+            visibility="public",
             play_count_cached=int(public_game_metadata.get("play_count_cached", 0) or 0),
         )
 

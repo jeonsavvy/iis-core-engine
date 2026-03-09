@@ -24,6 +24,8 @@ def test_racing_scaffold_contains_required_runtime_tokens() -> None:
     assert "wrongwaytimer" in html or "wrong way" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+    assert "__iispresentationready" in html
+    assert "__iispreparepresentationcapture" in html
 
 
 def test_flight_scaffold_contains_required_runtime_tokens() -> None:
@@ -42,6 +44,8 @@ def test_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "boostcharge" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+    assert "__iispresentationready" in html
+    assert "__iispreparepresentationcapture" in html
 
 
 def test_flight_scaffold_contains_depth_landmarks() -> None:
@@ -68,6 +72,8 @@ def test_island_flight_scaffold_contains_required_runtime_tokens() -> None:
     assert "lastsafepoint" in html or "respawn(" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+    assert "__iispresentationready" in html
+    assert "__iispreparepresentationcapture" in html
 
 
 def test_island_flight_scaffold_contains_environment_landmarks() -> None:
@@ -96,6 +102,8 @@ def test_topdown_scaffold_contains_required_runtime_tokens() -> None:
     assert "title-screen" in html or "start run" in html
     assert "requestanimationframe" in html
     assert "__iis_game_boot_ok" in html
+    assert "__iispresentationready" in html
+    assert "__iispreparepresentationcapture" in html
     assert "xp" in html
     assert "level" in html
     assert "upgrade" in html

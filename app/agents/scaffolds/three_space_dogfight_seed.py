@@ -64,6 +64,7 @@ FLIGHT_HTML = dedent(
           window.IISLeaderboard = { postScore: (score) => console.log("IIS:score", score) };
         }
         window.__iis_game_boot_ok = false;
+        window.__iisPresentationReady = false;
 
         const throttleReadout = document.getElementById("throttle-readout");
         const attitudeReadout = document.getElementById("attitude-readout");
@@ -215,6 +216,25 @@ FLIGHT_HTML = dedent(
           });
           statusReadout.textContent = "Boost ready · Cannons online";
         }
+
+        window.__iisPreparePresentationCapture = () => {
+          resetFight();
+          input.pitchUp = false;
+          input.pitchDown = false;
+          input.rollLeft = false;
+          input.rollRight = false;
+          input.yawLeft = false;
+          input.yawRight = false;
+          input.fire = false;
+          input.boost = false;
+          statusReadout.textContent = "Target locked · thumbnail pass";
+          window.__iisPresentationReady = false;
+          setTimeout(() => {
+            renderer.render(scene, camera);
+            window.__iisPresentationReady = true;
+          }, 120);
+          return { delay_ms: 140, reason: "dogfight_thumbnail_mode" };
+        };
 
         function fireProjectile() {
           if (state.fireCooldown > 0) return;
@@ -399,6 +419,7 @@ FLIGHT_HTML = dedent(
 
         resetFight();
         window.__iis_game_boot_ok = true;
+        window.__iisPresentationReady = true;
         window.requestAnimationFrame(animate);
       </script>
     </body>

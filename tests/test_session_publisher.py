@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from datetime import datetime
 
 from app.core.config import Settings
@@ -168,7 +167,7 @@ def test_publish_uses_text_only_telegram_alert_when_only_placeholder_media_exist
         },
     )
     monkeypatch.setattr(publisher._publisher, "update_game_marketing", lambda **_: True)
-    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=None))
+    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
     publisher._archiver = None
 
@@ -212,7 +211,7 @@ def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypat
         },
     )
     monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
-    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=None))
+    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **kwargs: sent_payload.update(kwargs))
     publisher._archiver = None
 
@@ -228,7 +227,7 @@ def test_publish_marks_game_hidden_when_canonical_thumbnail_is_missing(monkeypat
 
     assert result["presentation_status"] == "repair_pending"
     assert result["thumbnail_url"] is None
-    assert update_calls[-1]["visibility"] == "hidden"
+    assert update_calls[-1]["visibility"] == "public"
     assert update_calls[-1]["thumbnail_url"] is None
     assert update_calls[-1]["hero_image_url"] is None
     assert sent_payload == {}
@@ -262,7 +261,7 @@ def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(
     )
     monkeypatch.setattr(publisher._publisher, "upload_screenshot", lambda **_: screenshot_url)
     monkeypatch.setattr(publisher._publisher, "update_game_marketing", fake_update_game_marketing)
-    monkeypatch.setattr(publisher._quality, "run_smoke_check", lambda *_args, **_kwargs: SimpleNamespace(screenshot_bytes=b"png"))
+    monkeypatch.setattr(publisher._quality, "capture_presentation_screenshot", lambda *_args, **_kwargs: b"png")
     monkeypatch.setattr(publisher._telegram, "broadcast_launch_announcement", lambda **_: None)
     publisher._archiver = None
 

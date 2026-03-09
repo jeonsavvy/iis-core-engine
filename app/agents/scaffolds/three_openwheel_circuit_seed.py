@@ -49,6 +49,7 @@ RACING_HTML = dedent(
           window.IISLeaderboard = { postScore: (score) => console.log("IIS:score", score) };
         }
         window.__iis_game_boot_ok = false;
+        window.__iisPresentationReady = false;
 
         const lapTimerEl = document.getElementById("lap-timer");
         const lapStateEl = document.getElementById("lap-state");
@@ -318,6 +319,26 @@ RACING_HTML = dedent(
           countdownEl.style.opacity = "1";
         }
 
+        window.__iisPreparePresentationCapture = () => {
+          resetRace();
+          input.throttle = false;
+          input.brake = false;
+          input.left = false;
+          input.right = false;
+          carState.started = true;
+          carState.countdown = 0;
+          carState.speed = 22;
+          countdownEl.style.opacity = "0";
+          hintStateEl.textContent = "Circuit preview · lined up for a clean first lap";
+          statusStateEl.textContent = "THUMBNAIL READY";
+          window.__iisPresentationReady = false;
+          setTimeout(() => {
+            renderer.render(scene, camera);
+            window.__iisPresentationReady = true;
+          }, 120);
+          return { delay_ms: 140, reason: "circuit_thumbnail_mode" };
+        };
+
         function onKey(event, pressed) {
           const code = event.code;
           if (code === "KeyW" || code === "ArrowUp") input.throttle = pressed;
@@ -491,6 +512,7 @@ RACING_HTML = dedent(
 
         resetRace();
         window.__iis_game_boot_ok = true;
+        window.__iisPresentationReady = true;
         window.requestAnimationFrame(animate);
       </script>
     </body>

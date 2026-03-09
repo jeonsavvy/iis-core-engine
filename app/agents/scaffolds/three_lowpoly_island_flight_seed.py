@@ -52,6 +52,7 @@ ISLAND_FLIGHT_HTML = dedent(
           window.IISLeaderboard = { postScore: (score) => console.log("IIS:score", score) };
         }
         window.__iis_game_boot_ok = false;
+        window.__iisPresentationReady = false;
 
         const ringReadout = document.getElementById("ring-readout");
         const chainReadout = document.getElementById("chain-readout");
@@ -305,6 +306,27 @@ ISLAND_FLIGHT_HTML = dedent(
           statusReadout.textContent = "Propeller spinning · line up for the rings";
         }
 
+        window.__iisPreparePresentationCapture = () => {
+          resetFlight();
+          input.pitchUp = false;
+          input.pitchDown = false;
+          input.yawLeft = false;
+          input.yawRight = false;
+          input.boost = false;
+          input.stabilize = false;
+          state.started = true;
+          state.countdown = 0;
+          state.speed = 24;
+          countdownEl.style.opacity = "0";
+          statusReadout.textContent = "Ring route preview · warm light and island depth locked";
+          window.__iisPresentationReady = false;
+          setTimeout(() => {
+            renderer.render(scene, camera);
+            window.__iisPresentationReady = true;
+          }, 120);
+          return { delay_ms: 140, reason: "island_thumbnail_mode" };
+        };
+
         function updateFlightRating() {
           const completionRatio = state.rings / ringMeshes.length;
           if (completionRatio >= 1 && state.bestChain >= 5) {
@@ -468,6 +490,7 @@ ISLAND_FLIGHT_HTML = dedent(
 
         resetFlight();
         window.__iis_game_boot_ok = true;
+        window.__iisPresentationReady = true;
         window.requestAnimationFrame(animate);
       </script>
     </body>
