@@ -1,3 +1,5 @@
+-- Historical migration kept for schema provenance.
+-- Not part of the default bootstrap path for the current repository state.
 -- IIS modular generation core additive schema
 -- Safe to apply multiple times.
 

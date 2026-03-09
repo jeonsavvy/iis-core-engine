@@ -1,3 +1,5 @@
+-- Historical migration kept for schema provenance.
+-- Apply only when operating an older environment that still needs this cutover.
 -- IIS pipeline v2 breaking migration
 -- Apply during maintenance window.
 

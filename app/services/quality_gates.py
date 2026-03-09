@@ -1,3 +1,9 @@
+"""Static quality checks for generated game artifacts.
+
+실행 전 HTML만 보고 최소한의 계약 위반을 빠르게 걸러내는 계층입니다.
+생성 모델이 흔들려도 퍼블리시 전 기본 품질선을 지키게 하는 목적입니다.
+"""
+
 from __future__ import annotations
 
 import re
@@ -8,7 +14,8 @@ from app.core.config import Settings
 from app.services.quality_types import ArtifactContractResult, GameplayGateResult, QualityGateResult
 
 
-# --- Inline fallbacks for deleted modules (genre_engine, visual_contract) ---
+# --- Inline fallback profiles ----------------------------------------------
+# 현재 저장소에 별도 모듈이 없더라도 최소 기준은 여기서 유지합니다.
 
 def resolve_genre_engine(genre_or_engine: str, *, keyword: str = "") -> str:
     """Minimal genre engine resolver (inline fallback)."""
@@ -58,6 +65,7 @@ def resolve_visual_contract_profile(
     return _VisualContract()
 
 
+# --- Baseline HTML contract ------------------------------------------------
 def evaluate_quality_contract(
     settings: Settings,
     html_content: str,
@@ -266,6 +274,7 @@ _FLIGHT_GENRE_ENGINES = {
 }
 
 
+# --- Gameplay gate ---------------------------------------------------------
 def _resolve_gameplay_profile(*, genre_engine_hint: str, genre_hint: str, keyword_hint: str) -> str:
     combined = f"{genre_hint} {keyword_hint}"
     if genre_engine_hint in _RACING_GENRE_ENGINES:
@@ -515,6 +524,7 @@ def evaluate_gameplay_gate(
     )
 
 
+# --- Visual gate -----------------------------------------------------------
 def evaluate_visual_gate(
     settings: Settings,
     visual_metrics: dict[str, Any] | None,
@@ -640,6 +650,7 @@ def evaluate_visual_gate(
     )
 
 
+# --- Artifact contract -----------------------------------------------------
 def evaluate_artifact_contract(
     settings: Settings,
     artifact_manifest: dict[str, Any] | None,
@@ -800,6 +811,7 @@ _INTENT_STOPWORDS = {
 _TOKEN_PATTERN = re.compile(r"[a-z0-9가-힣]+", flags=re.IGNORECASE)
 
 
+# --- Intent matching -------------------------------------------------------
 def _extract_intent_tokens(value: str, *, limit: int = 8) -> list[str]:
     tokens: list[str] = []
     for raw in _TOKEN_PATTERN.findall(str(value).casefold()):

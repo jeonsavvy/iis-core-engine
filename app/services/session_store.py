@@ -1,6 +1,7 @@
-"""Supabase session persistence.
+"""Supabase-backed storage for editor sessions.
 
-Provides session CRUD + conversation + event timeline persistence.
+세션 본문, 대화 기록, 실행 상태, 이슈/수정안, 퍼블리시 이력을
+하나의 저장 계층으로 묶어 세션 API가 같은 계약을 보게 합니다.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ class SupabaseSessionStore:
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    # --- Session lifecycle -------------------------------------------------
 
     def create_session(
         self,
@@ -106,6 +109,8 @@ class SupabaseSessionStore:
         self._client.table("session_issue_proposals").delete().eq("session_id", session_id).execute()
         self._client.table("session_publish_approvals").delete().eq("session_id", session_id).execute()
         self._client.table("session_publish_history").delete().eq("session_id", session_id).execute()
+
+    # --- Conversation and timeline ----------------------------------------
 
     def add_conversation_message(
         self,
@@ -203,6 +208,8 @@ class SupabaseSessionStore:
         rows = result.data if hasattr(result, "data") and isinstance(result.data, list) else []
         return rows
 
+    # --- Async run tracking ------------------------------------------------
+
     def record_publish(
         self,
         *,
@@ -292,6 +299,8 @@ class SupabaseSessionStore:
             for key in ("attempt_count", "retry_after_seconds", "model_name", "model_location", "fallback_used", "capacity_error"):
                 legacy_fields.pop(key, None)
             self._client.table("session_runs").update(legacy_fields).eq("session_id", session_id).eq("id", run_id).execute()
+
+    # --- Human review loop -------------------------------------------------
 
     def create_session_issue(
         self,
@@ -431,7 +440,7 @@ class SupabaseSessionStore:
 
 
 def enable_supabase_persistence(app: Any, settings: Any) -> None:
-    """Attach persistent session store to FastAPI app state."""
+    """앱 상태에 세션 저장소를 연결하고 없으면 명시적으로 비웁니다."""
     if not settings.supabase_url or not settings.supabase_service_role_key:
         logger.warning("Supabase not configured. Session API will return 503.")
         return

@@ -1,3 +1,5 @@
+-- Historical migration kept for schema provenance.
+-- Apply only when recovering an older pipeline_v2 rollout.
 -- IIS pipeline v2 repair migration (additive, non-dropping)
 -- Safe to rerun during maintenance window.
 

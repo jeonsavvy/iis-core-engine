@@ -1,3 +1,9 @@
+"""Vertex service wrapper for structured and free-form generation.
+
+모델 선택, 지역 fallback, 재시도, 텍스트/JSON 변환을 이 파일에 모아
+상위 에이전트가 Vertex 세부 구현을 직접 알지 않도록 합니다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -38,6 +44,7 @@ from app.services.vertex_text_generation import (
 from app.services.vertex_text_utils import strip_code_fences
 from app.services.vertex_types import VertexGenerationResult
 
+# 런타임 환경마다 SDK 구성이 다를 수 있어 import 실패를 허용합니다.
 try:  # pragma: no cover - import availability differs across environments
     from langchain_google_vertexai import ChatVertexAI
 except Exception:  # pragma: no cover - runtime safeguard
@@ -209,6 +216,7 @@ class VertexService:
             variation_hint=variation_hint,
         )
 
+    # --- Runtime capability and route selection ----------------------------
     def _is_enabled(self) -> bool:
         if not self.settings.vertex_project_id:
             return False
@@ -282,6 +290,7 @@ class VertexService:
             )
         return routes
 
+    # --- SDK adapters ------------------------------------------------------
     def _builder_model_name(self) -> str:
         configured = str(self.settings.gemini_pro_model or "").strip()
         fallback = "gemini-2.5-pro"
@@ -443,6 +452,7 @@ class VertexService:
             return "\n".join(parts).strip()
         return str(response)
 
+    # --- Builder generation ------------------------------------------------
     def generate_builder_text_with_fallback(
         self,
         *,
@@ -539,6 +549,7 @@ class VertexService:
             config=config,
         )
 
+    # --- Prompt builders ---------------------------------------------------
     @staticmethod
     def _gdd_prompt(keyword: str, *, shared_contract: dict[str, Any] | None = None) -> str:
         return build_gdd_prompt(keyword, shared_contract=shared_contract)
@@ -594,6 +605,7 @@ class VertexService:
             shared_contract=shared_contract,
         )
 
+    # --- Public text generation helpers -----------------------------------
     def generate_marketing_copy(
         self,
         *,
@@ -737,6 +749,7 @@ class VertexService:
             variation_hint=variation_hint,
         )
 
+    # --- Deterministic fallback payloads ----------------------------------
     @staticmethod
     def _fallback_game_config() -> GameConfigModel:
         return GameConfigModel()

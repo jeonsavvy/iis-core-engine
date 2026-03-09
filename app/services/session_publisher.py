@@ -1,7 +1,7 @@
-"""Session Publisher — adapter for publishing games from editor sessions.
+"""Publish pipeline adapter for editor sessions.
 
-Wraps the existing PublisherService + GitHubArchiveService for the
-interactive session workflow.
+세션에서 확정된 HTML을 받아 저장소 업로드, 공개 메타데이터 기록,
+아카이브 동기화, 알림 전송을 한 번의 퍼블리시 흐름으로 묶습니다.
 """
 
 from __future__ import annotations
@@ -192,6 +192,7 @@ class SessionPublisher:
         Returns:
             dict with keys: success, public_url, game_id, error
         """
+        # 퍼블리시에는 실제 대표 이미지가 필요합니다.
         presentation_screenshot = selected_thumbnail_bytes
         screenshot_mime_type = str(selected_thumbnail_mime_type or "image/png").strip() or "image/png"
         if not presentation_screenshot:

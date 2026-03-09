@@ -1,3 +1,9 @@
+"""Git-based bridge to the public archive repository.
+
+코어 엔진은 퍼블리시 결과를 직접 배포하지 않고, 정적 아카이브 저장소를
+갱신한 뒤 guard 검증을 통과했을 때만 커밋과 푸시를 진행합니다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -70,7 +76,7 @@ class GitHubArchiveService:
         if sync_error:
             return {"status": "error", "reason": sync_error}
 
-        # 1. Update manifest
+        # 1. 아카이브 계약의 기준 파일은 항상 manifest입니다.
         manifest_path = os.path.join(self.repo_path, "manifest", "games.json")
         os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
         manifest = self._load_manifest(manifest_path)
@@ -98,7 +104,7 @@ class GitHubArchiveService:
 
         self._write_manifest(manifest_path, manifest)
 
-        # 2. Write game files
+        # 2. 공개 가능한 정적 산출물만 games/<slug>/ 아래에 씁니다.
         game_dir = os.path.join(self.repo_path, "games", game_slug)
         os.makedirs(game_dir, exist_ok=True)
 
@@ -137,7 +143,7 @@ class GitHubArchiveService:
             self._rollback_archive_changes(game_slug=game_slug)
             return {"status": "error", "reason": guard_error}
 
-        # 3. git add, commit, push
+        # 3. Guard를 통과한 변경만 커밋/푸시합니다.
         try:
             commit_msg = f"feat: archive {game_slug}"
 
@@ -227,6 +233,7 @@ class GitHubArchiveService:
             return f"archive_stage_failed: {output}"
 
     def _sync_archive_repo(self) -> str | None:
+        """로컬 아카이브 저장소를 기본 브랜치 기준 최신 상태로 맞춥니다."""
         try:
             self.runner.run(
                 ["git", "fetch", "--prune", "origin", "main"],
@@ -270,6 +277,7 @@ class GitHubArchiveService:
             return f"archive_sync_failed: {output}"
 
     def _run_archive_guard(self) -> str | None:
+        """공개 허용 범위를 벗어난 파일이 없는지 마지막으로 확인합니다."""
         script_path = os.path.join(self.repo_path, "scripts", "archive_guard.py")
         if not os.path.isfile(script_path):
             return None
@@ -290,6 +298,7 @@ class GitHubArchiveService:
             return f"archive_guard_failed: {output}"
 
     def _rollback_archive_changes(self, *, game_slug: str) -> None:
+        """검증 실패 시 manifest와 게임 디렉터리를 작업 전 상태로 되돌립니다."""
         manifest_path = "manifest/games.json"
         game_dir = f"games/{game_slug}"
 
@@ -305,6 +314,7 @@ class GitHubArchiveService:
 
     @staticmethod
     def _normalize_manifest(raw_manifest: Any) -> dict[str, Any]:
+        """누락된 필드를 보정해 manifest를 일관된 구조로 읽습니다."""
         if isinstance(raw_manifest, dict):
             schema_version = raw_manifest.get("schema_version", 1)
             games = raw_manifest.get("games", [])

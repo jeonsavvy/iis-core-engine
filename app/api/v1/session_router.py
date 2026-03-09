@@ -1,4 +1,8 @@
-"""Session API — interactive game creation sessions."""
+"""Session API for editor sessions.
+
+세션 생성부터 프롬프트 실행, 이슈 수정, 퍼블리시 승인까지
+포털 작업공간이 호출하는 편집 흐름을 이 라우터가 담당합니다.
+"""
 
 from __future__ import annotations
 
@@ -1315,7 +1319,7 @@ def _build_plan_draft(prompt: str, genre_hint: str) -> PlanDraftResponse:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-
+# 기본 세션 조회/편집 흐름
 @router.post("", response_model=CreateSessionResponse)
 async def create_session(body: CreateSessionRequest, request: Request) -> CreateSessionResponse:
     """Create a new interactive game editing session."""
@@ -1652,6 +1656,7 @@ async def cancel_prompt_run(session_id: str, run_id: str, request: Request) -> S
     return _build_run_response(store, session_id, refreshed)
 
 
+# 사람이 수정 지점을 지정한 뒤 제안/적용하는 흐름
 @router.post("/{session_id}/issues", response_model=SessionIssueResponse)
 async def create_issue(session_id: str, body: CreateIssueRequest, request: Request) -> SessionIssueResponse:
     if not settings.human_agent_issue_loop_enabled:
@@ -1893,6 +1898,7 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
     )
 
 
+# 퍼블리시 전 승인과 실제 배포는 분리합니다.
 @router.post("/{session_id}/approve-publish", response_model=ApprovePublishResponse)
 async def approve_publish(session_id: str, body: ApprovePublishRequest, request: Request) -> ApprovePublishResponse:
     store = _get_session_store(request)
@@ -2129,6 +2135,7 @@ async def publish_thumbnail_candidates(session_id: str, request: Request) -> Pub
     )
 
 
+# 실행 중 세션을 안전하게 정리하는 종료 경로
 @router.post("/{session_id}/cancel", response_model=CancelSessionResponse)
 async def cancel_session(session_id: str, request: Request) -> CancelSessionResponse:
     store = _get_session_store(request)

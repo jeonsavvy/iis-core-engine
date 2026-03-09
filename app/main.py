@@ -1,3 +1,10 @@
+"""Application entrypoint for the IIS Core Engine API.
+
+이 파일은 런타임 부팅 규칙을 한곳에 모읍니다. 운영 환경에서는
+필수 토큰과 세션 스키마를 먼저 검증하고, 그다음 API 라우터와
+세션 작업에 필요한 서비스를 순서대로 붙입니다.
+"""
+
 from typing import cast
 import logging
 import asyncio
@@ -22,17 +29,18 @@ if settings.app_env.strip().lower() in {"production", "prod"}:
 
 logger = logging.getLogger(__name__)
 
+# FastAPI 앱은 설정 검증이 끝난 뒤에만 생성합니다.
 app = FastAPI(title=settings.app_name)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
 
 
 # ---------------------------------------------------------------------------
-# Agent lifecycle: initialize on startup
+# Runtime bootstrap: 편집/퍼블리시 서비스 초기화
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def _init_agents() -> None:
-    """Initialize agent loop, publisher, and session persistence."""
+    """세션 편집 루프와 퍼블리시 경로를 런타임에 연결한다."""
     from app.services.vertex_service import VertexService
     from app.agents.codegen_agent import CodegenAgent
     from app.agents.visual_qa_agent import VisualQAAgent
