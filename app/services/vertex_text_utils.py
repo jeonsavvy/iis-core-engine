@@ -543,6 +543,10 @@ def playable_artifact_missing_requirements(html_content: str) -> list[str]:
         missing.append("boot_flag")
     if "iisleaderboard" not in lowered:
         missing.append("leaderboard_contract")
+    if "__iispresentationready" not in lowered:
+        missing.append("presentation_ready_flag")
+    if "__iispreparepresentationcapture" not in lowered:
+        missing.append("presentation_capture_hook")
     if "requestanimationframe" not in lowered:
         missing.append("realtime_loop")
 

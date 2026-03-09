@@ -127,3 +127,15 @@ def test_capture_presentation_screenshot_waits_until_countdown_clears_without_ho
     assert page.goto_calls
     assert page.wait_calls[0] == 250
     assert browser.closed is True
+
+
+def test_validate_presentation_contract_reports_missing_hooks_without_running_browser() -> None:
+    service = QualityService(Settings(playwright_required=False, qa_smoke_timeout_seconds=8.0))
+
+    ok, issues = service.validate_presentation_contract(
+        "<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>"
+    )
+
+    assert ok is False
+    assert "presentation_capture_hook" in issues
+    assert "presentation_ready_flag" in issues

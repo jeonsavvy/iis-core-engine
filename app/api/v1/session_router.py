@@ -763,9 +763,20 @@ async def _validate_publish_runtime(*, app: Any, html: str) -> tuple[bool, str, 
 
     result = await playtester.test(html_content=html)
     issues = result.fatal_issues or result.issues
-    if result.boots_ok:
-        return True, "", issues
-    return False, "publish_runtime_blocked", issues
+    if not result.boots_ok:
+        return False, "publish_runtime_blocked", issues
+
+    publisher = getattr(app.state, "publisher_service", None)
+    if publisher is None:
+        return False, "publisher_unavailable", ["Publisher is unavailable"]
+
+    validate_presentation = getattr(publisher, "validate_presentation_contract", None)
+    if callable(validate_presentation):
+        presentation_ok, presentation_issues = validate_presentation(html_content=html)
+        if not presentation_ok:
+            return False, "publish_presentation_blocked", presentation_issues
+
+    return True, "", issues
 
 
 def _schedule_prompt_run(

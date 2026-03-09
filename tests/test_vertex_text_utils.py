@@ -24,6 +24,8 @@ def test_looks_like_playable_artifact_checks_required_tokens() -> None:
         "<html><body><canvas></canvas><script>"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "</script></body></html>"
     )
@@ -37,6 +39,8 @@ def test_looks_like_playable_artifact_accepts_canvas_runtime_without_canvas_tag(
         "document.body.appendChild(c);"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "</script></body></html>"
     )
@@ -48,6 +52,8 @@ def test_playable_artifact_missing_requirements_returns_missing_tokens() -> None
     missing = playable_artifact_missing_requirements(html)
     assert "boot_flag" in missing
     assert "leaderboard_contract" in missing
+    assert "presentation_ready_flag" in missing
+    assert "presentation_capture_hook" in missing
 
 
 def test_playable_artifact_missing_requirements_rejects_unsupported_three_utils_usage() -> None:
@@ -55,6 +61,8 @@ def test_playable_artifact_missing_requirements_rejects_unsupported_three_utils_
         "<html><body><canvas></canvas><script>"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "const merged = new THREE.BufferGeometryUtils();"
         "</script></body></html>"
@@ -69,6 +77,8 @@ def test_playable_artifact_missing_requirements_rejects_three_namespace_addon_co
         "<html><body><canvas></canvas><script>"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "const c = new THREE.OrbitControls(camera, renderer.domElement);"
         "</script></body></html>"
@@ -82,6 +92,8 @@ def test_playable_artifact_missing_requirements_detects_unresolved_addon_constru
         "<html><body><canvas></canvas><script>"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "const controls = new OrbitControls(camera, renderer.domElement);"
         "</script></body></html>"
@@ -96,6 +108,8 @@ def test_playable_artifact_missing_requirements_accepts_explicitly_imported_addo
         "import { OrbitControls } from 'https://unpkg.com/three/examples/jsm/controls/OrbitControls.js';"
         "window.__iis_game_boot_ok=true;"
         "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
         "requestAnimationFrame(()=>{});"
         "const controls = new OrbitControls(camera, renderer.domElement);"
         "</script></body></html>"

@@ -348,6 +348,8 @@ class FakePlaytester:
 class FakePublisher:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.presentation_ok = True
+        self.presentation_issues: list[str] = []
 
     async def publish(
         self,
@@ -385,6 +387,9 @@ class FakePublisher:
             "play_overview": ["overview"],
             "controls_guide": ["controls"],
         }
+
+    def validate_presentation_contract(self, *, html_content: str) -> tuple[bool, list[str]]:
+        return self.presentation_ok, list(self.presentation_issues)
 
 
 def make_client(
@@ -596,6 +601,23 @@ def test_publish_blocks_when_runtime_fatal_exists() -> None:
     published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
     assert published.status_code == 409
     assert published.json()["detail"]["code"] == "publish_runtime_blocked"
+
+
+def test_publish_blocks_when_presentation_contract_is_missing() -> None:
+    client, store = make_client()
+    client.app.state.publisher_service.presentation_ok = False
+    client.app.state.publisher_service.presentation_issues = ["presentation_capture_hook", "presentation_ready_flag"]
+    session_id = create_session(client)
+    store.update_session_html(
+        session_id,
+        "<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>",
+        score=0,
+    )
+
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert published.status_code == 409
+    assert published.json()["detail"]["code"] == "publish_presentation_blocked"
+    assert "presentation_capture_hook" in published.json()["detail"]["issues"]
 
 
 def test_issue_propose_apply_flow() -> None:

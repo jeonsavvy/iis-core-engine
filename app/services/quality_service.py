@@ -88,6 +88,112 @@ class QualityService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    def validate_presentation_contract(
+        self,
+        html_content: str,
+        *,
+        artifact_files: list[dict[str, Any]] | None = None,
+        entrypoint_path: str | None = None,
+    ) -> tuple[bool, list[str]]:
+        lowered = html_content.casefold()
+        issues: list[str] = []
+        if "__iispreparepresentationcapture" not in lowered:
+            issues.append("presentation_capture_hook")
+        if "__iispresentationready" not in lowered:
+            issues.append("presentation_ready_flag")
+        if issues:
+            return False, issues
+
+        try:
+            with TemporaryDirectory(prefix="iis-presentation-check-") as tmp_dir:
+                html_path = prepare_smoke_workspace(
+                    tmp_dir=tmp_dir,
+                    html_content=html_content,
+                    artifact_files=artifact_files,
+                    entrypoint_path=entrypoint_path,
+                )
+
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+                    page = browser.new_page()
+                    page.goto(html_path.as_uri(), wait_until="load", timeout=int(self.settings.qa_smoke_timeout_seconds * 1000))
+                    page.wait_for_timeout(250)
+
+                    prep_state = page.evaluate(
+                        """
+                        () => {
+                          const hook = window.__iisPreparePresentationCapture;
+                          if (typeof hook !== "function") {
+                            return { hook_present: false, ready: Boolean(window.__iisPresentationReady), delay_ms: 0 };
+                          }
+                          try {
+                            const raw = hook();
+                            const row = raw && typeof raw === "object" ? raw : {};
+                            return {
+                              hook_present: true,
+                              ready: Boolean(window.__iisPresentationReady || row.ready),
+                              delay_ms: Number(row.delay_ms ?? row.delayMs ?? 0) || 0,
+                              reason: String(row.reason ?? ""),
+                            };
+                          } catch (error) {
+                            return {
+                              hook_present: true,
+                              ready: false,
+                              delay_ms: 0,
+                              error: String(error),
+                            };
+                          }
+                        }
+                        """
+                    )
+
+                    if not isinstance(prep_state, dict) or not bool(prep_state.get("hook_present", False)):
+                        browser.close()
+                        return False, ["presentation_capture_hook"]
+
+                    error_text = str(prep_state.get("error", "") or "").strip()
+                    if error_text:
+                        browser.close()
+                        return False, [f"presentation_hook_error:{error_text[:120]}"]
+
+                    delay_ms = 0
+                    raw_delay = prep_state.get("delay_ms") if isinstance(prep_state, dict) else 0
+                    if isinstance(raw_delay, (int, float)):
+                        delay_ms = int(max(0, min(2500, raw_delay)))
+                    if delay_ms > 0:
+                        page.wait_for_timeout(delay_ms)
+
+                    ready = False
+                    for _ in range(30):
+                        ready = bool(page.evaluate("() => Boolean(window.__iisPresentationReady)"))
+                        if ready:
+                            break
+                        page.wait_for_timeout(120)
+                    if not ready:
+                        browser.close()
+                        return False, ["presentation_ready_timeout"]
+
+                    probe = capture_runtime_probe(page) or {}
+                    browser.close()
+        except PlaywrightError as exc:
+            return False, [f"presentation_playwright_error:{str(exc)[:160]}"]
+        except Exception as exc:  # pragma: no cover - runtime safeguard
+            return False, [f"presentation_validation_error:{str(exc)[:160]}"]
+
+        if bool(probe.get("start_gate_visible", False)):
+            issues.append("presentation_start_gate_visible")
+        countdown_text = str(probe.get("countdown_text", "") or "").strip().casefold()
+        if countdown_text not in {"", "go!"}:
+            issues.append("presentation_countdown_active")
+        if bool(probe.get("overlay_visible", False)):
+            issues.append("presentation_overlay_visible")
+        if bool(probe.get("game_over_visible", False)):
+            issues.append("presentation_game_over_visible")
+        if not bool(probe.get("boot_ok", False)):
+            issues.append("presentation_boot_not_ready")
+
+        return (not issues), issues
+
     def capture_presentation_screenshot(
         self,
         html_content: str,

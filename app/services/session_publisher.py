@@ -176,6 +176,19 @@ class SessionPublisher:
             "play_count_cached": 0,
         }
 
+    def validate_presentation_contract(
+        self,
+        *,
+        html_content: str,
+        artifact_files: list[dict[str, Any]] | None = None,
+        entrypoint_path: str | None = None,
+    ) -> tuple[bool, list[str]]:
+        return self._quality.validate_presentation_contract(
+            html_content,
+            artifact_files=artifact_files,
+            entrypoint_path=entrypoint_path,
+        )
+
 
     async def publish(
         self,
