@@ -170,6 +170,23 @@ def test_compile_generated_artifact_injects_presentation_contract_shim_when_miss
     assert "inject_presentation_contract_shim" in meta["transforms_applied"]
 
 
+def test_compile_generated_artifact_injects_restart_contract_shim_for_restartable_combat_games() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "window.__iisPresentationReady=true;"
+        "window.__iisPreparePresentationCapture=()=>({delay_ms:0});"
+        "requestAnimationFrame(()=>{});"
+        "const gameState={hp:0,maxHp:5,wave:3};"
+        "function restartRun(){}"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(html)
+    assert "iis-restart-contract-shim" in compiled
+    assert "inject_restart_contract_shim" in meta["transforms_applied"]
+
+
 def test_compile_generated_artifact_reports_visual_precheck_and_asset_usage() -> None:
     html = (
         "<html><body><canvas></canvas><script>"

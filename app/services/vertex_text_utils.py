@@ -48,6 +48,7 @@ _GLOBAL_CONSTRUCTORS_ALLOWLIST = {
 _SHIM_SCRIPT_MARKER = "id=\"iis-addon-shims\""
 _RUNTIME_CONTRACT_MARKER = "id=\"iis-runtime-contract-shim\""
 _PRESENTATION_CONTRACT_MARKER = "id=\"iis-presentation-contract-shim\""
+_RESTART_CONTRACT_MARKER = "id=\"iis-restart-contract-shim\""
 _VISUAL_CONTRACT_MARKER = "id=\"iis-visual-contract-shim\""
 _AUTOSTART_MARKER = "id=\"iis-autostart-shim\""
 
@@ -231,6 +232,47 @@ def _inject_presentation_contract_shim(
     if head_close >= 0:
         return f"{html_content[:head_close]}{presentation_script}{html_content[head_close:]}"
     return f"{presentation_script}{html_content}"
+
+
+def _inject_restart_contract_shim(html_content: str) -> str:
+    if _RESTART_CONTRACT_MARKER in html_content:
+        return html_content
+    script = (
+        "<script id=\"iis-restart-contract-shim\">"
+        "(function(){"
+        "if(window.__iis_restart_contract_installed){return;}"
+        "window.__iis_restart_contract_installed=true;"
+        "const normalize=()=>{"
+        "try{if(typeof gameState!=='undefined'&&gameState&&typeof gameState==='object'){"
+        "if(typeof gameState.maxHp==='number'&&typeof gameState.hp==='number'&&gameState.hp<=0){gameState.hp=Math.max(1,gameState.maxHp);}"
+        "if(typeof gameState.max_hp==='number'&&typeof gameState.hp==='number'&&gameState.hp<=0){gameState.hp=Math.max(1,gameState.max_hp);}"
+        "if(typeof gameState.wave==='number'&&gameState.wave<1){gameState.wave=1;}"
+        "}}catch(_){}"
+        "try{if(typeof state!=='undefined'&&state&&typeof state==='object'){"
+        "if(typeof state.shield==='number'&&state.shield<=0){state.shield=100;}"
+        "if(typeof state.hp==='number'&&state.hp<=0&&typeof state.maxHp==='number'){state.hp=Math.max(1,state.maxHp);}"
+        "if(typeof state.wave==='number'&&state.wave<1){state.wave=1;}"
+        "}}catch(_){}"
+        "};"
+        "const wrap=(name)=>{"
+        "try{const fn=globalThis[name];if(typeof fn!=='function'||fn.__iis_wrapped_restart){return;}"
+        "const wrapped=function(){const result=fn.apply(this,arguments);setTimeout(normalize,0);setTimeout(normalize,180);return result;};"
+        "wrapped.__iis_wrapped_restart=true;globalThis[name]=wrapped;}catch(_){}};"
+        "['resetArena','resetFight','restartRun','restartGame','beginRun'].forEach(wrap);"
+        "window.addEventListener('keydown',function(event){if(event&&((event.key==='r')||(event.key==='R')||(event.code==='KeyR'))){setTimeout(normalize,0);setTimeout(normalize,180);}},true);"
+        "['#restart-button','#start-button'].forEach(function(selector){const node=document.querySelector(selector);if(node&&node instanceof HTMLElement){node.addEventListener('click',function(){setTimeout(normalize,0);setTimeout(normalize,180);},true);node.addEventListener('pointerdown',function(){setTimeout(normalize,0);setTimeout(normalize,180);},true);}});"
+        "setTimeout(normalize,0);setTimeout(normalize,220);"
+        "})();"
+        "</script>"
+    )
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{script}{html_content[head_close:]}"
+    return f"{script}{html_content}"
 
 
 def _extract_asset_tokens(
@@ -495,6 +537,11 @@ def compile_generated_artifact(
             presentation_hook_missing=presentation_hook_missing,
         )
         transforms_applied.append("inject_presentation_contract_shim")
+
+    restart_signal = any(token in lowered for token in ("restart", "reset", "game over", "gameover", "hp", "shield", "wave"))
+    if restart_signal:
+        transformed = _inject_restart_contract_shim(transformed)
+        transforms_applied.append("inject_restart_contract_shim")
 
     namespace_symbols = _NAMESPACE_ADDON_RE.findall(transformed)
     if namespace_symbols:
