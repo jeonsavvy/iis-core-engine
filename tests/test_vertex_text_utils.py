@@ -156,6 +156,20 @@ def test_compile_generated_artifact_injects_runtime_contract_shim_when_missing_r
     assert "inject_runtime_contract_shim" in meta["transforms_applied"]
 
 
+def test_compile_generated_artifact_injects_presentation_contract_shim_when_missing() -> None:
+    html = (
+        "<html><body><canvas></canvas><script>"
+        "window.__iis_game_boot_ok=true;"
+        "window.IISLeaderboard={};"
+        "requestAnimationFrame(()=>{});"
+        "</script></body></html>"
+    )
+    compiled, meta = compile_generated_artifact(html)
+    assert "__iisPresentationReady" in compiled
+    assert "__iisPreparePresentationCapture" in compiled
+    assert "inject_presentation_contract_shim" in meta["transforms_applied"]
+
+
 def test_compile_generated_artifact_reports_visual_precheck_and_asset_usage() -> None:
     html = (
         "<html><body><canvas></canvas><script>"

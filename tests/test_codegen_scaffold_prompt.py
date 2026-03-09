@@ -30,6 +30,7 @@ def test_initial_racing_prompt_uses_hard_scaffold_html() -> None:
     assert "Preserve system" in prompt
     assert "Structural contract" in prompt
     assert "__iisPreparePresentationCapture" in prompt
+    assert "never restart with 0 HP or 0 shield" in prompt
 
 
 def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
@@ -46,6 +47,7 @@ def test_initial_flight_prompt_uses_hard_scaffold_html() -> None:
     assert "forward auto-scroll shooter" in prompt.lower()
     assert "extending a production baseline" in prompt.lower()
     assert "__iisPreparePresentationCapture" in prompt
+    assert "never restart with 0 HP or 0 shield" in prompt
 
 
 def test_initial_island_flight_prompt_uses_hard_scaffold_html() -> None:
@@ -61,6 +63,7 @@ def test_initial_island_flight_prompt_uses_hard_scaffold_html() -> None:
     assert "Asset pack key: island_flight_pack_v1" in prompt
     assert "Visual contract" in prompt
     assert "__iisPreparePresentationCapture" in prompt
+    assert "never restart with 0 HP or 0 shield" in prompt
 
 
 def test_initial_topdown_prompt_uses_hard_scaffold_html() -> None:
@@ -77,3 +80,4 @@ def test_initial_topdown_prompt_uses_hard_scaffold_html() -> None:
     assert "single-button clicker" in prompt.lower()
     assert "extending a production baseline" in prompt.lower()
     assert "__iisPreparePresentationCapture" in prompt
+    assert "never restart with 0 HP or 0 shield" in prompt

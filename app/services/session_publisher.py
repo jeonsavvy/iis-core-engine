@@ -17,6 +17,7 @@ from app.services.quality_service import QualityService
 from app.services.publisher_service import PublisherService
 from app.services.github_service import GitHubArchiveService
 from app.services.telegram_service import TelegramService
+from app.services.vertex_text_utils import compile_generated_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,11 @@ class SessionPublisher:
             artifact_files=artifact_files,
             entrypoint_path=entrypoint_path,
         )
+
+    def repair_presentation_contract_html(self, *, html_content: str) -> tuple[str, list[str]]:
+        compiled, meta = compile_generated_artifact(html_content)
+        transforms = meta.get("transforms_applied")
+        return compiled, list(transforms) if isinstance(transforms, list) else []
 
 
     async def publish(

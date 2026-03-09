@@ -350,6 +350,7 @@ class FakePublisher:
         self.calls: list[dict[str, Any]] = []
         self.presentation_ok = True
         self.presentation_issues: list[str] = []
+        self.repair_missing_presentation = True
 
     async def publish(
         self,
@@ -389,7 +390,21 @@ class FakePublisher:
         }
 
     def validate_presentation_contract(self, *, html_content: str) -> tuple[bool, list[str]]:
+        if "__iisPreparePresentationCapture" not in html_content or "__iisPresentationReady" not in html_content:
+            return False, ["presentation_capture_hook", "presentation_ready_flag"]
         return self.presentation_ok, list(self.presentation_issues)
+
+    def repair_presentation_contract_html(self, *, html_content: str) -> tuple[str, list[str]]:
+        if not self.repair_missing_presentation or "__iisPreparePresentationCapture" in html_content:
+            return html_content, []
+        shim = "<script>window.__iisPresentationReady=true;window.__iisPreparePresentationCapture=()=>({delay_ms:0});</script>"
+        if "</body>" in html_content:
+            repaired = html_content.replace("</body>", f"{shim}</body>")
+        elif "</html>" in html_content:
+            repaired = html_content.replace("</html>", f"{shim}</html>")
+        else:
+            repaired = f"{html_content}{shim}"
+        return repaired, ["inject_presentation_contract_shim"]
 
 
 def make_client(
@@ -605,6 +620,7 @@ def test_publish_blocks_when_runtime_fatal_exists() -> None:
 
 def test_publish_blocks_when_presentation_contract_is_missing() -> None:
     client, store = make_client()
+    client.app.state.publisher_service.repair_missing_presentation = False
     client.app.state.publisher_service.presentation_ok = False
     client.app.state.publisher_service.presentation_issues = ["presentation_capture_hook", "presentation_ready_flag"]
     session_id = create_session(client)
@@ -618,6 +634,21 @@ def test_publish_blocks_when_presentation_contract_is_missing() -> None:
     assert published.status_code == 409
     assert published.json()["detail"]["code"] == "publish_presentation_blocked"
     assert "presentation_capture_hook" in published.json()["detail"]["issues"]
+
+
+def test_publish_repairs_presentation_contract_before_publishing() -> None:
+    client, store = make_client()
+    client.app.state.publisher_service.repair_missing_presentation = True
+    session_id = create_session(client)
+    store.update_session_html(
+        session_id,
+        "<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>",
+        score=0,
+    )
+
+    published = client.post(f"/api/v1/sessions/{session_id}/publish", json={"slug": "road-rush"})
+    assert published.status_code == 200
+    assert "__iisPreparePresentationCapture" in client.app.state.publisher_service.calls[-1]["html_content"]
 
 
 def test_issue_propose_apply_flow() -> None:

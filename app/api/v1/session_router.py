@@ -1916,6 +1916,13 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
     if session_title != game_name:
         store.update_session(session_id, title=game_name)
 
+    repair_presentation = getattr(publisher, "repair_presentation_contract_html", None)
+    if callable(repair_presentation):
+        repaired_html, repair_transforms = repair_presentation(html_content=html)
+        if isinstance(repaired_html, str) and repaired_html.strip() and repaired_html != html:
+            html = repaired_html
+            store.update_session_html(session_id, html, score=int(session.get("score", 0) or 0))
+
     publishable, publish_error_code, publish_issues = await _validate_publish_runtime(app=request.app, html=html)
     if not publishable:
         summary = _summarize_publish_issues(publish_issues, limit=3) or "Runtime fatal issue detected"
@@ -1930,7 +1937,11 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
             change_impact="publish_blocked",
             confidence=1.0,
             error_code=publish_error_code,
-            metadata={"issues": publish_issues[:8], "category": "publish_blocker"},
+            metadata={
+                "issues": publish_issues[:8],
+                "category": "publish_blocker",
+                "presentation_repair_transforms": repair_transforms if 'repair_transforms' in locals() else [],
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

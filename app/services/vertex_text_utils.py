@@ -47,6 +47,7 @@ _GLOBAL_CONSTRUCTORS_ALLOWLIST = {
 
 _SHIM_SCRIPT_MARKER = "id=\"iis-addon-shims\""
 _RUNTIME_CONTRACT_MARKER = "id=\"iis-runtime-contract-shim\""
+_PRESENTATION_CONTRACT_MARKER = "id=\"iis-presentation-contract-shim\""
 _VISUAL_CONTRACT_MARKER = "id=\"iis-visual-contract-shim\""
 _AUTOSTART_MARKER = "id=\"iis-autostart-shim\""
 
@@ -191,6 +192,45 @@ def _inject_runtime_contract_shim(
     if head_close >= 0:
         return f"{html_content[:head_close]}{runtime_script}{html_content[head_close:]}"
     return f"{runtime_script}{html_content}"
+
+
+def _inject_presentation_contract_shim(
+    html_content: str,
+    *,
+    presentation_ready_missing: bool,
+    presentation_hook_missing: bool,
+) -> str:
+    if _PRESENTATION_CONTRACT_MARKER in html_content:
+        return html_content
+    if not (presentation_ready_missing or presentation_hook_missing):
+        return html_content
+
+    script_lines = ["<script id=\"iis-presentation-contract-shim\">(function(){"]
+    if presentation_ready_missing:
+        script_lines.append("if(typeof window.__iisPresentationReady==='undefined'){window.__iisPresentationReady=false;}")
+    if presentation_hook_missing:
+        script_lines.append(
+            "if(typeof window.__iisPreparePresentationCapture!=='function'){"
+            "window.__iisPreparePresentationCapture=function(){"
+            "window.__iisPresentationReady=false;"
+            "const hide=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement){node.style.display='none';node.style.opacity='0';}};"
+            "const click=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement&&typeof node.click==='function'){try{node.click();}catch(_){}}};"
+            "click('#restart-button');click('#start-button');hide('#title-screen');hide('#game-over-screen');"
+            "const countdown=document.getElementById('countdown');if(countdown&&countdown instanceof HTMLElement){countdown.style.opacity='0';countdown.textContent='';}"
+            "setTimeout(function(){window.__iisPresentationReady=true;},180);"
+            "return {delay_ms:220,reason:'auto_presentation_contract_shim'};"
+            "};}"
+        )
+    script_lines.append("})();</script>")
+    presentation_script = "".join(script_lines)
+    lowered = html_content.casefold()
+    body_close = lowered.rfind("</body>")
+    if body_close >= 0:
+        return f"{html_content[:body_close]}{presentation_script}{html_content[body_close:]}"
+    head_close = lowered.rfind("</head>")
+    if head_close >= 0:
+        return f"{html_content[:head_close]}{presentation_script}{html_content[head_close:]}"
+    return f"{presentation_script}{html_content}"
 
 
 def _extract_asset_tokens(
@@ -436,6 +476,8 @@ def compile_generated_artifact(
     lowered = transformed.casefold()
     boot_flag_missing = "__iis_game_boot_ok" not in lowered
     leaderboard_missing = "iisleaderboard" not in lowered
+    presentation_ready_missing = "__iispresentationready" not in lowered
+    presentation_hook_missing = "__iispreparepresentationcapture" not in lowered
     raf_missing = "requestanimationframe" not in lowered
     if any((boot_flag_missing, leaderboard_missing, raf_missing)):
         transformed = _inject_runtime_contract_shim(
@@ -445,6 +487,14 @@ def compile_generated_artifact(
             raf_missing=raf_missing,
         )
         transforms_applied.append("inject_runtime_contract_shim")
+
+    if presentation_ready_missing or presentation_hook_missing:
+        transformed = _inject_presentation_contract_shim(
+            transformed,
+            presentation_ready_missing=presentation_ready_missing,
+            presentation_hook_missing=presentation_hook_missing,
+        )
+        transforms_applied.append("inject_presentation_contract_shim")
 
     namespace_symbols = _NAMESPACE_ADDON_RE.findall(transformed)
     if namespace_symbols:
