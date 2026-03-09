@@ -1,162 +1,129 @@
 from __future__ import annotations
 
-import struct
-import zlib
+from dataclasses import dataclass, field
+from typing import Any
+
+from typing_extensions import Literal
+
+from pytest import MonkeyPatch
 
 from app.core.config import Settings
+from app.services import quality_service
 from app.services.quality_service import QualityService
 
 
-COUNTDOWN_CAPTURE_HTML = """
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #020617; }
-    #app { position: relative; width: 100%; height: 100%; }
-    canvas { width: 100%; height: 100%; display: block; }
-    #countdown {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font: 900 92px/1 Inter, system-ui, sans-serif;
-      color: white;
-      text-shadow: 0 0 24px rgba(255,255,255,0.35);
-      pointer-events: none;
-    }
-  </style>
-</head>
-<body>
-  <div id="app">
-    <canvas id="game" width="1280" height="720"></canvas>
-    <div id="countdown">3</div>
-  </div>
-  <script>
-    window.__iis_game_boot_ok = true;
-    const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
-    const countdownEl = document.getElementById("countdown");
-    const startAt = performance.now();
+@dataclass
+class FakeMouse:
+    clicks: list[tuple[int, int]] = field(default_factory=list)
 
-    function draw(now) {
-      const elapsed = (now - startAt) / 1000;
-      const countdown = Math.max(0, 2.8 - elapsed);
-      if (countdown > 0) {
-        countdownEl.textContent = String(Math.ceil(countdown));
-        ctx.fillStyle = "#111827";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      } else {
-        countdownEl.textContent = "";
-        ctx.fillStyle = "#f59e0b";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      requestAnimationFrame(draw);
-    }
-
-    requestAnimationFrame(draw);
-  </script>
-</body>
-</html>
-""".strip()
+    def click(self, x: int, y: int) -> None:
+        self.clicks.append((x, y))
 
 
-def _paeth_predictor(left: int, up: int, up_left: int) -> int:
-    guess = left + up - up_left
-    left_dist = abs(guess - left)
-    up_dist = abs(guess - up)
-    up_left_dist = abs(guess - up_left)
-    if left_dist <= up_dist and left_dist <= up_left_dist:
-        return left
-    if up_dist <= up_left_dist:
-        return up
-    return up_left
+class FakeLocator:
+    def __init__(self, page: "FakePage") -> None:
+        self._page = page
+
+    def count(self) -> int:
+        return 1
+
+    @property
+    def first(self) -> "FakeLocator":
+        return self
+
+    def screenshot(self, *, type: str = "png") -> bytes:
+        assert type == "png"
+        self._page.screenshot_taken_at_probe = self._page.last_probe_index
+        return b"fake-png"
 
 
-def _read_png_center_rgb(png_bytes: bytes) -> tuple[int, int, int]:
-    signature = b"\x89PNG\r\n\x1a\n"
-    assert png_bytes.startswith(signature)
+@dataclass
+class FakePage:
+    viewport_size: dict[str, int] = field(default_factory=lambda: {"width": 1280, "height": 720})
+    mouse: FakeMouse = field(default_factory=FakeMouse)
+    wait_calls: list[int] = field(default_factory=list)
+    goto_calls: list[tuple[str, str, int]] = field(default_factory=list)
+    screenshot_taken_at_probe: int | None = None
+    last_probe_index: int = -1
 
-    width = 0
-    height = 0
-    bit_depth = 0
-    color_type = 0
-    compressed = bytearray()
+    def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
+        self.goto_calls.append((url, wait_until, timeout))
 
-    cursor = len(signature)
-    while cursor < len(png_bytes):
-        chunk_length = struct.unpack(">I", png_bytes[cursor : cursor + 4])[0]
-        chunk_type = png_bytes[cursor + 4 : cursor + 8]
-        chunk_data_start = cursor + 8
-        chunk_data_end = chunk_data_start + chunk_length
-        chunk_data = png_bytes[chunk_data_start:chunk_data_end]
-        cursor = chunk_data_end + 4  # crc
+    def wait_for_timeout(self, timeout_ms: int) -> None:
+        self.wait_calls.append(timeout_ms)
 
-        if chunk_type == b"IHDR":
-            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", chunk_data)
-            assert compression == 0
-            assert filter_method == 0
-            assert interlace == 0
-            assert bit_depth == 8
-            assert color_type in {2, 6}
-        elif chunk_type == b"IDAT":
-            compressed.extend(chunk_data)
-        elif chunk_type == b"IEND":
-            break
+    def evaluate(self, script: str) -> dict[str, Any] | bool:
+        if "__iisPreparePresentationCapture" in script:
+            return {"hook_present": False, "ready": False, "delay_ms": 0}
+        if "Boolean(window.__iisPresentationReady)" in script:
+            return False
+        raise AssertionError(f"unexpected evaluate script: {script[:80]}")
 
-    bytes_per_pixel = 4 if color_type == 6 else 3
-    stride = width * bytes_per_pixel
-    decoded = zlib.decompress(bytes(compressed))
-    rows: list[bytearray] = []
-    offset = 0
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == "canvas"
+        return FakeLocator(self)
 
-    for _ in range(height):
-        filter_type = decoded[offset]
-        offset += 1
-        scanline = bytearray(decoded[offset : offset + stride])
-        offset += stride
-        previous = rows[-1] if rows else bytearray(stride)
-
-        if filter_type == 1:
-            for index in range(bytes_per_pixel, stride):
-                scanline[index] = (scanline[index] + scanline[index - bytes_per_pixel]) % 256
-        elif filter_type == 2:
-            for index in range(stride):
-                scanline[index] = (scanline[index] + previous[index]) % 256
-        elif filter_type == 3:
-            for index in range(stride):
-                left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
-                up = previous[index]
-                scanline[index] = (scanline[index] + ((left + up) // 2)) % 256
-        elif filter_type == 4:
-            for index in range(stride):
-                left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
-                up = previous[index]
-                up_left = previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
-                scanline[index] = (scanline[index] + _paeth_predictor(left, up, up_left)) % 256
-        else:
-            assert filter_type == 0
-
-        rows.append(scanline)
-
-    center_x = width // 2
-    center_y = height // 2
-    base = center_x * bytes_per_pixel
-    row = rows[center_y]
-    return row[base], row[base + 1], row[base + 2]
+    def screenshot(self, *, type: str = "png") -> bytes:
+        assert type == "png"
+        self.screenshot_taken_at_probe = self.last_probe_index
+        return b"fake-page-png"
 
 
-def test_capture_presentation_screenshot_waits_until_countdown_clears_without_hooks() -> None:
+@dataclass
+class FakeBrowser:
+    page: FakePage
+    closed: bool = False
+
+    def new_page(self) -> FakePage:
+        return self.page
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass
+class FakeChromium:
+    browser: FakeBrowser
+
+    def launch(self, *, headless: bool, args: list[str]) -> FakeBrowser:
+        assert headless is True
+        assert args == ["--no-sandbox"]
+        return self.browser
+
+
+@dataclass
+class FakePlaywrightContext:
+    browser: FakeBrowser
+
+    def __enter__(self) -> Any:
+        return type("FakePlaywright", (), {"chromium": FakeChromium(self.browser)})()
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
+        return False
+
+
+def test_capture_presentation_screenshot_waits_until_countdown_clears_without_hooks(monkeypatch: MonkeyPatch) -> None:
+    page = FakePage()
+    browser = FakeBrowser(page=page)
+    probes = [
+        {"start_gate_visible": False, "countdown_text": "2"},
+        {"start_gate_visible": False, "countdown_text": "1"},
+        {"start_gate_visible": False, "countdown_text": "GO!"},
+    ]
+
+    def fake_capture_runtime_probe(_page: FakePage) -> dict[str, object]:
+        next_index = min(page.last_probe_index + 1, len(probes) - 1)
+        page.last_probe_index = next_index
+        return probes[next_index]
+
+    monkeypatch.setattr(quality_service, "sync_playwright", lambda: FakePlaywrightContext(browser))
+    monkeypatch.setattr(quality_service, "capture_runtime_probe", fake_capture_runtime_probe)
+
     service = QualityService(Settings(playwright_required=False, qa_smoke_timeout_seconds=8.0))
+    screenshot = service.capture_presentation_screenshot("<html><body>stub</body></html>")
 
-    screenshot = service.capture_presentation_screenshot(COUNTDOWN_CAPTURE_HTML)
-
-    assert screenshot is not None
-    center = _read_png_center_rgb(screenshot)
-
-    assert center[0] > 200
-    assert center[1] > 120
-    assert center[2] < 120
+    assert screenshot == b"fake-png"
+    assert page.screenshot_taken_at_probe == 2
+    assert page.goto_calls
+    assert page.wait_calls[0] == 250
+    assert browser.closed is True
