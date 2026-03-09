@@ -105,7 +105,6 @@ TOPDOWN_HTML = dedent(
           xp: 0,
           xpNext: 110,
           upgradePending: false,
-          fireRateMul: 1,
           pierceShots: 0,
           spreadShot: 0,
           moveSpeedMul: 1,
@@ -364,18 +363,11 @@ TOPDOWN_HTML = dedent(
             statusReadout.textContent = "Dash ready · Hold the arena";
           }
 
-          if (enemies.countActive(true) === 0) {
-            gameState.wave += 1;
-            gameState.combo = Math.max(0, gameState.combo - 1);
-            spawnWave(gameState.wave);
-            statusReadout.textContent = `Wave ${gameState.wave} inbound`;
-            updateHud();
-          }
         }
 
         function fireBullet() {
           if (gameState.fireCooldown > 0 || !player) return;
-          const spreadCount = Math.max(1, 1 + gameState.spreadShot * 2);
+          const spreadCount = Math.max(1, 1 + gameState.spreadShot);
           for (let i = 0; i < spreadCount; i += 1) {
             const bullet = bullets.create(player.x, player.y, "bullet-core");
             const spreadOffset = spreadCount === 1 ? 0 : Phaser.Math.DegToRad((i - (spreadCount - 1) / 2) * 8);
@@ -394,7 +386,7 @@ TOPDOWN_HTML = dedent(
             duration: 90,
             onComplete: () => muzzleFlash.destroy(),
           });
-          gameState.fireCooldown = 0.12 / gameState.fireRateMul;
+          gameState.fireCooldown = 0.12;
         }
 
         function fireEnemyBullet(enemy) {
@@ -581,6 +573,12 @@ TOPDOWN_HTML = dedent(
               }
             });
           }
+          if (enemies.countActive(true) === 0) {
+            gameState.wave += 1;
+            gameState.combo = Math.max(0, gameState.combo - 1);
+            spawnWave(gameState.wave);
+            statusReadout.textContent = `Wave ${gameState.wave} inbound`;
+          }
           updateHud();
         }
 
@@ -694,8 +692,8 @@ TOPDOWN_HTML = dedent(
 
         function applyUpgrade(key) {
           if (key === "overdrive") {
-            gameState.fireRateMul = Math.min(2.3, gameState.fireRateMul + 0.24);
-            gameState.bulletSpeedMul = Math.min(1.45, gameState.bulletSpeedMul + 0.08);
+            gameState.bulletSpeedMul = Math.min(1.55, gameState.bulletSpeedMul + 0.12);
+            gameState.moveSpeedMul = Math.min(1.2, gameState.moveSpeedMul + 0.04);
           }
           if (key === "pierce") gameState.pierceShots = Math.min(2, gameState.pierceShots + 1);
           if (key === "spread") gameState.spreadShot = Math.min(2, gameState.spreadShot + 1);
@@ -737,7 +735,6 @@ TOPDOWN_HTML = dedent(
           gameState.xp = 0;
           gameState.xpNext = 110;
           gameState.upgradePending = false;
-          gameState.fireRateMul = 1;
           gameState.pierceShots = 0;
           gameState.spreadShot = 0;
           gameState.moveSpeedMul = 1;

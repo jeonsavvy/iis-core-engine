@@ -133,3 +133,12 @@ def test_topdown_scaffold_contains_pause_game_over_and_enemy_variety_guards() ->
     assert "physics.world.resume()" in html
     assert "flanker" in html
     assert "bruiser" in html
+
+
+def test_topdown_scaffold_uses_single_increment_spread_and_fixed_click_fire_rate() -> None:
+    seed = get_scaffold_seed("phaser_twinstick_arena_seed")
+    assert seed is not None
+    html = seed.html.lower()
+    assert "fireratemul" not in html
+    assert "1 + gamestate.spreadshot * 2" not in html
+    assert "1 + gamestate.spreadshot" in html

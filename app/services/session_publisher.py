@@ -21,6 +21,8 @@ from app.services.vertex_text_utils import compile_generated_artifact
 
 logger = logging.getLogger(__name__)
 
+_PUBLISH_PRESENTATION_REPAIR_MARKER = 'id="iis-publish-presentation-repair"'
+
 
 class SessionPublisher:
     """Publishes a game from the editor session to Supabase + Archive."""
@@ -192,8 +194,33 @@ class SessionPublisher:
 
     def repair_presentation_contract_html(self, *, html_content: str) -> tuple[str, list[str]]:
         compiled, meta = compile_generated_artifact(html_content)
-        transforms = meta.get("transforms_applied")
-        return compiled, list(transforms) if isinstance(transforms, list) else []
+        raw_transforms = meta.get("transforms_applied")
+        transforms = [str(item) for item in raw_transforms] if isinstance(raw_transforms, list) else []
+        if _PUBLISH_PRESENTATION_REPAIR_MARKER not in compiled:
+            repair_script = (
+                "<script id=\"iis-publish-presentation-repair\">"
+                "(function(){"
+                "const hide=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement){node.style.display='none';node.style.opacity='0';}};"
+                "const click=(selector)=>{const node=document.querySelector(selector);if(node&&node instanceof HTMLElement&&typeof node.click==='function'){try{node.click();}catch(_){}}};"
+                "window.__iisPresentationReady=false;"
+                "window.__iisPreparePresentationCapture=function(){"
+                "window.__iisPresentationReady=false;"
+                "click('#restart-button');click('#start-button');hide('#title-screen');hide('#game-over-screen');"
+                "const countdown=document.getElementById('countdown');if(countdown&&countdown instanceof HTMLElement){countdown.style.opacity='0';countdown.textContent='';}"
+                "setTimeout(function(){window.__iisPresentationReady=true;},180);"
+                "return {delay_ms:220,reason:'publisher_repair_presentation'};"
+                "};"
+                "})();"
+                "</script>"
+            )
+            lowered = compiled.casefold()
+            body_close = lowered.rfind("</body>")
+            if body_close >= 0:
+                compiled = f"{compiled[:body_close]}{repair_script}{compiled[body_close:]}"
+            else:
+                compiled = f"{compiled}{repair_script}"
+            transforms.append("inject_publish_presentation_repair")
+        return compiled, transforms
 
 
     async def publish(

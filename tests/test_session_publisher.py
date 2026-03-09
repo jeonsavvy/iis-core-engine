@@ -296,3 +296,21 @@ def test_publish_synchronizes_canonical_thumbnail_fields_when_screenshot_exists(
     assert update_calls[-1]["screenshot_url"] == screenshot_url
     assert update_calls[-1]["thumbnail_url"] == screenshot_url
     assert update_calls[-1]["hero_image_url"] == screenshot_url
+
+
+def test_repair_presentation_contract_html_appends_publish_override_hook() -> None:
+    publisher = SessionPublisher(
+        Settings(
+            supabase_url="",
+            supabase_service_role_key="",
+            google_application_credentials="",
+        )
+    )
+
+    repaired, transforms = publisher.repair_presentation_contract_html(
+        html_content="<html><body><canvas></canvas><script>window.__iis_game_boot_ok=true;window.IISLeaderboard={};requestAnimationFrame(()=>{});</script></body></html>"
+    )
+
+    assert "iis-publish-presentation-repair" in repaired
+    assert "__iisPreparePresentationCapture" in repaired
+    assert "inject_publish_presentation_repair" in transforms

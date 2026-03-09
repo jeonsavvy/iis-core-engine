@@ -57,3 +57,5 @@ def test_topdown_brief_requires_paused_upgrades_kill_xp_and_no_forced_reload() -
     assert "pause" in joined_contracts
     assert "xp" in joined_contracts
     assert "reload" not in joined_contracts
+    assert "single mouse crosshair" in joined_contracts
+    assert "wave progression must advance exactly once" in joined_contracts

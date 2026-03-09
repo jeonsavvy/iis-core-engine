@@ -136,7 +136,10 @@ def build_genre_brief(*, user_prompt: str, genre_hint: str = "") -> dict[str, An
                 "arena bounds must lock the player inside the combat space",
                 "multiple enemy archetypes must create flanking, ranged, and bruiser pressure",
                 "title screen, combat loop, and game-over restart flow must remain intact",
+                "aim UI must keep a single mouse crosshair and must not add duplicate forward indicator rings",
                 "mouse-fire twin-stick combat must not force magazine downtime or ammo management unless the prompt explicitly asks for it",
+                "projectile count upgrades must increase by the stated amount instead of doubling unexpectedly",
+                "wave progression must advance exactly once per clear and restart must restore hp, wave, and upgrade state",
             ],
             "visual_contracts": [
                 "low-poly tactical silhouettes must remain readable at a glance",
