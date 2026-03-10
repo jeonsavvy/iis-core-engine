@@ -146,6 +146,7 @@ PYTHONPATH=. pytest -q -s
 - 원격 배포 스크립트: `scripts/deploy_remote.sh`
 - systemd 템플릿: `deploy/systemd/iis-core-api.service.tmpl`
 - 운영 문서:
+  - `docs/ubuntu-arm-server-runbook.md`
   - `docs/scaffold-v3-migration.md`
   - `docs/telegram-operations.md`
 

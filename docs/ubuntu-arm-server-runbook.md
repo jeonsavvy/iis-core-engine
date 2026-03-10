@@ -1,4 +1,4 @@
-# Oracle ARM Runbook (MVP)
+# Ubuntu ARM Server Runbook
 
 ## 설치 순서
 
@@ -12,7 +12,7 @@
    ```
 3. API 서비스 등록
    ```bash
-   ./scripts/install_systemd_services.sh /opt/iis-core-engine iis /opt/iis-core-engine/.venv/bin
+   ./scripts/install_systemd_services.sh /opt/iis-core-engine iis /opt/iis-core-engine/.venv311/bin
    sudo systemctl start iis-core-api.service
    ```
 

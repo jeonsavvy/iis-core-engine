@@ -24,7 +24,7 @@ resolve_python_bin() {
   exit 1
 }
 
-# Oracle Cloud Ubuntu ARM safe baseline.
+# Ubuntu ARM server baseline for Playwright dependencies.
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   libnss3 \
