@@ -305,7 +305,7 @@ class SessionStoreProtocol(Protocol):
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         ...
 
-    def list_sessions(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_sessions(self, *, status: str | None = None, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
         ...
 
     def update_session_html(self, session_id: str, html: str, score: int = 0) -> None:
@@ -447,9 +447,25 @@ def _resolve_actor(request: Request) -> tuple[str | None, str | None]:
     return resolved_actor_id, resolved_actor_role
 
 
+def _actor_can_access_session(*, actor_id: str | None, actor_role: str | None, session: dict[str, Any]) -> bool:
+    if actor_role == "master_admin":
+        return True
+    if actor_id:
+        return str(session.get("user_id") or "").strip() == actor_id
+    return True
+
+
 def _load_session_or_404(store: SessionStoreProtocol, session_id: str) -> dict[str, Any]:
     session = store.get_session(session_id)
     if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return session
+
+
+def _load_accessible_session_or_404(store: SessionStoreProtocol, session_id: str, request: Request) -> dict[str, Any]:
+    session = _load_session_or_404(store, session_id)
+    actor_id, actor_role = _resolve_actor(request)
+    if not _actor_can_access_session(actor_id=actor_id, actor_role=actor_role, session=session):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return session
 
@@ -1352,7 +1368,7 @@ async def create_session(body: CreateSessionRequest, request: Request) -> Create
 async def get_session(session_id: str, request: Request) -> SessionResponse:
     """Get session state."""
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     history = store.get_conversation_history(session_id, limit=200)
     current_run_id, current_run_status = _latest_run_snapshot(store, session_id)
     latest_issue, latest_proposal, _ = _latest_issue_snapshot(store, session_id)
@@ -1379,7 +1395,7 @@ async def get_session_conversation(
     limit: int = Query(default=80, ge=1, le=200),
 ) -> ConversationHistoryResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     history = store.get_conversation_history(session_id, limit=limit)
     return ConversationHistoryResponse(
         messages=[
@@ -1397,7 +1413,7 @@ async def get_session_conversation(
 @router.get("/{session_id}/issues/latest", response_model=LatestIssueSnapshotResponse)
 async def get_latest_issue_snapshot(session_id: str, request: Request) -> LatestIssueSnapshotResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     issue, proposal, routed_agents = _latest_issue_snapshot(store, session_id)
     if not issue:
         return LatestIssueSnapshotResponse()
@@ -1427,7 +1443,9 @@ async def list_sessions(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> SessionListResponse:
     store = _get_session_store(request)
-    rows = store.list_sessions(status=status, limit=limit)
+    actor_id, actor_role = _resolve_actor(request)
+    scoped_user_id = None if actor_role == "master_admin" else actor_id
+    rows = store.list_sessions(status=status, limit=limit, user_id=scoped_user_id)
     return SessionListResponse(
         sessions=[
             SessionSummary(
@@ -1452,7 +1470,7 @@ async def get_session_events(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> SessionEventsListResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     events = store.get_session_events(session_id, limit=limit, cursor=cursor)
     next_cursor = None
     if len(events) >= limit:
@@ -1490,7 +1508,7 @@ async def get_session_events(
 @router.post("/{session_id}/plan-draft", response_model=PlanDraftResponse)
 async def create_plan_draft(session_id: str, body: PlanDraftRequest, request: Request) -> PlanDraftResponse:
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     result = _build_plan_draft(body.prompt, str(session.get("genre", "")))
     store.add_session_event(
         session_id=session_id,
@@ -1516,7 +1534,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
         )
 
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     if str(session.get("status", "active")) != "active":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not active")
 
@@ -1614,7 +1632,7 @@ async def send_prompt(session_id: str, body: PromptRequest, request: Request) ->
 @router.get("/{session_id}/runs/{run_id}", response_model=SessionRunResponse)
 async def get_prompt_run(session_id: str, run_id: str, request: Request) -> SessionRunResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     run = _load_run_or_404(store, session_id, run_id)
     return _build_run_response(store, session_id, run)
 
@@ -1622,7 +1640,7 @@ async def get_prompt_run(session_id: str, run_id: str, request: Request) -> Sess
 @router.post("/{session_id}/runs/{run_id}/cancel", response_model=SessionRunResponse)
 async def cancel_prompt_run(session_id: str, run_id: str, request: Request) -> SessionRunResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     run = _load_run_or_404(store, session_id, run_id)
 
     current_status = str(run.get("status", "queued"))
@@ -1665,7 +1683,7 @@ async def create_issue(session_id: str, body: CreateIssueRequest, request: Reque
             detail={"error": "issue_loop_disabled", "code": "human_agent_issue_loop_disabled"},
         )
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
 
     attachment_meta = _attachment_metadata(body.image_attachment)
     actor_id, actor_role = _resolve_actor(request)
@@ -1735,7 +1753,7 @@ async def propose_issue_fix(
         )
 
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     issue = _load_issue_or_404(store, session_id, issue_id)
     attachment_meta = _attachment_metadata(body.image_attachment)
 
@@ -1846,7 +1864,7 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
             detail={"error": "issue_loop_disabled", "code": "human_agent_issue_loop_disabled"},
         )
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     _load_issue_or_404(store, session_id, issue_id)
 
     proposal: dict[str, Any] | None
@@ -1902,7 +1920,7 @@ async def apply_issue_fix(session_id: str, issue_id: str, body: ApplyFixRequest,
 @router.post("/{session_id}/approve-publish", response_model=ApprovePublishResponse)
 async def approve_publish(session_id: str, body: ApprovePublishRequest, request: Request) -> ApprovePublishResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     actor_id, actor_role = _resolve_actor(request)
     approval = store.create_publish_approval(session_id=session_id, approved_by=actor_id or actor_role or "master_admin", note=body.note)
     store.add_session_event(
@@ -1927,7 +1945,7 @@ async def approve_publish(session_id: str, body: ApprovePublishRequest, request:
 async def publish_session(session_id: str, body: PublishRequest, request: Request) -> PublishResponse:
     """Publish the current game to the platform."""
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     if str(session.get("status", "active")) == "cancelled":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cancelled session cannot be published")
 
@@ -2100,7 +2118,7 @@ async def publish_session(session_id: str, body: PublishRequest, request: Reques
 @router.get("/{session_id}/publish-thumbnail-candidates", response_model=PublishThumbnailCandidatesResponse)
 async def publish_thumbnail_candidates(session_id: str, request: Request) -> PublishThumbnailCandidatesResponse:
     store = _get_session_store(request)
-    session = _load_session_or_404(store, session_id)
+    session = _load_accessible_session_or_404(store, session_id, request)
     html = str(session.get("current_html", "") or "").strip()
     if not html:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No game to capture. Generate a game first.")
@@ -2139,7 +2157,7 @@ async def publish_thumbnail_candidates(session_id: str, request: Request) -> Pub
 @router.post("/{session_id}/cancel", response_model=CancelSessionResponse)
 async def cancel_session(session_id: str, request: Request) -> CancelSessionResponse:
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     store.update_session_status(session_id, "cancelled")
     store.add_session_event(
         session_id=session_id,
@@ -2157,6 +2175,6 @@ async def cancel_session(session_id: str, request: Request) -> CancelSessionResp
 async def delete_session(session_id: str, request: Request) -> dict[str, str]:
     """Delete a session."""
     store = _get_session_store(request)
-    _load_session_or_404(store, session_id)
+    _load_accessible_session_or_404(store, session_id, request)
     store.delete_session(session_id)
     return {"status": "deleted"}

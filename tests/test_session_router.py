@@ -50,10 +50,12 @@ class FakeSessionStore:
         self.publish_approvals[sid] = []
         return row
 
-    def list_sessions(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_sessions(self, *, status: str | None = None, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
         rows = list(self.sessions.values())
         if status:
             rows = [r for r in rows if r.get("status") == status]
+        if user_id:
+            rows = [r for r in rows if r.get("user_id") == user_id]
         return rows[:limit]
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
@@ -498,6 +500,17 @@ def create_named_session(client: TestClient, title: str, genre_hint: str = "arca
     return str(payload["session_id"])
 
 
+def create_actor_session(client: TestClient, *, actor_id: str, actor_role: str, title: str = "T", genre_hint: str = "arcade") -> str:
+    created = client.post(
+        "/api/v1/sessions",
+        json={"title": title, "genre_hint": genre_hint},
+        headers={"X-IIS-Actor-Id": actor_id, "X-IIS-Actor-Role": actor_role},
+    )
+    assert created.status_code == 200
+    payload = cast(dict[str, Any], created.json())
+    return str(payload["session_id"])
+
+
 def test_prompt_is_async_and_run_succeeds() -> None:
     client, store = make_client()
     session_id = create_session(client)
@@ -552,9 +565,64 @@ def test_create_session_tracks_actor_id_from_headers() -> None:
     assert store.sessions[session_id]["user_id"] == "creator-1"
 
 
+def test_creator_only_lists_own_sessions() -> None:
+    client, _ = make_client()
+    own_session_id = create_actor_session(client, actor_id="creator-1", actor_role="creator", title="Own Session")
+    create_actor_session(client, actor_id="creator-2", actor_role="creator", title="Other Session")
+
+    response = client.get(
+        "/api/v1/sessions",
+        headers={"X-IIS-Actor-Id": "creator-1", "X-IIS-Actor-Role": "creator"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["session_id"] for row in payload["sessions"]] == [own_session_id]
+
+
+def test_master_admin_lists_all_sessions() -> None:
+    client, _ = make_client()
+    first_session_id = create_actor_session(client, actor_id="creator-1", actor_role="creator", title="First Session")
+    second_session_id = create_actor_session(client, actor_id="creator-2", actor_role="creator", title="Second Session")
+
+    response = client.get(
+        "/api/v1/sessions",
+        headers={"X-IIS-Actor-Id": "admin-1", "X-IIS-Actor-Role": "master_admin"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {row["session_id"] for row in payload["sessions"]} == {first_session_id, second_session_id}
+
+
+def test_creator_cannot_open_other_users_session() -> None:
+    client, _ = make_client()
+    foreign_session_id = create_actor_session(client, actor_id="creator-2", actor_role="creator", title="Foreign Session")
+
+    response = client.get(
+        f"/api/v1/sessions/{foreign_session_id}",
+        headers={"X-IIS-Actor-Id": "creator-1", "X-IIS-Actor-Role": "creator"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_creator_cannot_delete_other_users_session() -> None:
+    client, store = make_client()
+    foreign_session_id = create_actor_session(client, actor_id="creator-2", actor_role="creator", title="Foreign Session")
+
+    response = client.delete(
+        f"/api/v1/sessions/{foreign_session_id}",
+        headers={"X-IIS-Actor-Id": "creator-1", "X-IIS-Actor-Role": "creator"},
+    )
+
+    assert response.status_code == 404
+    assert foreign_session_id in store.sessions
+
+
 def test_issue_and_approval_store_actor_id_from_headers() -> None:
     client, store = make_client()
-    session_id = create_session(client)
+    session_id = create_actor_session(client, actor_id="creator-1", actor_role="creator", title="Creator Session")
 
     issue_response = client.post(
         f"/api/v1/sessions/{session_id}/issues",

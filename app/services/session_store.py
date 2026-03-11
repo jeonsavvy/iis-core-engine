@@ -57,11 +57,14 @@ class SupabaseSessionStore:
         *,
         status: str | None = None,
         limit: int = 50,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         resolved_limit = max(1, min(int(limit), 200))
         query = self._client.table("sessions").select("*").order("updated_at", desc=True).limit(resolved_limit)
         if status:
             query = query.eq("status", status)
+        if user_id:
+            query = query.eq("user_id", user_id)
         result = query.execute()
         rows = result.data if hasattr(result, "data") and isinstance(result.data, list) else []
         return rows
